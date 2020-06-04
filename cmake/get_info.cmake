@@ -109,7 +109,7 @@ foreach(log_type ${log_types})
     ginkgo_print_module_footer(${${log_type}} "User configuration:")
     ginkgo_print_module_footer(${${log_type}} "  Enabled modules:")
     set(print_var
-        "GINKGO_BUILD_OMP;GINKGO_BUILD_REFERENCE;GINKGO_BUILD_CUDA;GINKGO_BUILD_HIP"
+        "GINKGO_BUILD_OMP;GINKGO_BUILD_REFERENCE;GINKGO_BUILD_CUDA;GINKGO_BUILD_HIP;GINKGO_WITH_HWLOC"
         )
     foreach(var ${print_var})
         ginkgo_print_variable(${${log_type}} ${var} )

@@ -837,10 +837,13 @@ private:
  * @ingroup Executor
  */
 class OmpExecutor : public detail::ExecutorBase<OmpExecutor>,
-                    public std::enable_shared_from_this<OmpExecutor> {
+                    public std::enable_shared_from_this<OmpExecutor>,
+                    public machine_config::Topology<OmpExecutor> {
     friend class detail::ExecutorBase<OmpExecutor>;
 
 public:
+    using omp_exec_info = machine_config::Topology<OmpExecutor>;
+
     /**
      * Creates a new OmpExecutor.
      */
@@ -855,14 +858,24 @@ public:
 
     void synchronize() const override;
 
+    /**
+     * Get the Executor information for this executor
+     *
+     * @return the executor info (omp_exec_info*) for this executor
+     */
+    omp_exec_info *get_exec_info() const { return exec_info_.get(); }
+
 protected:
-    OmpExecutor() = default;
+    OmpExecutor() : exec_info_(omp_exec_info::create()) {}
 
     void *raw_alloc(size_type size) const override;
 
     void raw_free(void *ptr) const noexcept override;
 
     GKO_ENABLE_FOR_ALL_EXECUTORS(GKO_OVERRIDE_RAW_COPY_TO);
+
+private:
+    std::unique_ptr<omp_exec_info> exec_info_;
 };
 
 
@@ -882,6 +895,8 @@ using DefaultExecutor = OmpExecutor;
  */
 class ReferenceExecutor : public OmpExecutor {
 public:
+    using ref_exec_info = machine_config::Topology<OmpExecutor>;
+
     static std::shared_ptr<ReferenceExecutor> create()
     {
         return std::shared_ptr<ReferenceExecutor>(new ReferenceExecutor());
@@ -895,8 +910,18 @@ public:
         this->template log<log::Logger::operation_completed>(this, &op);
     }
 
+    /**
+     * Get the Executor information for this executor
+     *
+     * @return the executor info (ref_exec_info*) for this executor
+     */
+    ref_exec_info *get_exec_info() const { return exec_info_.get(); }
+
 protected:
-    ReferenceExecutor() = default;
+    ReferenceExecutor() : exec_info_(ref_exec_info::create()) {}
+
+private:
+    std::unique_ptr<ref_exec_info> exec_info_;
 };
 
 
@@ -915,10 +940,13 @@ using DefaultExecutor = ReferenceExecutor;
  */
 class CudaExecutor : public detail::ExecutorBase<CudaExecutor>,
                      public std::enable_shared_from_this<CudaExecutor>,
-                     public detail::EnableDeviceReset {
+                     public detail::EnableDeviceReset,
+                     public machine_config::Topology<CudaExecutor> {
     friend class detail::ExecutorBase<CudaExecutor>;
 
 public:
+    using cuda_exec_info = machine_config::Topology<CudaExecutor>;
+
     /**
      * Creates a new CudaExecutor.
      *
@@ -1000,6 +1028,13 @@ public:
         return cusparse_handle_.get();
     }
 
+    /**
+     * Get the Executor information for this executor
+     *
+     * @return the executor info (cuda_exec_info*) for this executor
+     */
+    cuda_exec_info *get_exec_info() const { return exec_info_.get(); }
+
 protected:
     void set_gpu_property();
 
@@ -1020,6 +1055,7 @@ protected:
         this->set_gpu_property();
         this->init_handles();
         increase_num_execs(device_id);
+        exec_info_ = cuda_exec_info::create();
     }
 
     void *raw_alloc(size_type size) const override;
@@ -1063,6 +1099,7 @@ private:
     static constexpr int max_devices = 64;
     static unsigned num_execs[max_devices];
     static std::mutex mutex[max_devices];
+    std::unique_ptr<cuda_exec_info> exec_info_;
 };
 
 
@@ -1081,10 +1118,13 @@ using DefaultExecutor = CudaExecutor;
  */
 class HipExecutor : public detail::ExecutorBase<HipExecutor>,
                     public std::enable_shared_from_this<HipExecutor>,
-                    public detail::EnableDeviceReset {
+                    public detail::EnableDeviceReset,
+                    public machine_config::Topology<HipExecutor> {
     friend class detail::ExecutorBase<HipExecutor>;
 
 public:
+    using hip_exec_info = machine_config::Topology<HipExecutor>;
+
     /**
      * Creates a new HipExecutor.
      *
@@ -1166,6 +1206,13 @@ public:
         return hipsparse_handle_.get();
     }
 
+    /**
+     * Get the Executor information for this executor
+     *
+     * @return the executor info (hip_exec_info*) for this executor
+     */
+    hip_exec_info *get_exec_info() const { return exec_info_.get(); }
+
 protected:
     void set_gpu_property();
 
@@ -1186,6 +1233,7 @@ protected:
         this->set_gpu_property();
         this->init_handles();
         increase_num_execs(device_id);
+        exec_info_ = hip_exec_info::create();
     }
 
     void *raw_alloc(size_type size) const override;
@@ -1229,6 +1277,7 @@ private:
     static constexpr int max_devices = 64;
     static int num_execs[max_devices];
     static std::mutex mutex[max_devices];
+    std::unique_ptr<hip_exec_info> exec_info_;
 };
 
 
