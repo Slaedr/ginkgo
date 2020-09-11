@@ -414,6 +414,31 @@ TEST(HipExecutor, CanSetDeviceResetBoolean)
 }
 
 
+TEST(Executor, CanVerifyMemory)
+{
+    auto omp = gko::OmpExecutor::create();
+    auto hip = gko::HipExecutor::create(0, omp);
+    auto cuda = gko::CudaExecutor::create(0, omp);
+    auto omp2 = gko::OmpExecutor::create();
+    auto hip2 = gko::HipExecutor::create(0, omp);
+    auto cuda2 = gko::CudaExecutor::create(0, omp);
+    auto hip_1 = gko::HipExecutor::create(1, omp);
+    auto cuda_1 = gko::CudaExecutor::create(1, omp);
+
+    ASSERT_EQ(false, *omp == *hip);
+    ASSERT_EQ(false, *hip == *omp);
+    ASSERT_EQ(false, *omp == *cuda);
+    ASSERT_EQ(false, *cuda == *omp);
+    ASSERT_EQ(false, *hip == *cuda);
+    ASSERT_EQ(false, *cuda == *hip);
+    ASSERT_EQ(true, *omp == *omp2);
+    ASSERT_EQ(true, *hip == *hip2);
+    ASSERT_EQ(true, *cuda == *cuda2);
+    ASSERT_EQ(false, *hip == *hip_1);
+    ASSERT_EQ(false, *cuda == *cuda_1);
+}
+
+
 template <typename T>
 struct mock_free : T {
     /**

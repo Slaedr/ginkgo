@@ -586,6 +586,17 @@ public:
      */
     virtual void synchronize() const = 0;
 
+    /**
+     * Overload the equal-to operator which verifies whether the executors are
+     * on the same devices.
+     *
+     * @note only verify it when the concrete Executor type is the same.
+     */
+    bool operator==(const Executor &other) const
+    {
+        return this->verify_memory_from(other);
+    }
+
 protected:
     /**
      * Allocates raw memory in this Executor.
@@ -636,6 +647,31 @@ protected:
     GKO_ENABLE_FOR_ALL_EXECUTORS(GKO_ENABLE_RAW_COPY_TO);
 
 #undef GKO_ENABLE_RAW_COPY_TO
+
+    /**
+     * Verify the memory from another Executor.
+     *
+     * @param src_exec  Executor from which the memory will be copied
+     */
+    virtual bool verify_memory_from(const Executor &src_exec) const = 0;
+
+/**
+ * @internal
+ * Declares a verify_memory_to() overload for a specified Executor subclass.
+ *
+ * This is the second stage of the double dispatch emulation required to
+ * implement verify_memory_from().
+ *
+ * @param _exec_type  the Executor subclass
+ */
+#define GKO_ENABLE_VERIFY_MEMORY_TO(_exec_type, ...) \
+    virtual bool verify_memory_to(const _exec_type *dest_exec) const = 0
+
+    GKO_ENABLE_FOR_ALL_EXECUTORS(GKO_ENABLE_VERIFY_MEMORY_TO);
+
+    GKO_ENABLE_VERIFY_MEMORY_TO(ReferenceExecutor);
+
+#undef GKO_ENABLE_VERIFY_MEMORY_TO
 
 private:
     /**
@@ -770,6 +806,11 @@ protected:
         src_exec->raw_copy_to(self(), n_bytes, src_ptr, dest_ptr);
     }
 
+    bool verify_memory_from(const Executor &src_exec) const override
+    {
+        return src_exec.verify_memory_to(self());
+    }
+
 private:
     ConcreteExecutor *self() noexcept
     {
@@ -827,6 +868,11 @@ private:
     void raw_copy_to(const _executor_type *dest_exec, size_type n_bytes, \
                      const void *src_ptr, void *dest_ptr) const override
 
+#define GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(_executor_type, ...)        \
+    bool verify_memory_to(const _executor_type *dest_exec) const override \
+    {                                                                     \
+        return false;                                                     \
+    }
 
 /**
  * This is the Executor subclass which represents the OpenMP device
@@ -862,6 +908,17 @@ protected:
     void raw_free(void *ptr) const noexcept override;
 
     GKO_ENABLE_FOR_ALL_EXECUTORS(GKO_OVERRIDE_RAW_COPY_TO);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(ReferenceExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(CudaExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(HipExecutor);
+
+    bool verify_memory_to(const OmpExecutor *dest_exec) const override
+    {
+        return true;
+    }
 };
 
 
@@ -895,6 +952,17 @@ public:
     }
 
 protected:
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(OmpExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(CudaExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(HipExecutor);
+
+    bool verify_memory_to(const ReferenceExecutor *dest_exec) const override
+    {
+        return true;
+    }
+
     ReferenceExecutor() = default;
 };
 
@@ -1026,6 +1094,17 @@ protected:
     void raw_free(void *ptr) const noexcept override;
 
     GKO_ENABLE_FOR_ALL_EXECUTORS(GKO_OVERRIDE_RAW_COPY_TO);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(OmpExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(HipExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(ReferenceExecutor);
+
+    bool verify_memory_to(const CudaExecutor *dest_exec) const override
+    {
+        return device_id_ == dest_exec->get_device_id();
+    }
 
     static void increase_num_execs(unsigned device_id)
     {
@@ -1192,6 +1271,17 @@ protected:
     void raw_free(void *ptr) const noexcept override;
 
     GKO_ENABLE_FOR_ALL_EXECUTORS(GKO_OVERRIDE_RAW_COPY_TO);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(ReferenceExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(OmpExecutor);
+
+    GKO_DEFAULT_OVERRIDE_VERIFY_MEMORY_TO(CudaExecutor);
+
+    bool verify_memory_to(const HipExecutor *dest_exec) const override
+    {
+        return device_id_ == dest_exec->get_device_id();
+    }
 
     static void increase_num_execs(int device_id)
     {
