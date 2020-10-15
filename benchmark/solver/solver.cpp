@@ -184,7 +184,9 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
         {"jacobi",
          [](std::shared_ptr<const gko::Executor> exec) {
              std::shared_ptr<const gko::LinOpFactory> f =
-                 gko::preconditioner::Jacobi<>::build().on(exec);
+                 gko::preconditioner::Jacobi<>::build()
+                     .with_skip_sorting(true)
+                     .on(exec);
              return std::unique_ptr<ReferenceFactoryWrapper>(
                  new ReferenceFactoryWrapper(f));
          }},
@@ -194,6 +196,7 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  gko::preconditioner::Jacobi<>::build()
                      .with_storage_optimization(
                          gko::precision_reduction::autodetect())
+                     .with_skip_sorting(true)
                      .on(exec);
              return std::unique_ptr<ReferenceFactoryWrapper>(
                  new ReferenceFactoryWrapper(f));
