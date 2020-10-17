@@ -5,7 +5,7 @@ set(GINKGO_HAS_HWLOC OFF)
 find_package(OpenMP)
 include(CheckLanguage)
 check_language(CUDA)
-find_package(HWLOC)
+find_package(HWLOC 2.1)
 
 if(OpenMP_CXX_FOUND)
     if(NOT DEFINED GINKGO_BUILD_OMP)
