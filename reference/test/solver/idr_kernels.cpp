@@ -67,6 +67,7 @@ protected:
               {{1.0, -3.0, 0.0}, {-4.0, 1.0, -3.0}, {2.0, -1.0, 2.0}}, exec)),
           idr_factory(
               Solver::build()
+                  .with_deterministic(true)
                   .with_criteria(
                       gko::stop::Iteration::build().with_max_iters(8u).on(exec),
                       gko::stop::Time::build()
@@ -78,6 +79,7 @@ protected:
                   .on(exec)),
           idr_factory_precision(
               Solver::build()
+                  .with_deterministic(true)
                   .with_criteria(
                       gko::stop::Iteration::build().with_max_iters(50u).on(
                           exec),
@@ -123,6 +125,7 @@ TYPED_TEST(Idr, SolvesDenseSystemWithComplexSubSpace)
     auto solver_factory =
         Solver::build()
             .with_complex_subspace(true)
+            .with_deterministic(true)
             .with_criteria(
                 gko::stop::Iteration::build().with_max_iters(8u).on(this->exec),
                 gko::stop::Time::build()
@@ -171,6 +174,7 @@ TYPED_TEST(Idr, SolvesMultipleDenseSystemsWithComplexSubspace)
     auto solver_factory =
         Solver::build()
             .with_complex_subspace(true)
+            .with_deterministic(true)
             .with_criteria(
                 gko::stop::Iteration::build().with_max_iters(8u).on(this->exec),
                 gko::stop::Time::build()
