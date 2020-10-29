@@ -247,7 +247,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
         {"ilu",
          [](std::shared_ptr<const gko::Executor> exec) {
              auto fact = std::shared_ptr<gko::LinOpFactory>(
-                 gko::factorization::Ilu<>::build().on(exec));
+                 gko::factorization::Ilu<>::build().with_skip_sorting(true).on(
+                     exec));
              std::shared_ptr<const gko::LinOpFactory> f =
                  gko::preconditioner::Ilu<>::build()
                      .with_factorization_factory(fact)
