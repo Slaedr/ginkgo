@@ -253,7 +253,7 @@ template <typename ValueType>
 void Idr<ValueType>::apply_impl(const LinOp *b, LinOp *x) const
 {
     // If ValueType is complex, the subspace matrix P will be complex anyway.
-    if (!is_complex<ValueType> && complex_subspace_) {
+    if (!is_complex<ValueType>() && complex_subspace_) {
         auto dense_b = as<matrix::Dense<ValueType>>(b);
         auto dense_x = as<matrix::Dense<ValueType>>(x);
         auto complex_b = dense_b->make_complex();
