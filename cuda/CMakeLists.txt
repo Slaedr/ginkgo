@@ -113,6 +113,8 @@ target_sources(ginkgo_cuda
     reorder/rcm_kernels.cu
     solver/bicg_kernels.cu
     solver/bicgstab_kernels.cu
+    solver/blk_lower_trs_kernels.cu
+    solver/blk_upper_trs_kernels.cu
     solver/cg_kernels.cu
     solver/cgs_kernels.cu
     solver/fcg_kernels.cu

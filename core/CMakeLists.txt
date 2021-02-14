@@ -48,6 +48,8 @@ target_sources(ginkgo
     solver/ir.cpp
     solver/lower_trs.cpp
     solver/upper_trs.cpp
+    solver/blk_lower_trs.cpp
+    solver/blk_upper_trs.cpp
     stop/combined.cpp
     stop/criterion.cpp
     stop/iteration.cpp

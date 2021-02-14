@@ -61,6 +61,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "core/reorder/rcm_kernels.hpp"
 #include "core/solver/bicg_kernels.hpp"
 #include "core/solver/bicgstab_kernels.hpp"
+#include "core/solver/blk_lower_trs_kernels.hpp"
+#include "core/solver/blk_upper_trs_kernels.hpp"
 #include "core/solver/cb_gmres_kernels.hpp"
 #include "core/solver/cg_kernels.hpp"
 #include "core/solver/cgs_kernels.hpp"
@@ -433,6 +435,56 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
 
 
 }  // namespace upper_trs
+
+
+namespace blk_lower_trs {
+
+
+GKO_DECLARE_BLK_LOWER_TRS_SHOULD_PERFORM_TRANSPOSE_KERNEL()
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+
+GKO_DECLARE_BLK_LOWER_TRS_INIT_STRUCT_KERNEL()
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+
+template <typename ValueType, typename IndexType>
+GKO_DECLARE_BLK_LOWER_TRS_GENERATE_KERNEL(ValueType, IndexType)
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
+    GKO_DECLARE_BLK_LOWER_TRS_GENERATE_KERNEL);
+
+template <typename ValueType, typename IndexType>
+GKO_DECLARE_BLK_LOWER_TRS_SOLVE_KERNEL(ValueType, IndexType)
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
+    GKO_DECLARE_BLK_LOWER_TRS_SOLVE_KERNEL);
+
+
+}  // namespace blk_lower_trs
+
+
+namespace blk_upper_trs {
+
+
+GKO_DECLARE_BLK_UPPER_TRS_SHOULD_PERFORM_TRANSPOSE_KERNEL()
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+
+GKO_DECLARE_BLK_UPPER_TRS_INIT_STRUCT_KERNEL()
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+
+template <typename ValueType, typename IndexType>
+GKO_DECLARE_BLK_UPPER_TRS_GENERATE_KERNEL(ValueType, IndexType)
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
+    GKO_DECLARE_BLK_UPPER_TRS_GENERATE_KERNEL);
+
+template <typename ValueType, typename IndexType>
+GKO_DECLARE_BLK_UPPER_TRS_SOLVE_KERNEL(ValueType, IndexType)
+GKO_NOT_COMPILED(GKO_HOOK_MODULE);
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
+    GKO_DECLARE_BLK_UPPER_TRS_SOLVE_KERNEL);
+
+
+}  // namespace blk_upper_trs
 
 
 namespace fcg {

@@ -204,6 +204,8 @@ set(GINKGO_HIP_SOURCES
     reorder/rcm_kernels.hip.cpp
     solver/bicg_kernels.hip.cpp
     solver/bicgstab_kernels.hip.cpp
+    solver/blk_lower_trs_kernels.hip.cpp
+    solver/blk_upper_trs_kernels.hip.cpp
     solver/cg_kernels.hip.cpp
     solver/cgs_kernels.hip.cpp
     solver/fcg_kernels.hip.cpp

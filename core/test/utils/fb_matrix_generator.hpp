@@ -156,6 +156,9 @@ std::unique_ptr<matrix::Fbcsr<ValueType, IndexType>> generate_fbcsr_from_csr(
 }
 
 
+/**
+ * Generates a random FBCSR matrix. Always includes diagonal blocks.
+ */
 template <typename ValueType, typename IndexType, typename RandEngine>
 std::unique_ptr<matrix::Fbcsr<ValueType, IndexType>> generate_random_fbcsr(
     std::shared_ptr<const ReferenceExecutor> ref, RandEngine engine,

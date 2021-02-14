@@ -30,6 +30,8 @@ target_sources(ginkgo_reference
     reorder/rcm_kernels.cpp
     solver/bicg_kernels.cpp
     solver/bicgstab_kernels.cpp
+    solver/blk_lower_trs_kernels.cpp
+    solver/blk_upper_trs_kernels.cpp
     solver/cg_kernels.cpp
     solver/cgs_kernels.cpp
     solver/fcg_kernels.cpp
