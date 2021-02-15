@@ -89,8 +89,45 @@ constexpr int default_block_size{512};
 template <typename ValueType, typename IndexType>
 void spmv(std::shared_ptr<const CudaExecutor> exec,
           const matrix::Fbcsr<ValueType, IndexType> *a,
-          const matrix::Dense<ValueType> *b,
-          matrix::Dense<ValueType> *c) GKO_NOT_IMPLEMENTED;
+          const matrix::Dense<ValueType> *b, matrix::Dense<ValueType> *c)
+{
+    if (cusparse::is_supported<ValueType, IndexType>::value) {
+        auto handle = exec->get_cusparse_handle();
+        {
+            cusparse::pointer_mode_guard pm_guard(handle);
+            const auto alpha = one<ValueType>();
+            const auto beta = zero<ValueType>();
+            auto descr = cusparse::create_mat_descr();
+            const auto row_ptrs = a->get_const_row_ptrs();
+            const auto col_idxs = a->get_const_col_idxs();
+            const auto values = a->get_const_values();
+            const int bs = a->get_block_size();
+            const IndexType mb = a->get_num_block_rows();
+            const IndexType nb = a->get_num_block_cols();
+            const auto nnzb =
+                static_cast<IndexType>(a->get_num_stored_blocks());
+            const auto nrhs = static_cast<IndexType>(b->get_size()[1]);
+            assert(nrhs == c->get_size()[1]);
+            if (nrhs == 1) {
+                cusparse::bsrmv(handle, CUSPARSE_OPERATION_NON_TRANSPOSE, mb,
+                                nb, nnzb, &alpha, descr, values, row_ptrs,
+                                col_idxs, bs, b->get_const_values(), &beta,
+                                c->get_values());
+            } else {
+                GKO_NOT_IMPLEMENTED;
+                // cusparse::bsrmm(handle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                //                 CUSPARSE_OPERATION_TRANSPOSE, mb, nrhs, nb,
+                //                 nnzb, &alpha, descr, values, row_ptrs,
+                //                 col_idxs, bs, b->get_const_values(),
+                //                 b->get_stride(), &beta, c->get_values(),
+                //                 c->get_stride());
+            }
+
+            cusparse::destroy(descr);
+        }
+    } else
+        GKO_NOT_IMPLEMENTED;
+}
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(GKO_DECLARE_FBCSR_SPMV_KERNEL);
 
