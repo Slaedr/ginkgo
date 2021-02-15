@@ -107,21 +107,36 @@ inline void copy_diagonal_blocks(
     }
 }
 
-template <typename T>
-inline constexpr typename std::enable_if_t<!gko::is_complex_s<T>::value, T>
-get_some_number()
+// Assumes column-major blocks
+template <typename ValueType, typename IndexType>
+inline void make_strict_triangular(
+    const TriSystemType type, matrix::Fbcsr<ValueType, IndexType> *const trimtx)
 {
-    return static_cast<T>(1.2);
-}
+    const IndexType nbrows = trimtx->get_num_block_rows();
+    const int bs = trimtx->get_block_size();
 
-template <typename T>
-inline constexpr typename std::enable_if_t<gko::is_complex_s<T>::value, T>
-get_some_number()
-{
-    using RT = gko::remove_complex<T>;
-    return {static_cast<RT>(-0.1), static_cast<RT>(1.4)};
+    const auto row_ptrs = trimtx->get_const_row_ptrs();
+    const auto col_idxs = trimtx->get_const_col_idxs();
+    const auto values = trimtx->get_values();
+    for (IndexType ibrow = 0; ibrow < nbrows; ibrow++) {
+        ValueType *diag{};
+        for (IndexType ibz = row_ptrs[ibrow]; ibz < row_ptrs[ibrow + 1];
+             ibz++) {
+            if (col_idxs[ibz] == ibrow) {
+                diag = &values[ibz * bs * bs];
+            }
+        }
+        assert(diag);
+        for (int ib = 0; ib < bs; ib++) {
+            for (int jb = 0; jb < bs; jb++) {
+                if ((type == LOWER_TRI && ib < jb) ||
+                    (type == UPPER_TRI && ib > jb)) {
+                    diag[ib + jb * bs] = static_cast<ValueType>(0.0);
+                }
+            }
+        }
+    }
 }
-
 
 /**
  * Randomly generates a matrix, extracts its block-triangular part,
@@ -132,7 +147,8 @@ template <typename ValueType, typename IndexType>
 inline BlkTriSystem<ValueType, IndexType> get_block_tri_system(
     const std::shared_ptr<const Executor> exec, const IndexType nbrows,
     const int blk_sz, const int nrhs, const bool diag_identity,
-    const TriSystemType type)
+    const TriSystemType type, const bool diag_dominant = false,
+    const bool strict_triangular = false)
 {
     using real_type = gko::remove_complex<ValueType>;
     using Fbcsr = gko::matrix::Fbcsr<ValueType, IndexType>;
@@ -141,7 +157,8 @@ inline BlkTriSystem<ValueType, IndexType> get_block_tri_system(
     const IndexType nrows = nbrows * blk_sz;
     std::shared_ptr<const Fbcsr> mtx =
         gko::test::generate_random_fbcsr<ValueType, IndexType>(
-            refexec, std::ranlux48(42), nbrows, nbrows, blk_sz, false, false);
+            refexec, std::ranlux48(42), nbrows, nbrows, blk_sz, diag_dominant,
+            false);
     Array<IndexType> l_row_ptrs(refexec, nbrows + 1);
     Array<IndexType> u_row_ptrs(refexec, nbrows + 1);
     gko::kernels::reference::factorization::initialize_row_ptrs_BLU(
@@ -164,32 +181,29 @@ inline BlkTriSystem<ValueType, IndexType> get_block_tri_system(
         copy_diagonal_blocks(mtx.get(), l_factor.get());
     }
 
-    // std::shared_ptr<Dense> x =
-    // 	test::generate_random_matrix<Dense>(
-    // 	    nbrows*blk_sz, nrhs,
-    // 	    std::uniform_int_distribution<IndexType>(0, nrhs),
-    // 	    std::normal_distribution<real_type>(0.0, 1.0), std::ranlux48(53),
-    // 	    refexec);
-    std::shared_ptr<Dense> x =
-        Dense::create(refexec, dim<2>(nbrows * blk_sz, nrhs));
-    ValueType *const xarr = x->get_values();
-    for (IndexType i = 0; i < nbrows * blk_sz * nrhs; i++) {
-        xarr[i] = static_cast<ValueType>(std::sin(
-            static_cast<ValueType>(i / 2.0 + get_some_number<ValueType>())));
+    const std::shared_ptr<Fbcsr> tri_factor =
+        (type == LOWER_TRI) ? l_factor : u_factor;
+    if (strict_triangular) {
+        make_strict_triangular(type, tri_factor.get());
     }
+
+    std::shared_ptr<Dense> x = Dense::create(refexec, dim<2>(nrows, nrhs));
+    ValueType *const xarr = x->get_values();
+    for (IndexType i = 0; i < nrows * nrhs; i++) {
+        xarr[i] = static_cast<ValueType>(std::sin(static_cast<ValueType>(
+            i / 2.0 + gko::test::get_some_number<ValueType>())));
+    }
+    std::shared_ptr<Dense> b = Dense::create(refexec, gko::dim<2>(nrows, nrhs));
 
     std::shared_ptr<Fbcsr> d_mtx = Fbcsr::create(exec);
     std::shared_ptr<Fbcsr> d_tri_factor = Fbcsr::create(exec);
     std::shared_ptr<Dense> d_x = Dense::create(exec);
-    std::shared_ptr<Dense> d_b = Dense::create(exec, gko::dim<2>(nrows, nrhs));
+    std::shared_ptr<Dense> d_b = Dense::create(exec);
     d_mtx->copy_from(mtx.get());
     d_x->copy_from(x.get());
-    if (type == LOWER_TRI) {
-        d_tri_factor->copy_from(l_factor.get());
-    } else {
-        d_tri_factor->copy_from(u_factor.get());
-    }
-    d_tri_factor->apply(d_x.get(), d_b.get());
+    d_tri_factor->copy_from(tri_factor.get());
+    tri_factor->apply(x.get(), b.get());
+    d_b->copy_from(b.get());
 
     return BlkTriSystem<ValueType, IndexType>{d_mtx, d_tri_factor, d_b, d_x};
 }

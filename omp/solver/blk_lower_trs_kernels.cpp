@@ -75,13 +75,9 @@ void init_struct(std::shared_ptr<const OmpExecutor> exec,
 
 template <typename ValueType, typename IndexType>
 void generate(std::shared_ptr<const OmpExecutor> exec,
-              const matrix::Fbcsr<ValueType, IndexType> *matrix,
-              solver::SolveStruct *solve_struct, const gko::size_type num_rhs)
-{
-    // This generate kernel is here to allow for a more sophisticated
-    // implementation as for other executors. This kernel would perform the
-    // "analysis" phase for the triangular matrix.
-}
+              const matrix::Fbcsr<ValueType, IndexType> *const matrix,
+              solver::SolveStruct *solve_struct, const int num_rhs,
+              const bool) GKO_NOT_IMPLEMENTED;
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_BLK_LOWER_TRS_GENERATE_KERNEL);

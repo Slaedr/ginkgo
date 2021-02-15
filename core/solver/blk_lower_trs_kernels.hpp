@@ -60,11 +60,11 @@ namespace blk_lower_trs {
                      std::shared_ptr<solver::SolveStruct> &solve_struct)
 
 
-#define GKO_DECLARE_BLK_LOWER_TRS_GENERATE_KERNEL(_vtype, _itype) \
-    void generate(std::shared_ptr<const DefaultExecutor> exec,    \
-                  const matrix::Fbcsr<_vtype, _itype> *matrix,    \
-                  solver::SolveStruct *solve_struct,              \
-                  const gko::size_type num_rhs)
+#define GKO_DECLARE_BLK_LOWER_TRS_GENERATE_KERNEL(_vtype, _itype)       \
+    void generate(std::shared_ptr<const DefaultExecutor> exec,          \
+                  const matrix::Fbcsr<_vtype, _itype> *matrix,          \
+                  solver::SolveStruct *solve_struct, const int num_rhs, \
+                  const bool is_unit)
 
 
 #define GKO_DECLARE_BLK_LOWER_TRS_SOLVE_KERNEL(_vtype, _itype)                 \

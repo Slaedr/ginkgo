@@ -95,7 +95,7 @@ void BlkLowerTrs<ValueType, IndexType>::generate()
 {
     this->get_executor()->run(blk_lower_trs::make_generate(
         gko::lend(system_matrix_), gko::lend(this->solve_struct_),
-        parameters_.num_rhs));
+        parameters_.num_rhs, parameters_.diag_identity));
 }
 
 

@@ -43,7 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "cuda/base/math.hpp"
 #include "cuda/base/types.hpp"
-#include "cuda/solver/common_trs_kernels.cuh"
+#include "cuda/solver/common_blk_trs_kernels.cuh"
 
 
 namespace gko {
@@ -58,30 +58,27 @@ namespace blk_upper_trs {
 
 
 void should_perform_transpose(std::shared_ptr<const CudaExecutor> exec,
-                              bool &do_transpose) GKO_NOT_IMPLEMENTED;
-// {
-//     should_perform_transpose_kernel(exec, do_transpose);
-// }
+                              bool &do_transpose)
+{
+    should_perform_transpose_kernel(exec, do_transpose);
+}
 
 
 void init_struct(std::shared_ptr<const CudaExecutor> exec,
                  std::shared_ptr<solver::SolveStruct> &solve_struct)
-    GKO_NOT_IMPLEMENTED;
-// {
-//     init_struct_kernel(exec, solve_struct);
-// }
+{
+    init_struct_kernel(exec, solve_struct);
+}
 
 
 template <typename ValueType, typename IndexType>
 void generate(std::shared_ptr<const CudaExecutor> exec,
               const matrix::Fbcsr<ValueType, IndexType> *matrix,
-              solver::SolveStruct *solve_struct,
-              const gko::size_type num_rhs) GKO_NOT_IMPLEMENTED;
-// {
-//     generate_kernel<ValueType, IndexType>(exec, matrix, solve_struct,
-//     num_rhs,
-//                                           true);
-// }
+              solver::SolveStruct *solve_struct, const int num_rhs)
+{
+    generate_kernel<ValueType, IndexType>(exec, matrix, solve_struct, num_rhs,
+                                          true, false);
+}
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_BLK_UPPER_TRS_GENERATE_KERNEL);
@@ -92,12 +89,10 @@ void solve(std::shared_ptr<const CudaExecutor> exec,
            const matrix::Fbcsr<ValueType, IndexType> *matrix,
            const solver::SolveStruct *solve_struct,
            matrix::Dense<ValueType> *trans_b, matrix::Dense<ValueType> *trans_x,
-           const matrix::Dense<ValueType> *b,
-           matrix::Dense<ValueType> *x) GKO_NOT_IMPLEMENTED;
-// {
-//     solve_kernel<ValueType, IndexType>(exec, matrix, solve_struct, trans_b,
-//                                        trans_x, b, x);
-// }
+           const matrix::Dense<ValueType> *b, matrix::Dense<ValueType> *x)
+{
+    solve_kernel<ValueType, IndexType>(exec, matrix, solve_struct, b, x);
+}
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_BLK_UPPER_TRS_SOLVE_KERNEL);

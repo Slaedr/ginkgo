@@ -75,7 +75,7 @@ template <typename ValueType, typename IndexType>
 void generate(std::shared_ptr<const HipExecutor> exec,
               const matrix::Fbcsr<ValueType, IndexType> *matrix,
               solver::SolveStruct *solve_struct,
-              const gko::size_type num_rhs) GKO_NOT_IMPLEMENTED;
+              const int num_rhs) GKO_NOT_IMPLEMENTED;
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_BLK_LOWER_TRS_GENERATE_KERNEL);

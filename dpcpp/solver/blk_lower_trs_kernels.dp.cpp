@@ -73,7 +73,7 @@ void init_struct(std::shared_ptr<const DpcppExecutor> exec,
 template <typename ValueType, typename IndexType>
 void generate(std::shared_ptr<const DpcppExecutor> exec,
               const matrix::Fbcsr<ValueType, IndexType> *matrix,
-              solver::SolveStruct *solve_struct, const gko::size_type num_rhs)
+              solver::SolveStruct *solve_struct, const int num_rhs)
 {
     // This generate kernel is here to allow for a more sophisticated
     // implementation as for other executors. This kernel would perform the

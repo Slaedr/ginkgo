@@ -117,7 +117,7 @@ public:
          *       sophisticated implementation. Hence this parameter is left
          *       here. But currently, there is no need to use it.
          */
-        gko::size_type GKO_FACTORY_PARAMETER_SCALAR(num_rhs, 1u);
+        int GKO_FACTORY_PARAMETER_SCALAR(num_rhs, 1);
 
         /**
          * Whether the block triangular matrix has identity diagonal blocks.

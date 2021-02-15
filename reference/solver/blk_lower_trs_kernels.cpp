@@ -71,9 +71,9 @@ void init_struct(std::shared_ptr<const ReferenceExecutor> exec,
 
 
 template <typename ValueType, typename IndexType>
-void generate(std::shared_ptr<const ReferenceExecutor> exec,
-              const matrix::Fbcsr<ValueType, IndexType> *matrix,
-              solver::SolveStruct *solve_struct, const gko::size_type num_rhs)
+void generate(std::shared_ptr<const ReferenceExecutor>,
+              const matrix::Fbcsr<ValueType, IndexType> *,
+              solver::SolveStruct *, const int, const bool)
 {
     // This generate kernel is here to allow for a more sophisticated
     // implementation as for other executors. This kernel would perform the
@@ -150,9 +150,8 @@ template <typename ValueType, typename IndexType>
 void solve(std::shared_ptr<const ReferenceExecutor> exec,
            const matrix::Fbcsr<ValueType, IndexType> *const matrix,
            const solver::SolveStruct *const solve_struct,
-           const bool identity_diag, matrix::Dense<ValueType> *const trans_b,
-           matrix::Dense<ValueType> *const trans_x,
-           const matrix::Dense<ValueType> *const b,
+           const bool identity_diag, matrix::Dense<ValueType> *,
+           matrix::Dense<ValueType> *, const matrix::Dense<ValueType> *const b,
            matrix::Dense<ValueType> *const x)
 {
     auto row_ptrs = matrix->get_const_row_ptrs();

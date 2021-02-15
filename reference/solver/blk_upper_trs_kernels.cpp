@@ -73,7 +73,7 @@ void init_struct(std::shared_ptr<const ReferenceExecutor> exec,
 template <typename ValueType, typename IndexType>
 void generate(std::shared_ptr<const ReferenceExecutor>,
               const matrix::Fbcsr<ValueType, IndexType> *,
-              solver::SolveStruct *, const gko::size_type)
+              solver::SolveStruct *, const int)
 {
     // This generate kernel is here to allow for a more sophisticated
     // implementation as for other executors. This kernel would perform the
