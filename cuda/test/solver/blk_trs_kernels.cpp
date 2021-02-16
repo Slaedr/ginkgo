@@ -144,20 +144,33 @@ TYPED_TEST(BlkLowerTrs, RefLowerTrsFlagCheckIsCorrect)
 
 TYPED_TEST(BlkLowerTrs, SolvesUnitLowerBlockTriangularSystem)
 {
-    this->test_tri_system(10, 7, 1, true, gko::testing::LOWER_TRI, false);
+    const bool diag_identity = true;
+    const bool strict_triangular = false;
+
+    this->test_tri_system(10, 7, 1, diag_identity, gko::testing::LOWER_TRI,
+                          strict_triangular);
 }
 
 
 TYPED_TEST(BlkLowerTrs, SolvesNonUnitLowerBlockTriangularSystem)
 {
-    // test with strictly lower triangular matrix
-    this->test_tri_system(10, 7, 1, false, gko::testing::LOWER_TRI, true);
+    // test with lower triangular matrix, not block-triangular
+    const bool diag_identity = false;
+    const bool strict_triangular = true;
+
+    this->test_tri_system(10, 7, 1, diag_identity, gko::testing::LOWER_TRI,
+                          strict_triangular);
 }
 
 
 TYPED_TEST(BlkLowerTrs, SolvesUpperBlockTriangularSystem)
 {
-    this->test_tri_system(10, 7, 1, false, gko::testing::UPPER_TRI, true);
+    // test only works with upper triangular matrix, not block-triangular
+    const bool diag_identity = false;
+    const bool strict_triangular = true;
+
+    this->test_tri_system(10, 7, 1, diag_identity, gko::testing::UPPER_TRI,
+                          strict_triangular);
 }
 
 
