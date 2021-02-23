@@ -152,7 +152,7 @@ TYPED_TEST(BlkLowerTrs, SolvesUnitLowerBlockTriangularSystem)
 }
 
 
-TYPED_TEST(BlkLowerTrs, SolvesNonUnitLowerBlockTriangularSystem)
+TYPED_TEST(BlkLowerTrs, SolvesNonUnitLowerTriangularSystem)
 {
     // test with lower triangular matrix, not block-triangular
     const bool diag_identity = false;
@@ -163,7 +163,7 @@ TYPED_TEST(BlkLowerTrs, SolvesNonUnitLowerBlockTriangularSystem)
 }
 
 
-TYPED_TEST(BlkLowerTrs, SolvesUpperBlockTriangularSystem)
+TYPED_TEST(BlkLowerTrs, SolvesUpperTriangularSystem)
 {
     // test only works with upper triangular matrix, not block-triangular
     const bool diag_identity = false;

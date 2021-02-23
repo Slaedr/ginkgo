@@ -62,6 +62,7 @@ class BlkLowerTrs : public ::testing::Test {
 protected:
     using value_type =
         typename std::tuple_element<0, decltype(ValueIndexType())>::type;
+    using real_type = gko::remove_complex<value_type>;
     using index_type =
         typename std::tuple_element<1, decltype(ValueIndexType())>::type;
     using Dense = gko::matrix::Dense<value_type>;
@@ -76,9 +77,10 @@ protected:
                                const int nrhs, const bool diag_identity,
                                const gko::testing::TriSystemType type)
     {
+        const bool diag_dominant = true;
         const gko::testing::BlkTriSystem<value_type, index_type> tsys =
             gko::testing::get_block_tri_system<value_type, index_type>(
-                ref, nbrows, bs, nrhs, diag_identity, type);
+                ref, nbrows, bs, nrhs, diag_identity, type, diag_dominant);
         auto lower_trs_factory =
             Solver::build().with_diag_identity(diag_identity).on(ref);
         auto solver = lower_trs_factory->generate(tsys.tri_mtx);
@@ -86,7 +88,7 @@ protected:
 
         solver->apply(tsys.b.get(), x.get());
 
-        const double tol = 1e-10;
+        const double tol = 100 * std::numeric_limits<real_type>::epsilon();
         GKO_ASSERT_MTX_NEAR(x, tsys.x, tol);
     }
 };

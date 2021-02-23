@@ -62,6 +62,7 @@ class BlkUpperTrs : public ::testing::Test {
 protected:
     using value_type =
         typename std::tuple_element<0, decltype(ValueIndexType())>::type;
+    using real_type = gko::remove_complex<value_type>;
     using index_type =
         typename std::tuple_element<1, decltype(ValueIndexType())>::type;
     using Dense = gko::matrix::Dense<value_type>;
@@ -74,16 +75,18 @@ protected:
 
     void test_tri_system(const index_type nbrows, const int bs, const int nrhs)
     {
+        const bool diag_dominant = true;
         const gko::testing::BlkTriSystem<value_type, index_type> tsys =
             gko::testing::get_block_tri_system<value_type, index_type>(
-                ref, nbrows, bs, nrhs, false, gko::testing::UPPER_TRI);
+                ref, nbrows, bs, nrhs, false, gko::testing::UPPER_TRI,
+                diag_dominant);
         auto upper_trs_factory = Solver::build().on(ref);
         auto solver = upper_trs_factory->generate(tsys.tri_mtx);
         auto x = Dense::create(ref, gko::dim<2>(nbrows * bs, nrhs));
 
         solver->apply(tsys.b.get(), x.get());
 
-        const double tol = 1e-9;
+        const double tol = 100 * std::numeric_limits<real_type>::epsilon();
         GKO_ASSERT_MTX_NEAR(x, tsys.x, tol);
     }
 };
