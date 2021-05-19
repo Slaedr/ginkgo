@@ -70,6 +70,49 @@ __global__ __launch_bounds__(default_block_size, sm_multiplier) void add_scaled(
 
 
 /**
+ * Computes the dot products of some column vectors in global or shared memory.
+ *
+ * @param result  Holds dot product value for each pair of vectors.
+ */
+template <typename ValueType>
+__device__ __forceinline__ void compute_dot(
+    const gko::batch_dense::BatchEntry<const ValueType> &x,
+    const gko::batch_dense::BatchEntry<const ValueType> &y,
+    const gko::batch_dense::BatchEntry<ValueType> &result)
+{
+    for (int j = threadIdx.x; j < x.num_rhs; j += blockDim.x) {
+        result.values[j] = zero<ValueType>();
+    }
+    __syncthreads();
+    // TODO: replace this with a parallel reduce below
+    if (threadIdx.x == 0) {
+        for (int i = 0; i < x.num_rows; i++) {
+            for (int j = 0; j < x.num_rhs; ++j) {
+                result.values[j] += conj(x.values[i * x.stride + j]) *
+                                    y.values[i * y.stride + j];
+            }
+        }
+    }
+}
+
+template <typename ValueType>
+__global__
+    __launch_bounds__(default_block_size, sm_multiplier) void compute_dot(
+        const gko::batch_dense::UniformBatch<const ValueType> x,
+        const gko::batch_dense::UniformBatch<const ValueType> y,
+        const gko::batch_dense::UniformBatch<ValueType> result)
+{
+    for (size_type ibatch = blockIdx.x; ibatch < x.num_batch;
+         ibatch += gridDim.x) {
+        const auto x_b = gko::batch::batch_entry(x, ibatch);
+        const auto y_b = gko::batch::batch_entry(y, ibatch);
+        const auto r_b = gko::batch::batch_entry(result, ibatch);
+        compute_dot(x_b, y_b, r_b);
+    }
+}
+
+
+/**
  * Computes the 2-norms of some column vectors in global or shared memory.
  *
  * @param result  Holds norm value for each vector in x.
