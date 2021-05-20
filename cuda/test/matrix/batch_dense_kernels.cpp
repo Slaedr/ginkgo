@@ -191,7 +191,7 @@ TEST_F(BatchDense,
 }
 
 
-TEST_F(BatchDense, CudaDotIsEquivalentToRef)
+TEST_F(BatchDense, CudaNorm2IsEquivalentToRef)
 {
     set_up_vector_data(20);
     auto norm_size =
@@ -206,9 +206,9 @@ TEST_F(BatchDense, CudaDotIsEquivalentToRef)
 }
 
 
-TEST_F(BatchDense, CudaComputeNorm2IsEquivalentToRef)
+TEST_F(BatchDense, CudaComputeDotIsEquivalentToRef)
 {
-    set_up_vector_data(20);
+    set_up_vector_data(2);
     auto dot_size =
         gko::batch_dim<>(batch_size, gko::dim<2>{1, x->get_size().at()[1]});
     auto dot_expected = NormVector::create(this->ref, dot_size);

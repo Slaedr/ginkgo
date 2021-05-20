@@ -68,6 +68,60 @@ __global__ __launch_bounds__(default_block_size, sm_multiplier) void add_scaled(
     }
 }
 
+namespace {
+
+/**
+ * The answer is only available on thread 0 of the thread-block.
+ */
+template <typename ReduceType, typename LocalOp>
+__device__ __forceinline__ ReduceType reduce_one_rhs(LocalOp local_op,
+                                                     const int num_rows)
+{
+    __shared__ ReduceType sum;
+    if (threadIdx.x == 0) {
+        sum = zero<ReduceType>();
+    }
+    const int num_its = (num_rows - 1) / blockDim.x + 1;
+    constexpr auto warp_size = config::warp_size;
+    const auto tile =
+        group::tiled_partition<warp_size>(group::this_thread_block());
+    const int tile_rank = threadIdx.x / warp_size;
+    // const int num_tiles = (blockDim.x - 1) / warp_size + 1;
+    constexpr int num_tiles = (default_block_size - 1) / warp_size + 1;
+    for (int i = 0; i < num_its; i++) {
+        const int row_offset = i * blockDim.x;
+        const int row = row_offset + tile_rank * warp_size + tile.thread_rank();
+        if (row >= num_rows) {
+            break;
+        }
+        __shared__ ReduceType warp_sums[num_tiles];
+        // const ValueType localdata = conj(x.values[row * x.stride + j])
+        //     * y.values[row * y.stride + j];
+        const ReduceType localdata = local_op(row);
+        // reduce within each warp
+        const ReduceType warpsum = reduce(
+            tile, localdata,
+            [](ReduceType local, ReduceType remote) { return local + remote; });
+        if (tile.thread_rank() == 0) {
+            warp_sums[tile_rank] = warpsum;
+        }
+        __syncthreads();
+        // Reduce across warps using the first warp
+        if (tile_rank == 0) {
+            for (int it = tile.thread_rank(); it < num_tiles; it += warp_size) {
+                const ReduceType sum2 =
+                    reduce(tile, warp_sums[it],
+                           [](ReduceType a, ReduceType b) { return a + b; });
+                if (tile.thread_rank() == 0) {
+                    sum += sum2;
+                }
+            }
+        }
+    }
+    return sum;
+}
+
+}  // namespace
 
 /**
  * Computes the dot products of some column vectors in global or shared memory.
@@ -80,18 +134,26 @@ __device__ __forceinline__ void compute_dot(
     const gko::batch_dense::BatchEntry<const ValueType> &y,
     const gko::batch_dense::BatchEntry<ValueType> &result)
 {
-    for (int j = threadIdx.x; j < x.num_rhs; j += blockDim.x) {
-        result.values[j] = zero<ValueType>();
+    // for (int j = threadIdx.x; j < x.num_rhs; j += blockDim.x) {
+    //     result.values[j] = zero<ValueType>();
+    // }
+    // __syncthreads();
+    // This is inefficient for non-unit stride
+    for (int j = 0; j < x.num_rhs; j++) {
+        const ValueType sum = reduce_one_rhs<ValueType>(
+            [&](int row) {
+                return conj(x.values[row * x.stride + j]) *
+                       y.values[row * y.stride + j];
+            },
+            x.num_rows);
+        if (threadIdx.x == 0) {
+            result.values[j] = sum;
+        }
     }
     __syncthreads();
-    // TODO: replace this with a parallel reduce below
-    if (threadIdx.x == 0) {
-        for (int i = 0; i < x.num_rows; i++) {
-            for (int j = 0; j < x.num_rhs; ++j) {
-                result.values[j] += conj(x.values[i * x.stride + j]) *
-                                    y.values[i * y.stride + j];
-            }
-        }
+    for (int j = threadIdx.x; j < x.num_rhs; j += blockDim.x) {
+        // result.values[j] = 2.0+sqrt(result.values[j]);
+        printf("Nomr: %g ", result.values[j]);
     }
 }
 
@@ -122,8 +184,9 @@ __device__ __forceinline__ void compute_norm2(
     const gko::batch_dense::BatchEntry<const ValueType> &x,
     const gko::batch_dense::BatchEntry<remove_complex<ValueType>> &result)
 {
+    using real_type = remove_complex<ValueType>;
     for (int j = threadIdx.x; j < x.num_rhs; j += blockDim.x) {
-        result.values[j] = zero<remove_complex<ValueType>>();
+        result.values[j] = zero<real_type>();
     }
     __syncthreads();
     // TODO: replace this with a parallel reduce below
@@ -134,6 +197,15 @@ __device__ __forceinline__ void compute_norm2(
             }
         }
     }
+    // for(int j = 0; j < x.num_rhs; ++j) {
+    //     const real_type sum = reduce_one_rhs<real_type>([&x,j](int row) {
+    //             return squared_norm(x.values[row*x.stride+j]);
+    //         },
+    //         x.num_rows);
+    //     if(threadIdx.x == 0) {
+    //         result.values[j] = sum;
+    //     }
+    // }
     __syncthreads();
     for (int j = threadIdx.x; j < x.num_rhs; j += blockDim.x) {
         result.values[j] = sqrt(result.values[j]);

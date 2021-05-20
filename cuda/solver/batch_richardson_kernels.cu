@@ -41,6 +41,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cuda/base/types.hpp"
 #include "cuda/components/cooperative_groups.cuh"
 #include "cuda/components/intrinsics.cuh"
+#include "cuda/components/reduction.cuh"
 #include "cuda/components/thread_ids.cuh"
 #include "cuda/matrix/batch_struct.hpp"
 
@@ -50,17 +51,17 @@ namespace kernels {
 namespace cuda {
 
 
-#define GKO_CUDA_BATCH_USE_DYNAMIC_SHARED_MEM 1
-constexpr int default_block_size = 128;
-constexpr int sm_multiplier = 4;
-
-
 /**
  * @brief The batch Richardson solver namespace.
  *
  * @ingroup batch_rich
  */
 namespace batch_rich {
+
+
+#define GKO_CUDA_BATCH_USE_DYNAMIC_SHARED_MEM 1
+constexpr int default_block_size = 128;
+constexpr int sm_multiplier = 4;
 
 
 #include "common/components/uninitialized_array.hpp.inc"
