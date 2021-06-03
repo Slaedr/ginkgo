@@ -104,7 +104,8 @@ static void apply_impl(
         apply_kernel<stop::RelResidualMaxIter<ValueType>>
             <<<nbatch, default_block_size, shared_size>>>(
                 opts.max_its, opts.rel_residual_tol, opts.relax_factor, logger,
-                BatchJacobi<ValueType>(), a, left, right, b, x);
+                // BatchJacobi<ValueType>(), a, left, right, b, x);
+                BatchJacobi<ValueType>(), a, left.values, right.values, b, x);
     } else {
         GKO_NOT_IMPLEMENTED;
     }

@@ -48,7 +48,7 @@ namespace batch_csr {
  * Encapsulates (refers to) one matrix from a batch of CSR matrices
  */
 template <typename ValueType>
-struct BatchEntry {
+struct BatchEntry final {
     using value_type = ValueType;
     using index_type = int;
     ValueType *values;
@@ -65,7 +65,7 @@ struct BatchEntry {
  * sparsity pattern.
  */
 template <typename ValueType>
-struct UniformBatch {
+struct UniformBatch final {
     using value_type = ValueType;
     using index_type = int;
     using entry_type = BatchEntry<ValueType>;
@@ -89,9 +89,15 @@ namespace batch_dense {
  * Encapsulates one matrix from a batch of dense matrices (vectors).
  */
 template <typename ValueType>
-struct BatchEntry {
+struct BatchEntry final {
     using value_type = ValueType;
     ValueType *values;
+    size_type stride;
+    int num_rows;
+    int num_rhs;
+};
+
+struct BatchEntryConfig final {
     size_type stride;
     int num_rows;
     int num_rhs;
@@ -103,7 +109,7 @@ struct BatchEntry {
  * It is uniform in the sense that all matrices in the batch have common sizes.
  */
 template <typename ValueType>
-struct UniformBatch {
+struct UniformBatch final {
     using value_type = ValueType;
     using entry_type = BatchEntry<ValueType>;
 
@@ -170,6 +176,14 @@ GKO_ATTRIBUTES GKO_INLINE batch_dense::BatchEntry<ValueType> batch_entry(
 {
     return {batch.values + batch_idx * batch.stride * batch.num_rows,
             batch.stride, batch.num_rows, batch.num_rhs};
+}
+
+template <typename ValueType>
+GKO_ATTRIBUTES GKO_INLINE batch_dense::BatchEntry<ValueType> batch_pointer(
+    const batch_dense::UniformBatch<ValueType> &batch,
+    const size_type batch_idx)
+{
+    return batch.values + batch_idx * batch.stride * batch.num_rows;
 }
 
 

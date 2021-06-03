@@ -84,6 +84,29 @@ public:
         __syncthreads();
     }
 
+    __device__ __forceinline__ void generate(
+        const gko::batch_csr::UniformBatch<const ValueType> &mat,
+        const size_type batch_id, ValueType *const __restrict__ work)
+    {
+        work_ = work;
+        constexpr auto warp_size = config::warp_size;
+        const auto tile =
+            group::tiled_partition<warp_size>(group::this_thread_block());
+        const int tile_rank = threadIdx.x / warp_size;
+        const int num_tiles = (blockDim.x - 1) / warp_size + 1;
+        for (int irow = tile_rank; irow < mat.num_rows; irow += num_tiles) {
+            for (int j = mat.row_ptrs[irow] + tile.thread_rank();
+                 j < mat.row_ptrs[irow + 1]; j += warp_size) {
+                const int found = (mat.col_idxs[j] == irow);
+                if (found) {
+                    work_[irow] = one<ValueType>() /
+                                  mat.values[batch_id * mat.num_nnz + j];
+                }
+            }
+        }
+        __syncthreads();
+    }
+
     __device__ __forceinline__ void apply(
         const gko::batch_dense::BatchEntry<const ValueType> &r,
         const gko::batch_dense::BatchEntry<ValueType> &z) const
@@ -93,6 +116,19 @@ public:
             const int col = i % r.num_rhs;
             z.values[row * z.stride + col] =
                 work_[row] * r.values[row * r.stride + col];
+        }
+    }
+
+    __device__ __forceinline__ void apply(
+        const gko::batch_dense::BatchEntryConfig &conf,
+        const ValueType *const r, ValueType *const z) const
+    {
+        for (int i = threadIdx.x; i < conf.num_rows * conf.num_rhs;
+             i += blockDim.x) {
+            const int row = i / conf.num_rhs;
+            const int col = i % conf.num_rhs;
+            z[row * conf.stride + col] =
+                work_[row] * r[row * conf.stride + col];
         }
     }
 

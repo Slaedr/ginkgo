@@ -36,8 +36,9 @@ __global__ void apply_kernel(
     const int max_iter, const gko::remove_complex<ValueType> rel_tol,
     const gko::remove_complex<ValueType> relax_factor, LogType logger,
     PrecType prec, const MatrixType mat,
-    const gko::batch_dense::UniformBatch<const ValueType> left_scale,
-    const gko::batch_dense::UniformBatch<const ValueType> right_scale,
+    // const gko::batch_dense::UniformBatch<const ValueType> left_scale,
+    // const gko::batch_dense::UniformBatch<const ValueType> right_scale,
+    const ValueType *const left_scale, const ValueType *const right_scale,
     const gko::batch_dense::UniformBatch<ValueType> b,
     const gko::batch_dense::UniformBatch<ValueType> x)
 {
@@ -50,6 +51,10 @@ __global__ void apply_kernel(
     const auto nbatch = mat.num_batch;
     const auto num_rows = mat.num_rows;
     const auto num_rhs = b.num_rhs;
+    const auto mv_conf = gko::batch_dense::BatchEntryConfig{
+        static_cast<size_type>(num_rhs), num_rows, num_rhs};
+    const auto norm_conf = gko::batch_dense::BatchEntryConfig{
+        static_cast<size_type>(num_rhs), 1, num_rhs};
 
     for (size_type ibatch = blockIdx.x; ibatch < nbatch; ibatch += gridDim.x) {
 #if GKO_CUDA_BATCH_USE_DYNAMIC_SHARED_MEM
@@ -78,45 +83,62 @@ __global__ void apply_kernel(
 
         uint32 converged = 0;
 
-        const auto left_b = gko::batch::batch_entry(left_scale, ibatch);
-        const auto right_b = gko::batch::batch_entry(right_scale, ibatch);
+        // const auto left_b = gko::batch::batch_entry(left_scale, ibatch);
+        // const auto right_b = gko::batch::batch_entry(right_scale, ibatch);
 
+#if 0
         if (left_scale.values) {
             const auto a_b = gko::batch::batch_entry(mat, ibatch);
-            const auto b_b = gko::batch::batch_entry(b, ibatch);
-            batch_scale(left_b, right_b, a_b);
-            batch_scale(left_b, b_b);
+            //const auto b_b = gko::batch::batch_entry(b, ibatch);
+            //batch_scale(left_b, right_b, a_b);
+			batch_scale(left_scale.values + ibatch*num_rows,
+				right_scale.values + ibatch*num_rows, mat, ibatch);
+			const auto b_b = b.values + ibatch*mv_conf.stride*mv_conf.num_rows;
+            //batch_scale(left_b, b_b);
+            batch_scale(left_scale.values + ibatch*num_rows, b_b, mv_conf);
         }
+#else
+        if (left_scale) {
+            batch_scale(left_scale + ibatch * num_rows,
+                        right_scale + ibatch * num_rows, mat, ibatch);
+            const auto b_b =
+                b.values + ibatch * mv_conf.stride * mv_conf.num_rows;
+            batch_scale(left_scale + ibatch * num_rows, b_b, mv_conf);
+        }
+#endif
 
-        const auto a_b =
-            gko::batch::batch_entry(gko::batch::to_const(mat), ibatch);
-        const auto b_b =
-            gko::batch::batch_entry(gko::batch::to_const(b), ibatch);
-        const auto x_b = gko::batch::batch_entry(x, ibatch);
-        const gko::batch_dense::BatchEntry<ValueType> r_b{
-            residual, static_cast<size_type>(num_rhs), num_rows, num_rhs};
-        const gko::batch_dense::BatchEntry<ValueType> dx_b{
-            delta_x, static_cast<size_type>(num_rhs), num_rows, num_rhs};
+        // const auto a_b =
+        //    gko::batch::batch_entry(gko::batch::to_const(mat), ibatch);
+        // const auto b_b =
+        //    gko::batch::batch_entry(gko::batch::to_const(b), ibatch);
+        // const auto x_b = gko::batch::batch_entry(x, ibatch);
+        const ValueType *const b_b =
+            b.values + ibatch * mv_conf.stride * mv_conf.num_rows;
+        const auto x_b = x.values + ibatch * mv_conf.stride * mv_conf.num_rows;
+        // const gko::batch_dense::BatchEntry<ValueType> r_b{
+        //    residual, s_num_rhs, num_rows, num_rhs};
+        // const gko::batch_dense::BatchEntry<ValueType> dx_b{
+        //    delta_x, s_num_rhs, num_rows, num_rhs};
 
         // These need to be duplicated across threads
         const auto relax = static_cast<ValueType>(relax_factor);
-        const gko::batch_dense::BatchEntry<const ValueType> relax_b{&relax, 1,
-                                                                    1, 1};
+        // const gko::batch_dense::BatchEntry<const ValueType>
+        //    relax_b{&relax, s_num_rhs, i_one, i_one};
 
-        const gko::batch_dense::BatchEntry<real_type> norms_b{
-            norms, static_cast<size_type>(num_rhs), 1, num_rhs};
-        const gko::batch_dense::BatchEntry<real_type> init_res_norm_b{
-            init_res_norm, static_cast<size_type>(num_rhs), 1, num_rhs};
+        // const gko::batch_dense::BatchEntry<real_type> norms_b{
+        //    norms, s_num_rhs, i_one, num_rhs};
+        // const gko::batch_dense::BatchEntry<real_type> init_res_norm_b{
+        //    init_res_norm, s_num_rhs, i_one, num_rhs};
 
-        prec.generate(a_b, prec_work);
+        prec.generate(gko::batch::to_const(mat), ibatch, prec_work);
 
         // initial residual
-        copy(b_b, r_b);
-        compute_norm2<ValueType>(gko::batch::to_const(r_b), norms_b);
-        copy(gko::batch::to_const(norms_b), init_res_norm_b);
+        // copy(b_b, r_b);
+        copy(mv_conf, b_b, residual);
+        compute_norm2<ValueType>(mv_conf, residual, norms);
+        copy(norm_conf, norms, init_res_norm);
 
-        StopType stop(num_rhs, max_iter, rel_tol, init_res_norm_b.values,
-                      converged);
+        StopType stop(num_rhs, max_iter, rel_tol, converged, init_res_norm);
 
         int iter = 0;
         while (true) {
@@ -126,14 +148,19 @@ __global__ void apply_kernel(
             //     static_cast<ValueType>(1.0), r_b);
 
             // r <- b - Ax
-            copy(b_b, r_b);
+            // copy(b_b, r_b);
+            copy(mv_conf, b_b, residual);
             __syncthreads();
-            advanced_spmv_kernel(static_cast<ValueType>(-1.0), a_b,
-                                 gko::batch::to_const(x_b),
-                                 static_cast<ValueType>(1.0), r_b);
+            // advanced_spmv_kernel(static_cast<ValueType>(-1.0), a_b,
+            //                     gko::batch::to_const(x_b),
+            //                     static_cast<ValueType>(1.0), r_b);
+            advanced_spmv_kernel(static_cast<ValueType>(-1.0),
+                                 gko::batch::to_const(mat), ibatch, mv_conf,
+                                 x_b, static_cast<ValueType>(1.0), residual);
             __syncthreads();
 
-            compute_norm2<ValueType>(gko::batch::to_const(r_b), norms_b);
+            // compute_norm2<ValueType>(gko::batch::to_const(r_b), norms_b);
+            compute_norm2<ValueType>(mv_conf, residual, norms);
             __syncthreads();
 
             const bool all_converged =
@@ -143,7 +170,8 @@ __global__ void apply_kernel(
                 break;
             }
 
-            prec.apply(gko::batch::to_const(r_b), dx_b);
+            // prec.apply(gko::batch::to_const(r_b), dx_b);
+            prec.apply(mv_conf, residual, delta_x);
             __syncthreads();
 
             // zero out dx for rhs's which do not need to be updated,
@@ -152,19 +180,28 @@ __global__ void apply_kernel(
                 const uint32 conv = converged & (1 << j);
                 if (conv) {
                     for (int i = threadIdx.x; i < num_rows; i += blockDim.x) {
-                        dx_b.values[i * dx_b.stride + j] = 0.0;
+                        // dx_b.values[i * dx_b.stride + j] = 0.0;
+                        delta_x[i * mv_conf.stride + j] = 0.0;
                     }
                 }
             }
             __syncthreads();
 
-            add_scaled(relax_b, gko::batch::to_const(dx_b), x_b);
+            // add_scaled(relax_b, gko::batch::to_const(dx_b), x_b);
+            add_scaled(&relax, 1, mv_conf, delta_x, x_b);
             __syncthreads();
             iter++;
         }
 
+#if 0
         if (left_scale.values) {
-            batch_scale(right_b, x_b);
+            //batch_scale(right_b, x_b);
+            batch_scale(right_scale.values+ibatch*num_rows, x_b, mv_conf);
         }
+#else
+        if (left_scale) {
+            batch_scale(right_scale + ibatch * num_rows, x_b, mv_conf);
+        }
+#endif
     }
 }

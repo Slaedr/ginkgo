@@ -92,6 +92,28 @@ __device__ __forceinline__ void spmv_kernel(
 
 
 template <typename ValueType>
+__device__ __forceinline__ void spmv_kernel(
+    const gko::batch_csr::UniformBatch<const ValueType> &a,
+    const size_type mat_batch_id,
+    const gko::batch_dense::BatchEntryConfig &vec_conf,
+    const ValueType *const b, ValueType *const c)
+{
+    for (int row = threadIdx.x; row < a.num_rows; row += blockDim.x) {
+        for (int j = 0; j < vec_conf.num_rhs; ++j) {
+            c[row * vec_conf.stride + j] = zero<ValueType>();
+        }
+        for (auto k = a.row_ptrs[row]; k < a.row_ptrs[row + 1]; ++k) {
+            const auto val = a.values[mat_batch_id * a.num_nnz + k];
+            const auto col = a.col_idxs[k];
+            for (int j = 0; j < vec_conf.num_rhs; ++j) {
+                c[row * vec_conf.stride + j] +=
+                    val * b[col * vec_conf.stride + j];
+            }
+        }
+    }
+}
+
+template <typename ValueType>
 __global__ __launch_bounds__(default_block_size, sm_multiplier) void spmv(
     const gko::batch_csr::UniformBatch<const ValueType> a,
     const batch_dense::UniformBatch<const ValueType> b,
@@ -170,6 +192,29 @@ __device__ __forceinline__ void advanced_spmv_kernel(
 
 
 template <typename ValueType>
+__device__ __forceinline__ void advanced_spmv_kernel(
+    const ValueType alpha,
+    const gko::batch_csr::UniformBatch<const ValueType> &a,
+    const size_type mat_batch_id,
+    const gko::batch_dense::BatchEntryConfig &vconf, const ValueType *const b,
+    const ValueType beta, ValueType *const c)
+{
+    for (int row = threadIdx.x; row < a.num_rows; row += blockDim.x) {
+        for (int j = 0; j < vconf.num_rhs; ++j) {
+            c[row * vconf.stride + j] *= beta;
+        }
+        for (int k = a.row_ptrs[row]; k < a.row_ptrs[row + 1]; ++k) {
+            const auto val = a.values[mat_batch_id * a.num_nnz + k];
+            const auto col = a.col_idxs[k];
+            for (int j = 0; j < vconf.num_rhs; ++j) {
+                c[row * vconf.stride + j] +=
+                    alpha * val * b[col * vconf.stride + j];
+            }
+        }
+    }
+}
+
+template <typename ValueType>
 __global__
     __launch_bounds__(default_block_size, sm_multiplier) void advanced_spmv(
         const batch_dense::UniformBatch<const ValueType> alpha,
@@ -218,6 +263,27 @@ __device__ __forceinline__ void batch_scale(
     }
 }
 
+template <typename ValueType>
+__device__ __forceinline__ void batch_scale(
+    const ValueType *const left_scale, const ValueType *const right_scale,
+    const gko::batch_csr::UniformBatch<ValueType> &a,
+    const size_type mat_batch_id)
+{
+    constexpr auto warp_size = config::warp_size;
+    const auto tile =
+        group::tiled_partition<warp_size>(group::this_thread_block());
+    const int tile_rank = threadIdx.x / warp_size;
+    const int num_tiles = (blockDim.x - 1) / warp_size + 1;
+
+    for (int i_row = tile_rank; i_row < a.num_rows; i_row += num_tiles) {
+        const ValueType rowscale = left_scale[i_row];
+        for (int iz = a.row_ptrs[i_row] + tile.thread_rank();
+             iz < a.row_ptrs[i_row + 1]; iz += warp_size) {
+            a.values[mat_batch_id * a.num_nnz + iz] *=
+                rowscale * right_scale[a.col_idxs[iz]];
+        }
+    }
+}
 
 /**
  * Scales an entire batch of uniform CSR matrices with common dense
