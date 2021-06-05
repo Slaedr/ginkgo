@@ -99,18 +99,18 @@ __device__ __forceinline__ void add_scaled(
     ValueType *const y)
 {
     if (alpha_nrhs == 1) {
-        for (int ij = threadIdx.x; ij < mv_conf.num_rows * mv_conf.num_rhs;
+        for (int ij = threadIdx.x; ij < mv_conf.nrows * mv_conf.ncols;
              ij += blockDim.x) {
-            const int i = ij / mv_conf.num_rhs;
-            const int j = ij % mv_conf.num_rhs;
+            const int i = ij / mv_conf.ncols;
+            const int j = ij % mv_conf.ncols;
             y[i * mv_conf.stride + j] += alpha[0] * x[i * mv_conf.stride + j];
         }
     } else {
-        for (int ij = threadIdx.x; ij < mv_conf.num_rows * mv_conf.num_rhs;
+        for (int ij = threadIdx.x; ij < mv_conf.nrows * mv_conf.ncols;
              ij += blockDim.x) {
-            const int i = ij / mv_conf.num_rhs;
-            const int j = ij % mv_conf.num_rhs;
-            y[i * mv_conf.stride + j] += alpha[j] * x[i * mv_conf.stride + j];
+            const int i = ij / mv_conf.ncols;
+            const int j = ij % mv_conf.ncols;
+            y[i * mv_conf.ncols + j] += alpha[j] * x[i * mv_conf.ncols + j];
         }
     }
 }
@@ -158,20 +158,20 @@ __device__ __forceinline__ void compute_norm2(
     const gko::batch_dense::BatchEntryConfig conf, const ValueType *const x,
     remove_complex<ValueType> *const result)
 {
-    for (int j = threadIdx.x; j < conf.num_rhs; j += blockDim.x) {
+    for (int j = threadIdx.x; j < conf.ncols; j += blockDim.x) {
         result[j] = zero<remove_complex<ValueType>>();
     }
     __syncthreads();
     // TODO: replace this with a parallel reduce below
     if (threadIdx.x == 0) {
-        for (int i = 0; i < conf.num_rows; i++) {
-            for (int j = 0; j < conf.num_rhs; ++j) {
-                result[j] += squared_norm(x[i * conf.stride + j]);
+        for (int i = 0; i < conf.nrows; i++) {
+            for (int j = 0; j < conf.ncols; ++j) {
+                result[j] += squared_norm(x[i * conf.ncols + j]);
             }
         }
     }
     __syncthreads();
-    for (int j = threadIdx.x; j < conf.num_rhs; j += blockDim.x) {
+    for (int j = threadIdx.x; j < conf.ncols; j += blockDim.x) {
         result[j] = sqrt(result[j]);
     }
 }
@@ -215,11 +215,11 @@ __device__ __forceinline__ void batch_scale(
     const ValueType *const scale_vec, ValueType *const a,
     const gko::batch_dense::BatchEntryConfig &a_conf)
 {
-    for (int iz = threadIdx.x; iz < a_conf.num_rows * a_conf.num_rhs;
+    for (int iz = threadIdx.x; iz < a_conf.nrows * a_conf.ncols;
          iz += blockDim.x) {
-        const int row = iz / a_conf.num_rhs;
-        const int col = iz % a_conf.num_rhs;
-        a[row * a_conf.stride + col] *= scale_vec[row];
+        const int row = iz / a_conf.ncols;
+        const int col = iz % a_conf.ncols;
+        a[row * a_conf.ncols + col] *= scale_vec[row];
     }
 }
 
@@ -417,10 +417,9 @@ __device__ __forceinline__ void copy(
     const gko::batch_dense::BatchEntryConfig &conf, const ValueType *const in,
     ValueType *const out)
 {
-    for (int iz = threadIdx.x; iz < conf.num_rows * conf.num_rhs;
-         iz += blockDim.x) {
-        const int i = iz / conf.num_rhs;
-        const int j = iz % conf.num_rhs;
-        out[i * conf.stride + j] = in[i * conf.stride + j];
+    for (int iz = threadIdx.x; iz < conf.nrows * conf.ncols; iz += blockDim.x) {
+        const int i = iz / conf.ncols;
+        const int j = iz % conf.ncols;
+        out[i * conf.ncols + j] = in[i * conf.ncols + j];
     }
 }

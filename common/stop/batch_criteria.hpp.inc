@@ -91,7 +91,8 @@ public:
      */
     __device__ __forceinline__ bool check_converged(
         const int iter, const real_type *const residual_norms,
-        const gko::batch_dense::BatchEntry<const ValueType> &residual,
+        const ValueType *const residual_vec,
+        const gko::batch_dense::BatchEntryConfig &res_conf,
         bitset_type &converged) const
     {
         if (iter >= max_its - 1) {
@@ -102,11 +103,7 @@ public:
             check_norms(residual_norms, converged);
         } else {
             __shared__ real_type norms[batch_config<ValueType>::max_num_rhs];
-            compute_norm2<ValueType>(
-                residual, gko::batch_dense::BatchEntry<real_type>{
-                              norms, static_cast<size_type>(nrhs), 1, nrhs});
-
-            __syncthreads();
+            compute_norm2<ValueType>(res_conf, residual_vec, norms);
             check_norms(norms, converged);
         }
 

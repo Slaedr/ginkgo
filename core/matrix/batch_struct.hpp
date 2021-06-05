@@ -43,6 +43,8 @@ namespace gko {
 
 namespace batch_csr {
 
+#define GKO_BATCH_STRUCT_PADDING \
+    size_type unused_var {}
 
 /**
  * Encapsulates (refers to) one matrix from a batch of CSR matrices
@@ -99,8 +101,8 @@ struct BatchEntry final {
 
 struct BatchEntryConfig final {
     size_type stride;
-    int num_rows;
-    int num_rhs;
+    int nrows;
+    int ncols;
 };
 
 /**
@@ -178,12 +180,20 @@ GKO_ATTRIBUTES GKO_INLINE batch_dense::BatchEntry<ValueType> batch_entry(
             batch.stride, batch.num_rows, batch.num_rhs};
 }
 
+/**
+ * Computes a pointer to the beginning of the requested batch entry.
+ *
+ * \param batch  The entire uniform batch of dense matrices.
+ * \param batch_idx  The requested batch entry index.
+ * \param conf  The size of each individual entry in the uniform batch.
+ * \return  Pointer to the start of the requested batch entry.
+ */
 template <typename ValueType>
-GKO_ATTRIBUTES GKO_INLINE batch_dense::BatchEntry<ValueType> batch_pointer(
+GKO_ATTRIBUTES GKO_INLINE ValueType *batch_pointer(
     const batch_dense::UniformBatch<ValueType> &batch,
-    const size_type batch_idx)
+    const size_type batch_idx, const batch_dense::BatchEntryConfig &conf)
 {
-    return batch.values + batch_idx * batch.stride * batch.num_rows;
+    return batch.values + batch_idx * conf.ncols * conf.nrows;
 }
 
 

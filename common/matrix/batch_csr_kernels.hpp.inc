@@ -99,15 +99,15 @@ __device__ __forceinline__ void spmv_kernel(
     const ValueType *const b, ValueType *const c)
 {
     for (int row = threadIdx.x; row < a.num_rows; row += blockDim.x) {
-        for (int j = 0; j < vec_conf.num_rhs; ++j) {
-            c[row * vec_conf.stride + j] = zero<ValueType>();
+        for (int j = 0; j < vec_conf.ncols; ++j) {
+            c[row * vec_conf.ncols + j] = zero<ValueType>();
         }
         for (auto k = a.row_ptrs[row]; k < a.row_ptrs[row + 1]; ++k) {
             const auto val = a.values[mat_batch_id * a.num_nnz + k];
             const auto col = a.col_idxs[k];
-            for (int j = 0; j < vec_conf.num_rhs; ++j) {
-                c[row * vec_conf.stride + j] +=
-                    val * b[col * vec_conf.stride + j];
+            for (int j = 0; j < vec_conf.ncols; ++j) {
+                c[row * vec_conf.ncols + j] +=
+                    val * b[col * vec_conf.ncols + j];
             }
         }
     }
@@ -200,15 +200,15 @@ __device__ __forceinline__ void advanced_spmv_kernel(
     const ValueType beta, ValueType *const c)
 {
     for (int row = threadIdx.x; row < a.num_rows; row += blockDim.x) {
-        for (int j = 0; j < vconf.num_rhs; ++j) {
-            c[row * vconf.stride + j] *= beta;
+        for (int j = 0; j < vconf.ncols; ++j) {
+            c[row * vconf.ncols + j] *= beta;
         }
         for (int k = a.row_ptrs[row]; k < a.row_ptrs[row + 1]; ++k) {
             const auto val = a.values[mat_batch_id * a.num_nnz + k];
             const auto col = a.col_idxs[k];
-            for (int j = 0; j < vconf.num_rhs; ++j) {
-                c[row * vconf.stride + j] +=
-                    alpha * val * b[col * vconf.stride + j];
+            for (int j = 0; j < vconf.ncols; ++j) {
+                c[row * vconf.ncols + j] +=
+                    alpha * val * b[col * vconf.ncols + j];
             }
         }
     }

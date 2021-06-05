@@ -123,12 +123,11 @@ public:
         const gko::batch_dense::BatchEntryConfig &conf,
         const ValueType *const r, ValueType *const z) const
     {
-        for (int i = threadIdx.x; i < conf.num_rows * conf.num_rhs;
+        for (int i = threadIdx.x; i < conf.nrows * conf.ncols;
              i += blockDim.x) {
-            const int row = i / conf.num_rhs;
-            const int col = i % conf.num_rhs;
-            z[row * conf.stride + col] =
-                work_[row] * r[row * conf.stride + col];
+            const int row = i / conf.ncols;
+            const int col = i % conf.ncols;
+            z[row * conf.ncols + col] = work_[row] * r[row * conf.ncols + col];
         }
     }
 
