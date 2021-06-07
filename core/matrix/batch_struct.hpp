@@ -196,6 +196,22 @@ GKO_ATTRIBUTES GKO_INLINE ValueType *batch_pointer(
     return batch.values + batch_idx * conf.ncols * conf.nrows;
 }
 
+/**
+ * Computes a pointer to the beginning of the requested batch entry.
+ *
+ * \param batch  The entire uniform batch of dense matrices.
+ * \param batch_idx  The requested batch entry index.
+ * \param conf  The size of each individual entry in the uniform batch.
+ * \return  Pointer to the start of the requested batch entry.
+ */
+template <typename ValueType>
+GKO_ATTRIBUTES GKO_INLINE ValueType *batch_pointer(
+    ValueType *const batch_values, const size_type batch_idx,
+    const batch_dense::BatchEntryConfig &conf)
+{
+    return batch_values + batch_idx * conf.ncols * conf.nrows;
+}
+
 
 /**
  * Extract one object (matrix, vector etc.) from a batch of objects

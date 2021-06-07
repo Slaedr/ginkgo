@@ -88,6 +88,9 @@ static void apply_impl(
 {
     using real_type = gko::remove_complex<ValueType>;
     const size_type nbatch = a.num_batch;
+    const auto mv_conf =
+        gko::batch_dense::BatchEntryConfig{b.stride, a.num_rows, b.num_rhs};
+    GKO_ASSERT(b.stride == x.stride);
 
     gko::kernels::cuda::configure_shared_memory<ValueType>();
 
@@ -104,8 +107,8 @@ static void apply_impl(
         apply_kernel<stop::RelResidualMaxIter<ValueType>>
             <<<nbatch, default_block_size, shared_size>>>(
                 opts.max_its, opts.rel_residual_tol, opts.relax_factor, logger,
-                // BatchJacobi<ValueType>(), a, left, right, b, x);
-                BatchJacobi<ValueType>(), a, left.values, right.values, b, x);
+                BatchJacobi<ValueType>(), a, left.values, right.values, mv_conf,
+                as_cuda_type(b.values), as_cuda_type(x.values));
     } else {
         GKO_NOT_IMPLEMENTED;
     }

@@ -32,15 +32,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 template <typename StopType, typename PrecType, typename LogType,
           typename MatrixType, typename ValueType>
-__global__ void apply_kernel(
-    const int max_iter, const gko::remove_complex<ValueType> rel_tol,
-    const gko::remove_complex<ValueType> relax_factor, LogType logger,
-    PrecType prec, const MatrixType mat,
-    // const gko::batch_dense::UniformBatch<const ValueType> left_scale,
-    // const gko::batch_dense::UniformBatch<const ValueType> right_scale,
-    const ValueType *const left_scale, const ValueType *const right_scale,
-    const gko::batch_dense::UniformBatch<ValueType> b,
-    const gko::batch_dense::UniformBatch<ValueType> x)
+__global__ void apply_kernel(const int max_iter,
+                             const gko::remove_complex<ValueType> rel_tol,
+                             const gko::remove_complex<ValueType> relax_factor,
+                             LogType logger, PrecType prec,
+                             const MatrixType mat,
+                             const ValueType *const __restrict__ left_scale,
+                             const ValueType *const __restrict__ right_scale,
+                             const gko::batch_dense::BatchEntryConfig mv_conf,
+                             ValueType *const __restrict__ b,
+                             ValueType *const __restrict__ x)
 {
     static_assert(
         std::is_same<typename MatrixType::value_type, ValueType>::value,
@@ -51,11 +52,9 @@ __global__ void apply_kernel(
     using real_type = typename gko::remove_complex<ValueType>;
     const auto nbatch = mat.num_batch;
     const auto nrows = mat.num_rows;
-    const auto nrhs = b.num_rhs;
-    const auto mv_conf =
-        gko::batch_dense::BatchEntryConfig{b.stride, nrows, nrhs};
+    const auto nrhs = mv_conf.ncols;
     const auto norm_conf =
-        gko::batch_dense::BatchEntryConfig{b.stride, 1, nrhs};
+        gko::batch_dense::BatchEntryConfig{mv_conf.stride, 1, nrhs};
 
     for (size_type ibatch = blockIdx.x; ibatch < nbatch; ibatch += gridDim.x) {
 #if GKO_CUDA_BATCH_USE_DYNAMIC_SHARED_MEM
@@ -84,27 +83,12 @@ __global__ void apply_kernel(
 
         uint32 converged = 0;
 
-#if 0
-        if (left_scale.values) {
-            // const auto a_b = gko::batch::batch_entry(mat, ibatch);
-			// const auto left_b = gko::batch::batch_entry(left_scale, ibatch);
-			// const auto right_b = gko::batch::batch_entry(right_scale, ibatch);
-            //const auto b_b = gko::batch::batch_entry(b, ibatch);
-            //batch_scale(left_b, right_b, a_b);
-			batch_scale(left_scale.values + ibatch*nrows,
-				right_scale.values + ibatch*nrows, mat, ibatch);
-			const auto b_b = b.values + ibatch*nrhs*nrows;
-            //batch_scale(left_b, b_b);
-            batch_scale(left_scale.values + ibatch*nrows, b_b, mv_conf);
-        }
-#else
         if (left_scale) {
             batch_scale(left_scale + ibatch * nrows,
                         right_scale + ibatch * nrows, mat, ibatch);
-            const auto b_b = b.values + ibatch * mv_conf.stride * mv_conf.nrows;
+            const auto b_b = b + ibatch * mv_conf.stride * mv_conf.nrows;
             batch_scale(left_scale + ibatch * nrows, b_b, mv_conf);
         }
-#endif
 
         const auto b_b = gko::batch::batch_pointer(b, ibatch, mv_conf);
         ValueType *const __restrict__ x_b =
@@ -166,15 +150,8 @@ __global__ void apply_kernel(
             iter++;
         }
 
-#if 0
-        if (left_scale.values) {
-            //batch_scale(right_b, x_b);
-            batch_scale(right_scale.values+ibatch*nrows, x_b, mv_conf);
-        }
-#else
         if (left_scale) {
             batch_scale(right_scale + ibatch * nrows, x_b, mv_conf);
         }
-#endif
     }
 }
