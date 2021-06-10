@@ -1088,6 +1088,8 @@ __global__ void apply_kernel(
         __syncthreads();
 
         // stopping criterion object
+        const auto mv_conf =
+            gko::batch_dense::BatchEntryConfig{b.stride, nrows, nrhs};
         StopType stop(nrhs, max_iter, tol, rhs_norms_shared_entry.values,
                       converged);
 
@@ -1102,7 +1104,7 @@ __global__ void apply_kernel(
 
             bool all_converged =
                 stop.check_converged(outer_iter, res_norms_shared_entry.values,
-                                     {NULL, 0, 0, 0}, converged);
+                                     NULL, mv_conf, converged);
 
 
             logger.log_iteration(ibatch, outer_iter,

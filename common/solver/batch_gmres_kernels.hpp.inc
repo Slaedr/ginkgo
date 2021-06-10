@@ -601,6 +601,8 @@ __global__ void apply_kernel(
 
 
         // stopping criterion object
+        const auto mv_conf =
+            gko::batch_dense::BatchEntryConfig{b.stride, nrows, nrhs};
         StopType stop(nrhs, max_iter, tol, rhs_norms_shared_entry.values,
                       converged);
 
@@ -614,8 +616,8 @@ __global__ void apply_kernel(
 
 
             bool all_converged = stop.check_converged(
-                outer_iter * (restart + 1), res_norms_shared_entry.values,
-                {NULL, 0, 0, 0}, converged);
+                outer_iter * (restart + 1), res_norms_shared_entry.values, NULL,
+                mv_conf, converged);
 
 
             logger.log_iteration(ibatch, outer_iter * (restart + 1),
@@ -758,7 +760,7 @@ __global__ void apply_kernel(
 
                 all_converged = stop.check_converged(
                     outer_iter * (restart + 1) + inner_iter + 1,
-                    res_norms_shared_entry.values, {NULL, 0, 0, 0}, converged);
+                    res_norms_shared_entry.values, NULL, mv_conf, converged);
 
 
                 const uint32 converged_recent = converged_prev ^ converged;

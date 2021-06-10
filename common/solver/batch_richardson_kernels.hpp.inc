@@ -102,7 +102,7 @@ __global__ void apply_kernel(const int max_iter,
         compute_norm2<ValueType>(mv_conf, residual, norms);
         copy(norm_conf, norms, init_res_norm);
 
-        StopType stop(nrhs, max_iter, rel_tol, converged, init_res_norm);
+        StopType stop(nrhs, max_iter, rel_tol, init_res_norm, converged);
 
         int iter = 0;
         while (true) {

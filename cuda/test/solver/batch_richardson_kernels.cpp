@@ -537,6 +537,7 @@ TEST(BatchRich, CanSolveWithoutScaling)
     res->compute_norm2(rnorm.get());
     auto ref_rnorm = RDense::create(refexec);
     ref_rnorm->copy_from(rnorm.get());
+    ASSERT_NO_THROW(exec->synchronize());
     auto r_iter_array = logger->get_num_iterations();
     auto r_logged_res = logger->get_residual_norm();
     ASSERT_NO_THROW(exec->synchronize());
@@ -545,9 +546,12 @@ TEST(BatchRich, CanSolveWithoutScaling)
             ASSERT_LE(ref_rnorm->at(ib, 0, j) / ref_bnorm->at(ib, 0, j), tol);
             ASSERT_GT(r_iter_array.get_const_data()[ib * nrhs + j], 0);
             ASSERT_LE(r_iter_array.get_const_data()[ib * nrhs + j], maxits);
+            ASSERT_LE((r_logged_res->at(ib, 0, j) - ref_rnorm->at(ib, 0, j)) /
+                          ref_rnorm->at(ib, 0, j),
+                      10 * r<T>::value);
         }
     }
-    GKO_ASSERT_BATCH_MTX_NEAR(r_logged_res, ref_rnorm, r<T>::value);
+    GKO_ASSERT_BATCH_MTX_NEAR(r_logged_res, ref_rnorm, 10 * r<T>::value);
 }
 
 }  // namespace

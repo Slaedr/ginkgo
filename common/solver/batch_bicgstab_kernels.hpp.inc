@@ -428,6 +428,8 @@ __global__ void apply_kernel(
 
 
         // stopping criterion object
+        const auto mv_conf =
+            gko::batch_dense::BatchEntryConfig{b.stride, nrows, nrhs};
         StopType stop(nrhs, max_iter, tol, rhs_norms_shared_entry.values,
                       converged);
 
@@ -437,9 +439,8 @@ __global__ void apply_kernel(
         while (1) {
             ++iter;
 
-            bool all_converged =
-                stop.check_converged(iter, res_norms_shared_entry.values,
-                                     {NULL, 0, 0, 0}, converged);
+            bool all_converged = stop.check_converged(
+                iter, res_norms_shared_entry.values, NULL, mv_conf, converged);
 
 
             logger.log_iteration(ibatch, iter, res_norms_shared_entry.values,
@@ -509,9 +510,8 @@ __global__ void apply_kernel(
 
             const uint32 converged_prev = converged;
 
-            all_converged =
-                stop.check_converged(iter, res_norms_shared_entry.values,
-                                     {NULL, 0, 0, 0}, converged);
+            all_converged = stop.check_converged(
+                iter, res_norms_shared_entry.values, NULL, mv_conf, converged);
 
             // update x for the sytems (rhs) which converge at this point...  x
             // = x + alpha*p_hat
