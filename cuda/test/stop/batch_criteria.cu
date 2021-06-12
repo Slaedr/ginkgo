@@ -78,6 +78,7 @@ __global__ void conv_check(const int nrhs, const int nrows,
     BatchStop bstop(nrhs, maxits, tol, bnorms, *converged);
     *all_conv = bstop.check_converged(iter, res_norms, residual,
                                       {nrhs, nrows, nrhs}, *converged);
+    __syncthreads();
 }
 
 
@@ -147,7 +148,7 @@ protected:
                     h_r[i * nrhs + j] = 100 * tol;
                 }
                 for (size_t j = 0; j < conv_col.size(); j++) {
-                    h_r[i * nrhs + conv_col[j]] = tol / 100;
+                    h_r[i * nrhs + conv_col[j]] = tol / 10000;
                 }
             }
             resm = h_resm;

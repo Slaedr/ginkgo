@@ -158,21 +158,14 @@ __device__ __forceinline__ void compute_norm2(
     const gko::batch_dense::BatchEntryConfig conf, const ValueType *const x,
     remove_complex<ValueType> *const result)
 {
-    for (int j = threadIdx.x; j < conf.ncols; j += blockDim.x) {
-        result[j] = zero<remove_complex<ValueType>>();
-    }
-    __syncthreads();
-    // TODO: replace this with a parallel reduce below
-    if (threadIdx.x == 0) {
-        for (int i = 0; i < conf.nrows; i++) {
-            for (int j = 0; j < conf.ncols; ++j) {
-                result[j] += squared_norm(x[i * conf.ncols + j]);
-            }
+    for (int c = threadIdx.x; c < conf.ncols; c += blockDim.x) {
+        result[c] = zero<remove_complex<ValueType>>();
+
+        for (int r = 0; r < conf.nrows; r++) {
+            result[c] += squared_norm(x[r * conf.stride + c]);
         }
-    }
-    __syncthreads();
-    for (int j = threadIdx.x; j < conf.ncols; j += blockDim.x) {
-        result[j] = sqrt(result[j]);
+
+        result[c] = sqrt(result[c]);
     }
 }
 

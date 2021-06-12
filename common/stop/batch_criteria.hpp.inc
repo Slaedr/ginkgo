@@ -104,6 +104,7 @@ public:
         } else {
             __shared__ real_type norms[batch_config<ValueType>::max_num_rhs];
             compute_norm2<ValueType>(res_conf, residual_vec, norms);
+            __syncthreads();
             check_norms(norms, converged);
         }
 
@@ -205,6 +206,7 @@ public:
             //                   norms, static_cast<size_type>(nrhs), 1, nrhs});
             // __syncthreads();
             compute_norm2<ValueType>(res_conf, residual_vec, norms);
+            __syncthreads();
             check_norms(norms, converged);
         }
 
