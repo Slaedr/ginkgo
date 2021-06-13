@@ -148,7 +148,7 @@ protected:
                     h_r[i * nrhs + j] = 100 * tol;
                 }
                 for (size_t j = 0; j < conv_col.size(); j++) {
-                    h_r[i * nrhs + conv_col[j]] = tol / 10000;
+                    h_r[i * nrhs + conv_col[j]] = tol / 100;
                 }
             }
             resm = h_resm;

@@ -114,7 +114,7 @@ void test_solve_without_scaling(
     auto r_logged_res = logger->get_residual_norm();
     // std::cout << "Converged iterations:\n";
     for (size_t ib = 0; ib < nbatch; ib++) {
-        std::cout << "Batch " << ib << ": ";
+        // std::cout << "Batch " << ib << ": ";
         for (int j = 0; j < nrhs; j++) {
             // std::cout << r_iter_array.get_const_data()[ib*nrhs + j] << ", ";
             ASSERT_GT(r_iter_array.get_const_data()[ib * nrhs + j], 0);

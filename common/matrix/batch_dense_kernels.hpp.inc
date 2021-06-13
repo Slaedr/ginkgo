@@ -212,7 +212,7 @@ __device__ __forceinline__ void batch_scale(
          iz += blockDim.x) {
         const int row = iz / a_conf.ncols;
         const int col = iz % a_conf.ncols;
-        a[row * a_conf.ncols + col] *= scale_vec[row];
+        a[row * a_conf.stride + col] *= scale_vec[row];
     }
 }
 
@@ -300,6 +300,25 @@ __device__ __forceinline__ void compute_norm2(
         }
 
         result.values[c] = sqrt(result.values[c]);
+    }
+    // TODO: put a parallel reduce here
+}
+
+template <typename ValueType>
+__device__ __forceinline__ void compute_norm2(
+    const gko::batch_dense::BatchEntryConfig &conf, const ValueType *const x,
+    remove_complex<ValueType> *const result, const uint32 &converged)
+{
+    for (int c = threadIdx.x; c < conf.ncols; c += blockDim.x) {
+        const uint32 conv = converged & (1 << c);
+        if (conv) {
+            continue;
+        }
+        result[c] = zero<remove_complex<ValueType>>();
+        for (int r = 0; r < conf.nrows; r++) {
+            result[c] += squared_norm(x[r * conf.stride + c]);
+        }
+        result[c] = sqrt(result[c]);
     }
     // TODO: put a parallel reduce here
 }
@@ -406,6 +425,24 @@ __device__ __forceinline__ void compute_dot_product(
 }
 
 template <typename ValueType>
+__device__ __forceinline__ void compute_dot_product(
+    const gko::batch_dense::BatchEntryConfig conf, const ValueType *const x,
+    const ValueType *const y, ValueType *const result, const uint32 &converged)
+{
+    for (int c = threadIdx.x; c < conf.ncols; c += blockDim.x) {
+        const uint32 conv = converged & (1 << c);
+        if (conv) {
+            continue;
+        }
+        result[c] = zero<ValueType>();
+        for (int r = 0; r < conf.nrows; r++) {
+            result[c] += conj(x[r * conf.stride + c]) * y[r * conf.stride + c];
+        }
+    }
+    // TODO: put a parallel reduce here
+}
+
+template <typename ValueType>
 __device__ __forceinline__ void copy(
     const gko::batch_dense::BatchEntryConfig &conf, const ValueType *const in,
     ValueType *const out)
@@ -414,5 +451,21 @@ __device__ __forceinline__ void copy(
         const int i = iz / conf.ncols;
         const int j = iz % conf.ncols;
         out[i * conf.ncols + j] = in[i * conf.ncols + j];
+    }
+}
+
+template <typename ValueType>
+__device__ __forceinline__ void copy(
+    const gko::batch_dense::BatchEntryConfig &conf, const ValueType *const src,
+    ValueType *const dest, const uint32 &converged)
+{
+    for (int li = threadIdx.x; li < conf.ncols * conf.nrows; li += blockDim.x) {
+        const int r = li / conf.ncols;
+        const int c = li % conf.ncols;
+        const uint32 conv = converged & (1 << c);
+        if (conv) {
+            continue;
+        }
+        dest[r * conf.stride + c] = src[r * conf.stride + c];
     }
 }

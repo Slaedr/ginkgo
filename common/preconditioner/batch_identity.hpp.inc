@@ -69,6 +69,11 @@ public:
         const gko::batch_csr::BatchEntry<const ValueType> &mat, ValueType *)
     {}
 
+    __device__ __forceinline__ void generate(
+        const gko::batch_csr::UniformBatch<const ValueType> &, size_type,
+        ValueType *)
+    {}
+
     __device__ __forceinline__ void apply(
         const gko::batch_dense::BatchEntry<const ValueType> &r,
         const gko::batch_dense::BatchEntry<ValueType> &z) const
@@ -76,10 +81,20 @@ public:
         for (int li = threadIdx.x; li < r.num_rows * r.num_rhs;
              li += blockDim.x) {
             const int row = li / r.num_rhs;
-
             const int col = li % r.num_rhs;
-
             z.values[row * z.stride + col] = r.values[row * r.stride + col];
+        }
+    }
+
+    __device__ __forceinline__ void apply(
+        const gko::batch_dense::BatchEntryConfig &conf,
+        const ValueType *const r, ValueType *const z) const
+    {
+        for (int i = threadIdx.x; i < conf.nrows * conf.ncols;
+             i += blockDim.x) {
+            const int row = i / conf.ncols;
+            const int col = i % conf.ncols;
+            z[row * conf.stride + col] = r[row * conf.stride + col];
         }
     }
 };

@@ -127,7 +127,8 @@ public:
              i += blockDim.x) {
             const int row = i / conf.ncols;
             const int col = i % conf.ncols;
-            z[row * conf.ncols + col] = work_[row] * r[row * conf.ncols + col];
+            z[row * conf.stride + col] =
+                work_[row] * r[row * conf.stride + col];
         }
     }
 
