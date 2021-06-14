@@ -75,6 +75,13 @@ template <typename T>
 using BatchBicgstabOptions =
     gko::kernels::batch_bicgstab::BatchBicgstabOptions<T>;
 
+#define BATCH_BICGSTAB_KERNEL_LAUNCH(_stoppertype, _prectype)                \
+    apply_kernel<stop::_stoppertype<ValueType>>                              \
+        <<<nbatch, default_block_size, shared_size>>>(                       \
+            opts.max_its, opts.residual_tol, logger, _prectype<ValueType>(), \
+            a, left.values, right.values, {b.stride, b.num_rows, b.num_rhs}, \
+            b.values, x.values)
+
 template <typename BatchMatrixType, typename LogType, typename ValueType>
 static void apply_impl(
     std::shared_ptr<const CudaExecutor> exec,
@@ -99,15 +106,9 @@ static void apply_impl(
             0;
 #endif
         if (opts.tol_type == gko::stop::batch::ToleranceType::absolute) {
-            apply_kernel<stop::AbsResidualMaxIter<ValueType>>
-                <<<nbatch, default_block_size, shared_size>>>(
-                    opts.max_its, opts.residual_tol, logger,
-                    BatchIdentity<ValueType>(), a, left, right, b, x);
+            BATCH_BICGSTAB_KERNEL_LAUNCH(AbsResidualMaxIter, BatchIdentity);
         } else {
-            apply_kernel<stop::RelResidualMaxIter<ValueType>>
-                <<<nbatch, default_block_size, shared_size>>>(
-                    opts.max_its, opts.residual_tol, logger,
-                    BatchIdentity<ValueType>(), a, left, right, b, x);
+            BATCH_BICGSTAB_KERNEL_LAUNCH(RelResidualMaxIter, BatchIdentity);
         }
 
 
@@ -124,15 +125,9 @@ static void apply_impl(
 #endif
 
         if (opts.tol_type == gko::stop::batch::ToleranceType::absolute) {
-            apply_kernel<stop::AbsResidualMaxIter<ValueType>>
-                <<<nbatch, default_block_size, shared_size>>>(
-                    opts.max_its, opts.residual_tol, logger,
-                    BatchJacobi<ValueType>(), a, left, right, b, x);
+            BATCH_BICGSTAB_KERNEL_LAUNCH(AbsResidualMaxIter, BatchJacobi);
         } else {
-            apply_kernel<stop::RelResidualMaxIter<ValueType>>
-                <<<nbatch, default_block_size, shared_size>>>(
-                    opts.max_its, opts.residual_tol, logger,
-                    BatchJacobi<ValueType>(), a, left, right, b, x);
+            BATCH_BICGSTAB_KERNEL_LAUNCH(RelResidualMaxIter, BatchJacobi);
         }
 
 
