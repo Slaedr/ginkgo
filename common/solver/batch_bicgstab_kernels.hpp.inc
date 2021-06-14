@@ -230,9 +230,11 @@ __global__ void apply_kernel(const int max_iter,
     const auto norm_conf =
         gko::batch_dense::BatchEntryConfig{mv_conf.stride, 1, mv_conf.ncols};
 
-    assert(batch_config<ValueType>::max_num_rhs >= nrhs);
+    constexpr int max_nrhs = batch_config<ValueType>::max_num_rhs;
+    assert(max_rhs >= nrhs);
 
     for (size_type ibatch = blockIdx.x; ibatch < nbatch; ibatch += gridDim.x) {
+#if GKO_CUDA_BATCH_USE_DYNAMIC_SHARED_MEM
         extern __shared__ char local_mem_sh[];
         ValueType *const r_sh = reinterpret_cast<ValueType *>(local_mem_sh);
         ValueType *const r_hat_sh = r_sh + nrows * nrhs;
@@ -250,9 +252,37 @@ __global__ void apply_kernel(const int max_iter,
         ValueType *const omega_sh = rho_new_sh + nrhs;
         ValueType *const alpha_sh = omega_sh + nrhs;
         ValueType *const temp_sh = alpha_sh + nrhs;
-        real_type *const norms_rhs_sh =
-            reinterpret_cast<real_type *>(temp_sh + nrhs);
-        real_type *const norms_res_sh = norms_rhs_sh + nrhs;
+        // real_type *const norms_rhs_sh =
+        //    reinterpret_cast<real_type *>(temp_sh + nrhs);
+        // real_type *const norms_res_sh = norms_rhs_sh + nrhs;
+#else
+        constexpr int max_nrows = batch_config<ValueType>::max_num_rows;
+        if (max_nrows * max_nrhs < nrows * nrhs) {
+            if (blockIdx.x == 0 && threadIdx.x == 0) {
+                printf(" Static vector size not enough!\n");
+            }
+            return;
+        }
+        __shared__ ValueType r_sh[max_nrows * max_nrhs];
+        __shared__ ValueType r_hat_sh[max_nrows * max_nrhs];
+        __shared__ ValueType p_sh[max_nrows * max_nrhs];
+        __shared__ ValueType p_hat_sh[max_nrows * max_nrhs];
+        __shared__ ValueType v_sh[max_nrows * max_nrhs];
+        __shared__ ValueType s_sh[max_nrows * max_nrhs];
+        __shared__ ValueType s_hat_sh[max_nrows * max_nrhs];
+        __shared__ ValueType t_sh[max_nrows * max_nrhs];
+        __shared__ ValueType x_sh[max_nrows * max_nrhs];
+        __shared__ ValueType prec_work_sh[PrecType::work_size + 2];
+        __shared__ ValueType rho_old_sh[max_nrhs];
+        __shared__ ValueType rho_new_sh[max_nrhs];
+        __shared__ ValueType omega_sh[max_nrhs];
+        __shared__ ValueType alpha_sh[max_nrhs];
+        __shared__ ValueType temp_sh[max_nrhs];
+        __shared__ real_type norms_rhs_sh[max_nrhs];
+        __shared__ real_type norms_res_sh[max_nrhs];
+#endif
+        __shared__ real_type norms_rhs_sh[max_nrhs];
+        __shared__ real_type norms_res_sh[max_nrhs];
 
         uint32 converged = 0;
 
