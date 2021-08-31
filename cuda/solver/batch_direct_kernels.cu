@@ -48,6 +48,8 @@ constexpr int default_block_size = 256;
 #include "common/cuda_hip/solver/batch_direct_kernels.hpp.inc"
 
 
+#ifndef NDEBUG
+
 namespace {
 
 void check_batch(std::shared_ptr<const CudaExecutor> exec, const int nbatch,
@@ -72,6 +74,8 @@ void check_batch(std::shared_ptr<const CudaExecutor> exec, const int nbatch,
 }
 
 }  // namespace
+
+#endif
 
 
 template <typename ValueType>

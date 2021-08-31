@@ -78,12 +78,11 @@ template <typename T>
 using BatchBicgstabOptions =
     gko::kernels::batch_bicgstab::BatchBicgstabOptions<T>;
 
-#define BATCH_BICGSTAB_KERNEL_LAUNCH(_stoppertype, _prectype)         \
-    apply_kernel<stop::_stoppertype<ValueType>>                       \
-        <<<nbatch, default_block_size, shared_size>>>(                \
-            shared_gap, opts.max_its, opts.residual_tol, logger,      \
-            _prectype<ValueType>(), a, b.stride, b.num_rhs, b.values, \
-            x.values)
+#define BATCH_BICGSTAB_KERNEL_LAUNCH(_stoppertype, _prectype)    \
+    apply_kernel<stop::_stoppertype<ValueType>>                  \
+        <<<nbatch, default_block_size, shared_size>>>(           \
+            shared_gap, opts.max_its, opts.residual_tol, logger, \
+            _prectype<ValueType>(), a, b.values, x.values)
 
 template <typename BatchMatrixType, typename LogType, typename ValueType>
 static void apply_impl(
