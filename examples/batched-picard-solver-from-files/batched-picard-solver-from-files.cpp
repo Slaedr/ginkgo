@@ -131,10 +131,12 @@ int main(int argc, char* argv[])
     // open file to write out timing data
     std::cout << "Writing to " << out_file << std::endl;
     std::ofstream outfile(out_file);
-    outfile << " processor \"case name\" \"solver type\" \"matrix format\" "
+    outfile << "processor \"case name\" \"solver type\" \"matrix format\" "
             << "\"tolerance type\" \"batch size\" \"solve time (s)\"\n";
 
     const size_type num_total_systems = num_systems * num_duplications;
+    std::cout << "Total number of systems = " << num_total_systems << std::endl;
+    std::cout << num_picard << " Picard iterations.\n";
     double avg_total_time = 0.0;
     std::vector<double> total_times(nrepeats, 0.0);
     for (int irpt = 0; irpt < nrepeats; irpt++) {
@@ -211,54 +213,6 @@ int main(int argc, char* argv[])
             // logger before
             //  the next solve using the same solver object.
             solver->remove_logger(logger.get());
-
-            // @sect3{Check result}
-            // Compute norms of RHS and final residual to check the result
-            // auto b_norm =
-            // gko::batch_initialize<real_vec_type>(num_total_systems,
-            // {0.0},
-            //                                                   exec->get_master());
-            // b->compute_norm2(lend(b_norm));
-            //// we need constants on the device
-            // auto one = gko::batch_initialize<vec_type>(num_total_systems,
-            // {1.0}, exec); auto neg_one =
-            //    gko::batch_initialize<vec_type>(num_total_systems, {-1.0},
-            //    exec);
-            //// allocate and compute the residual
-            // auto res = vec_type::create(exec);
-            // res->copy_from(lend(b));
-            // A->apply(lend(one), lend(x), lend(neg_one), lend(res));
-            //// allocate and compute residual norm on the device
-            // auto res_norm = gko::batch_initialize<real_vec_type>(
-            //    num_total_systems, {0.0}, exec->get_master());
-            // res->compute_norm2(lend(res_norm));
-
-            // std::cout << "Residual norm sqrt(r^T r):\n";
-            //// "unbatch" converts a batch object into a vector of objects
-            /// of
-            /// the /   corresponding single type, eg. BatchDense -->
-            /// vector<Dense>.
-            // auto unb_res = res_norm->unbatch();
-            // auto unb_bnorm = b_norm->unbatch();
-            // for (size_type i = 0; i < num_total_systems; ++i) {
-            //    std::cout << " System no. "
-            //              << i
-            //              //<< ": residual norm = " << unb_res[i]->at(0,
-            //              0)
-            //              //<< ", internal residual norm = "
-            //              //<< logger->get_residual_norm()->at(i, 0, 0)
-            //              << ", iterations = "
-            //              <<
-            //              logger->get_num_iterations().get_const_data()[i]
-            //              << std::endl;
-            //     const real_type relresnorm =
-            //        unb_res[i]->at(0, 0) / unb_bnorm[i]->at(0, 0);
-            //     if (!(relresnorm <= reduction_factor)) {
-            //        std::cout << "System " << i << " converged only to "
-            //        << relresnorm
-            //                  << " relative residual." << std::endl;
-            //    }
-            //}
 
             auto time_span =
                 std::chrono::duration_cast<std::chrono::duration<double>>(t2 -
