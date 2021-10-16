@@ -132,13 +132,16 @@ int main(int argc, char* argv[])
     std::cout << "Writing to " << out_file << std::endl;
     std::ofstream outfile(out_file);
     outfile << "processor \"case name\" \"solver type\" \"matrix format\" "
-            << "\"tolerance type\" \"batch size\" \"solve time (s)\"\n";
+            << "\"tolerance type\" \"batch size\" iterations  "
+            << "\"solve time (s)\"\n";
 
     const size_type num_total_systems = num_systems * num_duplications;
     std::cout << "Total number of systems = " << num_total_systems << std::endl;
     std::cout << num_picard << " Picard iterations.\n";
     double avg_total_time = 0.0;
+    int avg_total_iters = 0;
     std::vector<double> total_times(nrepeats, 0.0);
+    std::vector<int> total_iters(nrepeats, 0);
     for (int irpt = 0; irpt < nrepeats; irpt++) {
         for (int ipic = 0; ipic < num_picard; ipic++) {
             auto data = std::vector<gko::matrix_data<value_type>>(num_systems);
@@ -217,23 +220,23 @@ int main(int argc, char* argv[])
             auto time_span =
                 std::chrono::duration_cast<std::chrono::duration<double>>(t2 -
                                                                           t1);
-            // std::cout << "Solve " << ipic << " with " <<
-            // num_total_systems
-            //          << " total systems "
-            //          << " took " << time_span.count() << " seconds."
-            //          << std::endl;
             total_times[irpt] += time_span.count();
+            total_iters[irpt] +=
+                logger->get_num_iterations().get_const_data()[0];
         }
     }
 
     for (int irpt = 0; irpt < nrepeats; irpt++) {
         avg_total_time += total_times[irpt];
+        avg_total_iters += total_iters[irpt];
     }
     avg_total_time /= nrepeats;
+    const double davgiters = static_cast<double>(avg_total_iters) / nrepeats;
+    avg_total_iters = static_cast<int>(davgiters);
 
     outfile << executor_string << " " << problem_descr_str
             << " bicgstab ELL absolute " << num_total_systems << " "
-            << avg_total_time << "\n";
+            << avg_total_iters << " " << avg_total_time << "\n";
 
     outfile.close();
 
