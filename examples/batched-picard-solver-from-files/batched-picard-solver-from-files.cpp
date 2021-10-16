@@ -109,7 +109,7 @@ int main(int argc, char* argv[])
     // Number of linear systems to read from files.
     const size_type num_systems = argc >= 4 ? std::atoi(argv[3]) : 2;
     // Max number of times to duplicate whatever systems are read from files.
-    const size_type max_duplications = argc >= 5 ? std::atoi(argv[4]) : 100;
+    const size_type num_duplications = argc >= 5 ? std::atoi(argv[4]) : 100;
     const int num_picard = argc >= 6 ? std::atoi(argv[5]) : 2;
     const std::string out_file = argc >= 7 ? argv[6] : "timings.txt";
     // Whether to enable diagonal scaling of the matrices before solving.
@@ -134,157 +134,152 @@ int main(int argc, char* argv[])
     outfile << " processor \"case name\" \"solver type\" \"matrix format\" "
             << "\"tolerance type\" \"batch size\" \"solve time (s)\"\n";
 
-    for (size_type num_duplications = 10; num_duplications <= max_duplications;
-         num_duplications += 10) {
-        const size_type num_total_systems = num_systems * num_duplications;
-        double avg_total_time = 0.0;
-        std::vector<double> total_times(nrepeats, 0.0);
-        for (int irpt = 0; irpt < nrepeats; irpt++) {
-            for (int ipic = 0; ipic < num_picard; ipic++) {
-                auto data =
-                    std::vector<gko::matrix_data<value_type>>(num_systems);
-                std::vector<gko::matrix_data<value_type>> bdata(num_systems);
-                auto scale_data =
-                    std::vector<gko::matrix_data<value_type>>(num_systems);
-                auto xinit_data =
-                    std::vector<gko::matrix_data<value_type>>(num_systems);
-                for (size_type i = 0; i < data.size(); ++i) {
-                    const std::string mat_str = "A.mtx";
-                    const std::string f_base = problem_descr_str + "/p_" +
-                                               std::to_string(ipic) + "/" +
-                                               std::to_string(i) + "/";
-                    std::string fname = f_base + mat_str;
-                    std::ifstream mtx_fd(fname);
-                    data[i] = gko::read_raw<value_type>(mtx_fd);
-                    mtx_fd.close();
-                    std::string bfname = f_base + "b.mtx";
-                    std::ifstream b_fd(bfname);
-                    bdata[i] = gko::read_raw<value_type>(b_fd);
-                    b_fd.close();
+    const size_type num_total_systems = num_systems * num_duplications;
+    double avg_total_time = 0.0;
+    std::vector<double> total_times(nrepeats, 0.0);
+    for (int irpt = 0; irpt < nrepeats; irpt++) {
+        for (int ipic = 0; ipic < num_picard; ipic++) {
+            auto data = std::vector<gko::matrix_data<value_type>>(num_systems);
+            std::vector<gko::matrix_data<value_type>> bdata(num_systems);
+            auto scale_data =
+                std::vector<gko::matrix_data<value_type>>(num_systems);
+            auto xinit_data =
+                std::vector<gko::matrix_data<value_type>>(num_systems);
+            for (size_type i = 0; i < data.size(); ++i) {
+                const std::string mat_str = "A.mtx";
+                const std::string f_base = problem_descr_str + "/p_" +
+                                           std::to_string(ipic) + "/" +
+                                           std::to_string(i) + "/";
+                std::string fname = f_base + mat_str;
+                std::ifstream mtx_fd(fname);
+                data[i] = gko::read_raw<value_type>(mtx_fd);
+                mtx_fd.close();
+                std::string bfname = f_base + "b.mtx";
+                std::ifstream b_fd(bfname);
+                bdata[i] = gko::read_raw<value_type>(b_fd);
+                b_fd.close();
 
-                    std::string xfname = f_base + "x_init.mtx";
-                    std::ifstream x_fd(xfname);
-                    xinit_data[i] = gko::read_raw<value_type>(x_fd);
-                    x_fd.close();
-                    // If necessary, 'scaling vectors' can be provided to
-                    // diagonal-scale
-                    //  a system from the left and the right. For this example,
-                    //  no scaling vectors are provided.
-                    if (batch_scaling == "explicit") {
-                        std::string scale_fname = f_base + "S.mtx";
-                        std::ifstream scale_fd(scale_fname);
-                        scale_data[i] = gko::read_raw<value_type>(scale_fd);
-                    }
+                std::string xfname = f_base + "x_init.mtx";
+                std::ifstream x_fd(xfname);
+                xinit_data[i] = gko::read_raw<value_type>(x_fd);
+                x_fd.close();
+                // If necessary, 'scaling vectors' can be provided to
+                // diagonal-scale
+                //  a system from the left and the right. For this example,
+                //  no scaling vectors are provided.
+                if (batch_scaling == "explicit") {
+                    std::string scale_fname = f_base + "S.mtx";
+                    std::ifstream scale_fd(scale_fname);
+                    scale_data[i] = gko::read_raw<value_type>(scale_fd);
                 }
-                auto single_batch = mtx_type::create(exec);
-                single_batch->read(data);
-                // We can duplicate the batch a few times if we wish.
-                std::shared_ptr<mtx_type> A = mtx_type::create(
-                    exec, num_duplications, single_batch.get());
-                // Create RHS
-                auto temp_b = vec_type::create(exec);
-                temp_b->read(bdata);
-                auto b = vec_type::create(exec, num_duplications, temp_b.get());
-                // Create initial guess as 0 and copy to device
-                auto temp_x = vec_type::create(exec);
-                temp_x->read(xinit_data);
-                auto x = vec_type::create(exec, num_duplications, temp_x.get());
-
-                // @sect3{Batch logger}
-                // Create a logger to obtain the iteration counts and "implicit"
-                // residual
-                //  norms for every system after the solve.
-                std::shared_ptr<const gko::log::BatchConvergence<value_type>>
-                    logger =
-                        gko::log::BatchConvergence<value_type>::create(exec);
-
-                // @sect3{Generate and solve}
-                // Generate the batch solver from the batch matrix
-                auto solver = solver_gen->generate(A);
-
-                // add the logger to the solver
-                solver->add_logger(logger);
-
-                std::chrono::steady_clock::time_point t1 =
-                    std::chrono::steady_clock::now();
-                // Solve the batch system
-                solver->apply(lend(b), lend(x));
-                std::chrono::steady_clock::time_point t2 =
-                    std::chrono::steady_clock::now();
-                // This is not necessary, but one might want to remove the
-                // logger before
-                //  the next solve using the same solver object.
-                solver->remove_logger(logger.get());
-
-                // @sect3{Check result}
-                // Compute norms of RHS and final residual to check the result
-                // auto b_norm =
-                // gko::batch_initialize<real_vec_type>(num_total_systems,
-                // {0.0},
-                //                                                   exec->get_master());
-                // b->compute_norm2(lend(b_norm));
-                //// we need constants on the device
-                // auto one = gko::batch_initialize<vec_type>(num_total_systems,
-                // {1.0}, exec); auto neg_one =
-                //    gko::batch_initialize<vec_type>(num_total_systems, {-1.0},
-                //    exec);
-                //// allocate and compute the residual
-                // auto res = vec_type::create(exec);
-                // res->copy_from(lend(b));
-                // A->apply(lend(one), lend(x), lend(neg_one), lend(res));
-                //// allocate and compute residual norm on the device
-                // auto res_norm = gko::batch_initialize<real_vec_type>(
-                //    num_total_systems, {0.0}, exec->get_master());
-                // res->compute_norm2(lend(res_norm));
-
-                // std::cout << "Residual norm sqrt(r^T r):\n";
-                //// "unbatch" converts a batch object into a vector of objects
-                /// of
-                /// the /   corresponding single type, eg. BatchDense -->
-                /// vector<Dense>.
-                // auto unb_res = res_norm->unbatch();
-                // auto unb_bnorm = b_norm->unbatch();
-                // for (size_type i = 0; i < num_total_systems; ++i) {
-                //    std::cout << " System no. "
-                //              << i
-                //              //<< ": residual norm = " << unb_res[i]->at(0,
-                //              0)
-                //              //<< ", internal residual norm = "
-                //              //<< logger->get_residual_norm()->at(i, 0, 0)
-                //              << ", iterations = "
-                //              <<
-                //              logger->get_num_iterations().get_const_data()[i]
-                //              << std::endl;
-                //     const real_type relresnorm =
-                //        unb_res[i]->at(0, 0) / unb_bnorm[i]->at(0, 0);
-                //     if (!(relresnorm <= reduction_factor)) {
-                //        std::cout << "System " << i << " converged only to "
-                //        << relresnorm
-                //                  << " relative residual." << std::endl;
-                //    }
-                //}
-
-                auto time_span =
-                    std::chrono::duration_cast<std::chrono::duration<double>>(
-                        t2 - t1);
-                // std::cout << "Solve " << ipic << " with " <<
-                // num_total_systems
-                //          << " total systems "
-                //          << " took " << time_span.count() << " seconds."
-                //          << std::endl;
-                total_times[irpt] += time_span.count();
             }
-        }
+            auto single_batch = mtx_type::create(exec);
+            single_batch->read(data);
+            // We can duplicate the batch a few times if we wish.
+            std::shared_ptr<mtx_type> A =
+                mtx_type::create(exec, num_duplications, single_batch.get());
+            // Create RHS
+            auto temp_b = vec_type::create(exec);
+            temp_b->read(bdata);
+            auto b = vec_type::create(exec, num_duplications, temp_b.get());
+            // Create initial guess as 0 and copy to device
+            auto temp_x = vec_type::create(exec);
+            temp_x->read(xinit_data);
+            auto x = vec_type::create(exec, num_duplications, temp_x.get());
 
-        for (int irpt = 0; irpt < nrepeats; irpt++) {
-            avg_total_time += total_times[irpt];
-        }
-        avg_total_time /= nrepeats;
+            // @sect3{Batch logger}
+            // Create a logger to obtain the iteration counts and "implicit"
+            // residual
+            //  norms for every system after the solve.
+            std::shared_ptr<const gko::log::BatchConvergence<value_type>>
+                logger = gko::log::BatchConvergence<value_type>::create(exec);
 
-        outfile << executor_string << " " << problem_descr_str
-                << " bicgstab ELL absolute " << num_total_systems << " "
-                << avg_total_time << "\n";
+            // @sect3{Generate and solve}
+            // Generate the batch solver from the batch matrix
+            auto solver = solver_gen->generate(A);
+
+            // add the logger to the solver
+            solver->add_logger(logger);
+
+            std::chrono::steady_clock::time_point t1 =
+                std::chrono::steady_clock::now();
+            // Solve the batch system
+            solver->apply(lend(b), lend(x));
+            std::chrono::steady_clock::time_point t2 =
+                std::chrono::steady_clock::now();
+            // This is not necessary, but one might want to remove the
+            // logger before
+            //  the next solve using the same solver object.
+            solver->remove_logger(logger.get());
+
+            // @sect3{Check result}
+            // Compute norms of RHS and final residual to check the result
+            // auto b_norm =
+            // gko::batch_initialize<real_vec_type>(num_total_systems,
+            // {0.0},
+            //                                                   exec->get_master());
+            // b->compute_norm2(lend(b_norm));
+            //// we need constants on the device
+            // auto one = gko::batch_initialize<vec_type>(num_total_systems,
+            // {1.0}, exec); auto neg_one =
+            //    gko::batch_initialize<vec_type>(num_total_systems, {-1.0},
+            //    exec);
+            //// allocate and compute the residual
+            // auto res = vec_type::create(exec);
+            // res->copy_from(lend(b));
+            // A->apply(lend(one), lend(x), lend(neg_one), lend(res));
+            //// allocate and compute residual norm on the device
+            // auto res_norm = gko::batch_initialize<real_vec_type>(
+            //    num_total_systems, {0.0}, exec->get_master());
+            // res->compute_norm2(lend(res_norm));
+
+            // std::cout << "Residual norm sqrt(r^T r):\n";
+            //// "unbatch" converts a batch object into a vector of objects
+            /// of
+            /// the /   corresponding single type, eg. BatchDense -->
+            /// vector<Dense>.
+            // auto unb_res = res_norm->unbatch();
+            // auto unb_bnorm = b_norm->unbatch();
+            // for (size_type i = 0; i < num_total_systems; ++i) {
+            //    std::cout << " System no. "
+            //              << i
+            //              //<< ": residual norm = " << unb_res[i]->at(0,
+            //              0)
+            //              //<< ", internal residual norm = "
+            //              //<< logger->get_residual_norm()->at(i, 0, 0)
+            //              << ", iterations = "
+            //              <<
+            //              logger->get_num_iterations().get_const_data()[i]
+            //              << std::endl;
+            //     const real_type relresnorm =
+            //        unb_res[i]->at(0, 0) / unb_bnorm[i]->at(0, 0);
+            //     if (!(relresnorm <= reduction_factor)) {
+            //        std::cout << "System " << i << " converged only to "
+            //        << relresnorm
+            //                  << " relative residual." << std::endl;
+            //    }
+            //}
+
+            auto time_span =
+                std::chrono::duration_cast<std::chrono::duration<double>>(t2 -
+                                                                          t1);
+            // std::cout << "Solve " << ipic << " with " <<
+            // num_total_systems
+            //          << " total systems "
+            //          << " took " << time_span.count() << " seconds."
+            //          << std::endl;
+            total_times[irpt] += time_span.count();
+        }
     }
+
+    for (int irpt = 0; irpt < nrepeats; irpt++) {
+        avg_total_time += total_times[irpt];
+    }
+    avg_total_time /= nrepeats;
+
+    outfile << executor_string << " " << problem_descr_str
+            << " bicgstab ELL absolute " << num_total_systems << " "
+            << avg_total_time << "\n";
 
     outfile.close();
 
