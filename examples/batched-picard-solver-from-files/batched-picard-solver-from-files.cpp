@@ -132,7 +132,7 @@ int main(int argc, char* argv[])
     std::cout << "Writing to " << out_file << std::endl;
     std::ofstream outfile(out_file);
     outfile << "processor \"case name\" \"solver type\" \"matrix format\" "
-            << "\"tolerance type\" \"batch size\" iterations  "
+            << "\"tolerance type\" \"batch size\" repetition iterations  "
             << "\"solve time (s)\"\n";
 
     const size_type num_total_systems = num_systems * num_duplications;
@@ -224,19 +224,20 @@ int main(int argc, char* argv[])
             total_iters[irpt] +=
                 logger->get_num_iterations().get_const_data()[0];
         }
+
+        outfile << executor_string << " " << problem_descr_str
+                << " bicgstab ELL absolute " << num_total_systems << " " << irpt
+                << " " << total_iters[irpt] << " " << total_times[irpt] << "\n";
     }
 
-    for (int irpt = 0; irpt < nrepeats; irpt++) {
-        avg_total_time += total_times[irpt];
-        avg_total_iters += total_iters[irpt];
-    }
-    avg_total_time /= nrepeats;
-    const double davgiters = static_cast<double>(avg_total_iters) / nrepeats;
-    avg_total_iters = static_cast<int>(davgiters);
+    // for (int irpt = 0; irpt < nrepeats; irpt++) {
+    //    avg_total_time += total_times[irpt];
+    //    avg_total_iters += total_iters[irpt];
+    //}
+    // avg_total_time /= nrepeats;
+    // const double davgiters = static_cast<double>(avg_total_iters) / nrepeats;
+    // avg_total_iters = static_cast<int>(davgiters);
 
-    outfile << executor_string << " " << problem_descr_str
-            << " bicgstab ELL absolute " << num_total_systems << " "
-            << avg_total_iters << " " << avg_total_time << "\n";
 
     outfile.close();
 
