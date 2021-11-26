@@ -139,6 +139,7 @@ TYPED_TEST(BatchCg, SolveIsEquivalentToReference)
 {
     using value_type = typename TestFixture::value_type;
     using solver_type = gko::solver::BatchCg<value_type>;
+    using mtx_type = typename TestFixture::Mtx;
     using opts_type = typename TestFixture::Options;
     constexpr bool issingle =
         std::is_same<gko::remove_complex<value_type>, float>::value;
@@ -146,7 +147,7 @@ TYPED_TEST(BatchCg, SolveIsEquivalentToReference)
     const opts_type opts{gko::preconditioner::batch::type::none, 500,
                          solver_restol,
                          gko::stop::batch::ToleranceType::relative};
-    auto r_sys = gko::test::generate_solvable_batch_system<value_type>(
+    auto r_sys = gko::test::generate_solvable_batch_system<mtx_type>(
         this->exec, this->nbatch, 11, 1, true);
     auto r_factory = this->create_factory(this->exec, opts);
     const double iter_tol = 0.01;
@@ -278,11 +279,12 @@ TEST(BatchCg, GoodScalingImprovesConvergence)
 }
 
 
-TEST(BatchCg, CanSolveWithoutScaling)
+TEST(BatchCg, CanSolveCsrWithoutScaling)
 {
     using T = std::complex<float>;
     using RT = typename gko::remove_complex<T>;
     using Solver = gko::solver::BatchCg<T>;
+    using Csr = gko::matrix::BatchCsr<T>;
     const RT tol = 1e-5;
     std::shared_ptr<gko::ReferenceExecutor> refexec =
         gko::ReferenceExecutor::create();
@@ -299,8 +301,9 @@ TEST(BatchCg, CanSolveWithoutScaling)
     const int nrows = 28;
     const size_t nbatch = 3;
     const int nrhs = 1;
-    gko::test::test_solve<Solver>(exec, nbatch, nrows, nrhs, tol, maxits,
-                                  batchcg_factory.get(), 10);
+
+    gko::test::test_solve<Solver, Csr>(exec, nbatch, nrows, nrhs, tol, maxits,
+                                       batchcg_factory.get(), 10);
 }
 
 

@@ -69,8 +69,7 @@ protected:
         sys_1.xex =
             gko::batch_initialize<BDense>(nbatch, {1.0, 3.0, 2.0}, exec);
         sys_1.b = gko::batch_initialize<BDense>(nbatch, {-1.0, 3.0, 1.0}, exec);
-        sys_1.mtx =
-            gko::test::create_poisson1d_batch<value_type>(exec, nrows, nbatch);
+        sys_1.mtx = gko::test::create_poisson1d_batch<Mtx>(exec, nrows, nbatch);
         sys_1.bnorm = gko::batch_initialize<RBDense>(nbatch, {0.0}, exec);
         sys_1.b->compute_norm2(sys_1.bnorm.get());
 
@@ -252,6 +251,7 @@ TEST(BatchRich, CoreCanSolveWithoutScaling)
     using T = std::complex<float>;
     using RT = typename gko::remove_complex<T>;
     using Solver = gko::solver::BatchRichardson<T>;
+    using Mtx = gko::matrix::BatchCsr<T, int>;
     const RT tol = 200 * std::numeric_limits<RT>::epsilon();
     std::shared_ptr<gko::ReferenceExecutor> exec =
         gko::ReferenceExecutor::create();
@@ -266,8 +266,8 @@ TEST(BatchRich, CoreCanSolveWithoutScaling)
     const int nrows = 42;
     const size_t nbatch = 3;
     const int nrhs = 1;
-    gko::test::test_solve<Solver>(exec, nbatch, nrows, nrhs, tol, maxits,
-                                  batchrich_factory.get());
+    gko::test::test_solve<Solver, Mtx>(exec, nbatch, nrows, nrhs, tol, maxits,
+                                       batchrich_factory.get());
 }
 
 
@@ -275,6 +275,7 @@ TEST(BatchRich, CoreCanSolveWithScaling)
 {
     using T = double;
     using RT = typename gko::remove_complex<T>;
+    using Mtx = gko::matrix::BatchCsr<T, int>;
     using Solver = gko::solver::BatchRichardson<T>;
     const RT tol = 10000 * std::numeric_limits<RT>::epsilon();
     const int maxits = 10000;
@@ -291,8 +292,9 @@ TEST(BatchRich, CoreCanSolveWithScaling)
     const size_t nbatch = 3;
     const int nrhs = 1;
 
-    gko::test::test_solve<Solver>(exec, nbatch, nrows, nrhs, 20 * tol, maxits,
-                                  batchrich_factory.get(), 10, true);
+    gko::test::test_solve<Solver, Mtx>(exec, nbatch, nrows, nrhs, 20 * tol,
+                                       maxits, batchrich_factory.get(), 10,
+                                       true);
 }
 
 
