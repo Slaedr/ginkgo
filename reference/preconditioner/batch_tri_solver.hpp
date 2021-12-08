@@ -30,52 +30,59 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ******************************<GINKGO LICENSE>*******************************/
 
-#ifndef GKO_PUBLIC_CORE_PRECONDITIONER_BATCH_PRECONDITIONER_TYPES_HPP_
-#define GKO_PUBLIC_CORE_PRECONDITIONER_BATCH_PRECONDITIONER_TYPES_HPP_
+#ifndef GKO_REFERENCE_PRECONDITIONER_BATCH_TRI_SOLVER_HPP_
+#define GKO_REFERENCE_PRECONDITIONER_BATCH_TRI_SOLVER_HPP_
 
 
-#include <string>
+#include "core/matrix/batch_struct.hpp"
+#include "reference/base/config.hpp"
 
 
 namespace gko {
-namespace preconditioner {
-namespace batch {
+namespace kernels {
+namespace host {
 
 
 /**
- * Types of batch preconditioners available.
+ * Exact triangular solver based on busy-waiting loops.
  */
-enum class type { none, jacobi, ilu0 };
+template <typename ValueType>
+class BatchExactTriSolve final {
+public:
+    using value_type = ValueType;
 
+    static constexpr bool is_batch_tri_solve = true;
 
-/**
- * Types of triangular solvers available.
- */
-enum class trisolve_type { none, direct };
+    /**
+     * The size of the work vector required in case of dynamic allocation.
+     */
+    static int dynamic_work_size(int, int) { return 0; }
 
-
-const char none_str[] = "none";
-const char jacobi_str[] = "jacobi";
-const char ilu0_str[] = "ilu0";
-
-
-/**
- * Get a string name of an available batch preconditioner type.
- */
-inline std::string get_string_of(type prec_type)
-{
-    if (prec_type == type::jacobi) {
-        return jacobi_str;
-    } else if (prec_type == type::ilu0) {
-        return ilu0_str;
-    } else {
-        return none_str;
+    /**
+     * Sets the input and generates the identity preconditioner.(Nothing needs
+     * to be actually generated.)
+     *
+     * @param mat  Matrix for which to build an Ideniity preconditioner.
+     * @param work  A 'work-vector', which is unneecessary here as no
+     * preconditioner values are to be stored.
+     */
+    void generate(const gko::batch_csr::BatchEntry<const ValueType>& mat,
+                  ValueType* const work)
+    {
+        work_ = work;
     }
-}
+
+    void apply(const gko::batch_dense::BatchEntry<const ValueType>& r,
+               const gko::batch_dense::BatchEntry<ValueType>& z) const
+    {}
+
+private:
+    ValueType* work_;
+};
 
 
-}  // namespace batch
-}  // namespace preconditioner
+}  // namespace host
+}  // namespace kernels
 }  // namespace gko
 
-#endif  // GKO_PUBLIC_CORE_PRECONDITIONER_BATCH_PRECONDITIONER_TYPES_HPP_
+#endif  // GKO_REFERENCE_PRECONDITIONER_BATCH_IDENTITY_HPP_
