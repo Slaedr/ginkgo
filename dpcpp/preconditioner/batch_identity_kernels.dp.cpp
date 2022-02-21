@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -46,9 +46,9 @@ namespace dpcpp {
 
 template <typename ValueType>
 void batch_identity_apply(std::shared_ptr<const gko::DpcppExecutor> exec,
-                          const matrix::BatchCsr<ValueType> *const a,
-                          const matrix::BatchDense<ValueType> *const b,
-                          matrix::BatchDense<ValueType> *const x)
+                          const matrix::BatchCsr<ValueType>* const a,
+                          const matrix::BatchDense<ValueType>* const b,
+                          matrix::BatchDense<ValueType>* const x)
     GKO_NOT_IMPLEMENTED;
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_BATCH_IDENTITY_KERNEL);

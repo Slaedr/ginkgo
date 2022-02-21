@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -958,7 +958,7 @@ TYPED_TEST(BatchDense, SquareMatrixIsTransposable)
 {
     using Mtx = typename TestFixture::Mtx;
     auto trans = this->mtx_4->transpose();
-    auto trans_as_batch_dense = static_cast<Mtx *>(trans.get());
+    auto trans_as_batch_dense = static_cast<Mtx*>(trans.get());
 
     auto utb = trans_as_batch_dense->unbatch();
     GKO_ASSERT_MTX_NEAR(utb[0].get(),
@@ -974,7 +974,7 @@ TYPED_TEST(BatchDense, NonSquareMatrixIsTransposable)
 {
     using Mtx = typename TestFixture::Mtx;
     auto trans = this->mtx_5->transpose();
-    auto trans_as_batch_dense = static_cast<Mtx *>(trans.get());
+    auto trans_as_batch_dense = static_cast<Mtx*>(trans.get());
 
     auto utb = trans_as_batch_dense->unbatch();
     GKO_ASSERT_MTX_NEAR(utb[0].get(), l({{1.0, 6.0, 7.0}, {1.5, 1.0, -4.5}}),

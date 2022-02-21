@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -35,7 +35,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "core/matrix/batch_struct.hpp"
 #include "cuda/base/cublas_bindings.hpp"
+#include "cuda/components/reduction.cuh"
 #include "cuda/components/thread_ids.cuh"
+#include "cuda/components/uninitialized_array.hpp"
 
 
 namespace gko {

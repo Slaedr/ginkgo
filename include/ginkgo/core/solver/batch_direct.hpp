@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -92,16 +92,16 @@ public:
     GKO_ENABLE_BUILD_METHOD(Factory);
 
 protected:
-    void apply_impl(const BatchLinOp *b, BatchLinOp *x) const override;
+    void apply_impl(const BatchLinOp* b, BatchLinOp* x) const override;
 
-    void apply_impl(const BatchLinOp *alpha, const BatchLinOp *b,
-                    const BatchLinOp *beta, BatchLinOp *x) const override;
+    void apply_impl(const BatchLinOp* alpha, const BatchLinOp* b,
+                    const BatchLinOp* beta, BatchLinOp* x) const override;
 
     explicit BatchDirect(std::shared_ptr<const Executor> exec)
         : EnableBatchLinOp<BatchDirect>(std::move(exec))
     {}
 
-    explicit BatchDirect(const Factory *factory,
+    explicit BatchDirect(const Factory* factory,
                          std::shared_ptr<const BatchLinOp> system_matrix)
         : EnableBatchLinOp<BatchDirect>(
               factory->get_executor(),

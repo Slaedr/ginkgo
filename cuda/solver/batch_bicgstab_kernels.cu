@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -41,7 +41,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cuda/base/exception.cuh"
 #include "cuda/base/types.hpp"
 #include "cuda/components/cooperative_groups.cuh"
+#include "cuda/components/reduction.cuh"
 #include "cuda/components/thread_ids.cuh"
+#include "cuda/components/uninitialized_array.hpp"
 #include "cuda/matrix/batch_struct.hpp"
 
 
@@ -62,9 +64,6 @@ constexpr int sm_multiplier = 4;
 namespace batch_bicgstab {
 
 
-#include "common/cuda_hip/components/uninitialized_array.hpp.inc"
-// include all depedencies (note: do not remove this comment)
-#include "common/cuda_hip/components/reduction.hpp.inc"
 #include "common/cuda_hip/log/batch_logger.hpp.inc"
 #include "common/cuda_hip/matrix/batch_csr_kernels.hpp.inc"
 #include "common/cuda_hip/matrix/batch_ell_kernels.hpp.inc"
@@ -112,14 +111,12 @@ int get_max_dynamic_shared_memory(std::shared_ptr<const CudaExecutor> exec,
     cudaDeviceGetAttribute(&shmem_per_sm,
                            cudaDevAttrMaxSharedMemoryPerMultiprocessor,
                            exec->get_device_id());
-    printf(" Max shared mem per SM = %d.\n", shmem_per_sm);
     int max_shared_pc =
         100 - static_cast<int>(static_cast<double>(required_cache_storage) /
                                shmem_per_sm * 100);
     if (max_shared_pc <= 0) {
         max_shared_pc = 1;
     }
-    printf(" Max shared pc required = %d.\n", max_shared_pc);
     GKO_ASSERT_NO_CUDA_ERRORS(cudaFuncSetAttribute(
         apply_kernel<StopType, PrecType, LogType, BatchMatrixType, ValueType>,
         cudaFuncAttributePreferredSharedMemoryCarveout, max_shared_pc - 1));
@@ -127,8 +124,6 @@ int get_max_dynamic_shared_memory(std::shared_ptr<const CudaExecutor> exec,
     cudaFuncGetAttributes(
         &funcattr,
         apply_kernel<StopType, PrecType, LogType, BatchMatrixType, ValueType>);
-    printf(" Max dyn. shared memory for batch bcgs = %d.\n",
-           funcattr.maxDynamicSharedSizeBytes);
     return funcattr.maxDynamicSharedSizeBytes;
 }
 
@@ -193,13 +188,6 @@ static void apply_impl(
     auto workspace = gko::Array<ValueType>(
         exec, sconf.gmem_stride_bytes * nbatch / sizeof(ValueType));
     assert(sconf.gmem_stride_bytes % sizeof(ValueType) == 0);
-
-    printf(" Bicgstab: vectors in shared memory = %d\n", sconf.n_shared);
-    if (sconf.prec_shared) {
-        printf(" Bicgstab: precondiioner is in shared memory.\n");
-    }
-    printf(" Bicgstab: vectors in global memory = %d\n", sconf.n_global);
-    printf(" Bicgstab: number of threads per block = %d.\n", block_size);
 
     if (opts.tol_type == gko::stop::batch::ToleranceType::absolute) {
         BATCH_BICGSTAB_KERNEL_LAUNCH(SimpleAbsResidual, PrecType);

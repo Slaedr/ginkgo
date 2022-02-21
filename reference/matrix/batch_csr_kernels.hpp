@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -52,9 +52,9 @@ namespace batch_csr {
  * Assumes the input and output multi-vectors are stored row-major.
  */
 template <typename ValueType>
-inline void spmv_kernel(const gko::batch_csr::BatchEntry<const ValueType> &a,
-                        const gko::batch_dense::BatchEntry<const ValueType> &b,
-                        const gko::batch_dense::BatchEntry<ValueType> &c)
+inline void spmv_kernel(const gko::batch_csr::BatchEntry<const ValueType>& a,
+                        const gko::batch_dense::BatchEntry<const ValueType>& b,
+                        const gko::batch_dense::BatchEntry<ValueType>& c)
 {
     for (int row = 0; row < a.num_rows; ++row) {
         for (int j = 0; j < b.num_rhs; ++j) {
@@ -79,9 +79,9 @@ inline void spmv_kernel(const gko::batch_csr::BatchEntry<const ValueType> &a,
  */
 template <typename ValueType>
 inline void advanced_spmv_kernel(
-    const ValueType alpha, const gko::batch_csr::BatchEntry<const ValueType> &a,
-    const gko::batch_dense::BatchEntry<const ValueType> &b,
-    const ValueType beta, const gko::batch_dense::BatchEntry<ValueType> &c)
+    const ValueType alpha, const gko::batch_csr::BatchEntry<const ValueType>& a,
+    const gko::batch_dense::BatchEntry<const ValueType>& b,
+    const ValueType beta, const gko::batch_dense::BatchEntry<ValueType>& c)
 {
     for (int row = 0; row < a.num_rows; ++row) {
         for (int j = 0; j < c.num_rhs; ++j) {
@@ -106,9 +106,9 @@ inline void advanced_spmv_kernel(
  */
 template <typename ValueType>
 inline void batch_scale(
-    const gko::batch_dense::BatchEntry<const ValueType> &left_scale,
-    const gko::batch_dense::BatchEntry<const ValueType> &right_scale,
-    const gko::batch_csr::BatchEntry<ValueType> &a)
+    const gko::batch_dense::BatchEntry<const ValueType>& left_scale,
+    const gko::batch_dense::BatchEntry<const ValueType>& right_scale,
+    const gko::batch_csr::BatchEntry<ValueType>& a)
 {
     for (int i_row = 0; i_row < a.num_rows; i_row++) {
         const ValueType rowscale = left_scale.values[i_row];
@@ -125,12 +125,12 @@ inline void batch_scale(
 template <typename ValueType>
 inline void pre_diag_scale_system(const size_type batch_id,
                                   const size_type a_batch_stride,
-                                  const int num_rows, ValueType *const a_values,
-                                  const int *const col_idxs,
-                                  const int *const row_ptrs, const int num_rhs,
-                                  const size_type b_stride, ValueType *const b,
-                                  const ValueType *const left_scale,
-                                  const ValueType *const right_scale)
+                                  const int num_rows, ValueType* const a_values,
+                                  const int* const col_idxs,
+                                  const int* const row_ptrs, const int num_rhs,
+                                  const size_type b_stride, ValueType* const b,
+                                  const ValueType* const left_scale,
+                                  const ValueType* const right_scale)
 {
     auto ab = a_values + a_batch_stride * batch_id;
     auto bb = gko::batch::batch_entry_ptr(b, b_stride, num_rows, batch_id);
@@ -153,11 +153,11 @@ inline void pre_diag_scale_system(const size_type batch_id,
 
 template <typename ValueType>
 inline void convert_csr_to_dense(const int num_rows, const int num_cols,
-                                 const int *const row_ptrs,
-                                 const int *const col_idxs,
-                                 const ValueType *const values,
+                                 const int* const row_ptrs,
+                                 const int* const col_idxs,
+                                 const ValueType* const values,
                                  const size_type dense_stride,
-                                 ValueType *const dense_vals)
+                                 ValueType* const dense_vals)
 {
     for (int i_row = 0; i_row < num_rows; i_row++) {
         for (int j = 0; j < num_cols; j++) {

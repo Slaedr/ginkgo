@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -77,11 +77,11 @@ protected:
         this->create_mtx3(mtx3_sorted.get(), mtx3_unsorted.get());
     }
 
-    void create_mtx(Mtx *m)
+    void create_mtx(Mtx* m)
     {
-        value_type *v = m->get_values();
-        index_type *c = m->get_col_idxs();
-        index_type *r = m->get_row_ptrs();
+        value_type* v = m->get_values();
+        index_type* c = m->get_col_idxs();
+        index_type* r = m->get_row_ptrs();
         /*
          * 1   3   2
          * 0   5   0
@@ -106,11 +106,11 @@ protected:
         v[7] = 8.0;
     }
 
-    void create_mtx2(Mtx *m)
+    void create_mtx2(Mtx* m)
     {
-        value_type *v = m->get_values();
-        index_type *c = m->get_col_idxs();
-        index_type *r = m->get_row_ptrs();
+        value_type* v = m->get_values();
+        index_type* c = m->get_col_idxs();
+        index_type* r = m->get_row_ptrs();
         // It keeps an explict zero
         /*
          *  1    3   2
@@ -139,7 +139,7 @@ protected:
         v[9] = -9.0;
     }
 
-    void create_mtx3(Mtx *sorted, Mtx *unsorted)
+    void create_mtx3(Mtx* sorted, Mtx* unsorted)
     {
         auto vals_s = sorted->get_values();
         auto cols_s = sorted->get_col_idxs();
@@ -457,7 +457,7 @@ TYPED_TEST(BatchCsr, CanBeBatchScaled)
         gko::batch_initialize<Vec>(nbatch, {1.0, 2.0, -1.0}, this->exec);
     auto ref_scaled_mtx = Mtx::create(this->exec);
     ref_scaled_mtx->copy_from(mtx.get());
-    value_type *const refvals = ref_scaled_mtx->get_values();
+    value_type* const refvals = ref_scaled_mtx->get_values();
     // clang-format off
     refvals[0] = -2; refvals[1] = 2;
     refvals[2] = -3; refvals[3] = 12; refvals[4] = 3;
@@ -498,7 +498,7 @@ TYPED_TEST(BatchCsr, CanPreScaleSystem)
     right->at(1, 2, 0) = 3.0;
     auto ref_scaled_mtx = Mtx::create(this->exec);
     ref_scaled_mtx->copy_from(mtx.get());
-    value_type *const refvals = ref_scaled_mtx->get_values();
+    value_type* const refvals = ref_scaled_mtx->get_values();
     // clang-format off
     refvals[0] = -2; refvals[1] = 2;
     refvals[2] = -3; refvals[3] = 12; refvals[4] = 1.5;

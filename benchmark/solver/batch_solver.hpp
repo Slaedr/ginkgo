@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -113,6 +113,9 @@ DEFINE_string(
     "Method used to generate the initial guess. Supported values are: "
     "`random`, `rhs`, `0`. `random` uses a random vector, `rhs` uses the right "
     "hand side, and `0 uses a zero vector as the initial guess.");
+
+DEFINE_bool(use_abs_residual, false,
+            "If true, uses absolute residual convergence criterion.");
 
 // This allows to benchmark the overhead of a solver by using the following
 // data: A=[1.0], x=[0.0], b=[nan]. This data can be used to benchmark normal
@@ -292,6 +295,9 @@ std::unique_ptr<gko::BatchLinOpFactory> generate_solver(
     const std::string& description,
     const gko::preconditioner::batch::type prec_type)
 {
+    const auto toltype = FLAGS_use_abs_residual
+                             ? gko::stop::batch::ToleranceType::absolute
+                             : gko::stop::batch::ToleranceType::relative;
     if (description == "richardson") {
         using Solver = gko::solver::BatchRichardson<etype>;
         return Solver::build()
@@ -301,6 +307,7 @@ std::unique_ptr<gko::BatchLinOpFactory> generate_solver(
             .with_preconditioner(prec_type)
             .with_relaxation_factor(static_cast<gko::remove_complex<etype>>(
                 FLAGS_relaxation_factor))
+            .with_tolerance_type(toltype)
             .on(exec);
     } else if (description == "bicgstab") {
         using Solver = gko::solver::BatchBicgstab<etype>;
@@ -310,7 +317,7 @@ std::unique_ptr<gko::BatchLinOpFactory> generate_solver(
             .with_residual_tol(
                 static_cast<gko::remove_complex<etype>>(FLAGS_rel_res_goal))
             .with_preconditioner(prec_type)
-            .with_tolerance_type(gko::stop::batch::ToleranceType::relative)
+            .with_tolerance_type(toltype)
             .on(exec);
     } else if (description == "gmres") {
         using Solver = gko::solver::BatchGmres<etype>;
@@ -319,7 +326,7 @@ std::unique_ptr<gko::BatchLinOpFactory> generate_solver(
             .with_residual_tol(
                 static_cast<gko::remove_complex<etype>>(FLAGS_rel_res_goal))
             .with_preconditioner(prec_type)
-            .with_tolerance_type(gko::stop::batch::ToleranceType::relative)
+            .with_tolerance_type(toltype)
             .with_restart(FLAGS_gmres_restart)
             .on(exec);
     } else if (description == "direct") {
@@ -356,6 +363,11 @@ void solve_system(const std::string& sol_name, const std::string& prec_name,
         add_or_set_member(solver_json, "scaling",
                           rapidjson::StringRef(FLAGS_batch_scaling.c_str()),
                           allocator);
+        add_or_set_member(
+            solver_json, "matrix_format",
+            rapidjson::StringRef(FLAGS_batch_solver_mat_format.c_str()),
+            allocator);
+
         if (FLAGS_detailed && b->get_size().at(0)[1] == 1 && !FLAGS_overhead) {
             add_or_set_member(solver_json, "rhs_norm",
                               rapidjson::Value(rapidjson::kObjectType),
@@ -594,8 +606,6 @@ void solve_system(const std::string& sol_name, const std::string& prec_name,
 int read_data_and_launch_benchmark(int argc, char* argv[],
                                    const bool io_from_std)
 {
-    // Set the default repetitions = 1.
-    FLAGS_repetitions = "1";
     std::string header =
         "A benchmark for measuring performance of Ginkgo's batch solvers.\n";
     std::string format =

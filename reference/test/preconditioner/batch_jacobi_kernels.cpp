@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -68,9 +68,9 @@ protected:
     std::unique_ptr<Mtx> get_matrix()
     {
         auto mat = Mtx::create(exec, nbatch, gko::dim<2>(nrows, nrows), 6);
-        int *const row_ptrs = mat->get_row_ptrs();
-        int *const col_idxs = mat->get_col_idxs();
-        value_type *const vals = mat->get_values();
+        int* const row_ptrs = mat->get_row_ptrs();
+        int* const col_idxs = mat->get_col_idxs();
+        value_type* const vals = mat->get_values();
         // clang-format off
 		row_ptrs[0] = 0; row_ptrs[1] = 2; row_ptrs[2] = 4; row_ptrs[3] = 6;
 		col_idxs[0] = 0; col_idxs[1] = 1; col_idxs[2] = 0; col_idxs[3] = 1;

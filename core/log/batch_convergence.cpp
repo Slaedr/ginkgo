@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -44,8 +44,8 @@ namespace log {
 
 template <typename ValueType>
 void BatchConvergence<ValueType>::on_batch_solver_completed(
-    const Array<int> &num_iterations,
-    const BatchLinOp *const residual_norm) const
+    const Array<int>& num_iterations,
+    const BatchLinOp* const residual_norm) const
 {
     using NormVector = matrix::BatchDense<real_type>;
     this->num_iterations_ = num_iterations;

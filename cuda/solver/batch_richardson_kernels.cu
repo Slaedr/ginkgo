@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -42,7 +42,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cuda/base/types.hpp"
 #include "cuda/components/cooperative_groups.cuh"
 #include "cuda/components/intrinsics.cuh"
+#include "cuda/components/reduction.cuh"
 #include "cuda/components/thread_ids.cuh"
+#include "cuda/components/uninitialized_array.hpp"
 #include "cuda/matrix/batch_struct.hpp"
 
 
@@ -64,9 +66,6 @@ constexpr int sm_multiplier = 4;
 namespace batch_rich {
 
 
-#include "common/cuda_hip/components/uninitialized_array.hpp.inc"
-// include all depedencies (note: do not remove this comment)
-#include "common/cuda_hip/components/reduction.hpp.inc"
 #include "common/cuda_hip/log/batch_logger.hpp.inc"
 #include "common/cuda_hip/matrix/batch_csr_kernels.hpp.inc"
 #include "common/cuda_hip/matrix/batch_dense_kernels.hpp.inc"

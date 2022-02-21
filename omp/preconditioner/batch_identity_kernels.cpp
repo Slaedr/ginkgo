@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -50,9 +50,9 @@ namespace batch_identity {
 
 template <typename ValueType>
 void batch_identity_apply(std::shared_ptr<const gko::OmpExecutor> exec,
-                          const matrix::BatchCsr<ValueType> *const a,
-                          const matrix::BatchDense<ValueType> *const b,
-                          matrix::BatchDense<ValueType> *const x)
+                          const matrix::BatchCsr<ValueType>* const a,
+                          const matrix::BatchDense<ValueType>* const b,
+                          matrix::BatchDense<ValueType>* const x)
 {
     using gko::kernels::reference::BatchIdentity;
 
@@ -74,7 +74,7 @@ void batch_identity_apply(std::shared_ptr<const gko::OmpExecutor> exec,
         const auto x_b = gko::batch::batch_entry(x_ub, batch);
 
         const auto prec_work =
-            reinterpret_cast<ValueType *>(local_space.get_data());
+            reinterpret_cast<ValueType*>(local_space.get_data());
         prec.generate(a_b, prec_work);
         prec.apply(b_b, x_b);
     }

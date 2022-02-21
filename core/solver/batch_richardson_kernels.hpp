@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -83,10 +83,10 @@ inline int local_memory_requirement(const int num_rows, const int num_rhs)
 #define GKO_DECLARE_BATCH_RICHARDSON_APPLY_KERNEL(_type)                \
     void apply(std::shared_ptr<const DefaultExecutor> exec,             \
                const gko::kernels::batch_rich::BatchRichardsonOptions<  \
-                   remove_complex<_type>> &options,                     \
-               const BatchLinOp *a, const matrix::BatchDense<_type> *b, \
-               matrix::BatchDense<_type> *x,                            \
-               gko::log::BatchLogData<_type> &logdata)
+                   remove_complex<_type>>& options,                     \
+               const BatchLinOp* a, const matrix::BatchDense<_type>* b, \
+               matrix::BatchDense<_type>* x,                            \
+               gko::log::BatchLogData<_type>& logdata)
 
 
 #define GKO_DECLARE_ALL_AS_TEMPLATES \

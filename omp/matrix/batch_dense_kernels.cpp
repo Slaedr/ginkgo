@@ -1,5 +1,5 @@
 /*******************************<GINKGO LICENSE>******************************
-Copyright (c) 2017-2021, the Ginkgo authors
+Copyright (c) 2017-2022, the Ginkgo authors
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -42,7 +42,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ginkgo/core/matrix/batch_csr.hpp>
 
 
-#include "core/components/prefix_sum.hpp"
+#include "core/components/prefix_sum_kernels.hpp"
 #include "reference/matrix/batch_dense_kernels.hpp"
 #include "reference/matrix/batch_struct.hpp"
 
@@ -60,9 +60,9 @@ namespace batch_dense {
 
 template <typename ValueType>
 void simple_apply(std::shared_ptr<const OmpExecutor> exec,
-                  const matrix::BatchDense<ValueType> *const a,
-                  const matrix::BatchDense<ValueType> *const b,
-                  matrix::BatchDense<ValueType> *const c)
+                  const matrix::BatchDense<ValueType>* const a,
+                  const matrix::BatchDense<ValueType>* const b,
+                  matrix::BatchDense<ValueType>* const c)
 {
     const auto a_ub = host::get_batch_struct(a);
     const auto b_ub = host::get_batch_struct(b);
@@ -82,11 +82,11 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void apply(std::shared_ptr<const OmpExecutor> exec,
-           const matrix::BatchDense<ValueType> *const alpha,
-           const matrix::BatchDense<ValueType> *const a,
-           const matrix::BatchDense<ValueType> *const b,
-           const matrix::BatchDense<ValueType> *const beta,
-           matrix::BatchDense<ValueType> *const c)
+           const matrix::BatchDense<ValueType>* const alpha,
+           const matrix::BatchDense<ValueType>* const a,
+           const matrix::BatchDense<ValueType>* const b,
+           const matrix::BatchDense<ValueType>* const beta,
+           matrix::BatchDense<ValueType>* const c)
 {
     const auto a_ub = host::get_batch_struct(a);
     const auto b_ub = host::get_batch_struct(b);
@@ -110,8 +110,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_BATCH_DENSE_APPLY_KERNEL);
 
 template <typename ValueType>
 void scale(std::shared_ptr<const OmpExecutor> exec,
-           const matrix::BatchDense<ValueType> *const alpha,
-           matrix::BatchDense<ValueType> *const x)
+           const matrix::BatchDense<ValueType>* const alpha,
+           matrix::BatchDense<ValueType>* const x)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto alpha_ub = host::get_batch_struct(alpha);
@@ -128,9 +128,9 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_BATCH_DENSE_SCALE_KERNEL);
 
 template <typename ValueType>
 void convergence_scale(std::shared_ptr<const OmpExecutor> exec,
-                       const matrix::BatchDense<ValueType> *const alpha,
-                       matrix::BatchDense<ValueType> *const x,
-                       const uint32 &converged)
+                       const matrix::BatchDense<ValueType>* const alpha,
+                       matrix::BatchDense<ValueType>* const x,
+                       const uint32& converged)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto alpha_ub = host::get_batch_struct(alpha);
@@ -148,9 +148,9 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void add_scaled(std::shared_ptr<const OmpExecutor> exec,
-                const matrix::BatchDense<ValueType> *const alpha,
-                const matrix::BatchDense<ValueType> *const x,
-                matrix::BatchDense<ValueType> *const y)
+                const matrix::BatchDense<ValueType>* const alpha,
+                const matrix::BatchDense<ValueType>* const x,
+                matrix::BatchDense<ValueType>* const y)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto y_ub = host::get_batch_struct(y);
@@ -169,10 +169,10 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_BATCH_DENSE_ADD_SCALED_KERNEL);
 
 template <typename ValueType>
 void convergence_add_scaled(std::shared_ptr<const OmpExecutor> exec,
-                            const matrix::BatchDense<ValueType> *const alpha,
-                            const matrix::BatchDense<ValueType> *const x,
-                            matrix::BatchDense<ValueType> *const y,
-                            const uint32 &converged)
+                            const matrix::BatchDense<ValueType>* const alpha,
+                            const matrix::BatchDense<ValueType>* const x,
+                            matrix::BatchDense<ValueType>* const y,
+                            const uint32& converged)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto y_ub = host::get_batch_struct(y);
@@ -193,9 +193,9 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void add_scaled_diag(std::shared_ptr<const OmpExecutor>,
-                     const matrix::BatchDense<ValueType> *,
-                     const matrix::Diagonal<ValueType> *,
-                     matrix::BatchDense<ValueType> *) GKO_NOT_IMPLEMENTED;
+                     const matrix::BatchDense<ValueType>*,
+                     const matrix::Diagonal<ValueType>*,
+                     matrix::BatchDense<ValueType>*) GKO_NOT_IMPLEMENTED;
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
     GKO_DECLARE_BATCH_DENSE_ADD_SCALED_DIAG_KERNEL);
@@ -203,9 +203,9 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void compute_dot(std::shared_ptr<const OmpExecutor> exec,
-                 const matrix::BatchDense<ValueType> *const x,
-                 const matrix::BatchDense<ValueType> *const y,
-                 matrix::BatchDense<ValueType> *const result)
+                 const matrix::BatchDense<ValueType>* const x,
+                 const matrix::BatchDense<ValueType>* const y,
+                 matrix::BatchDense<ValueType>* const result)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto y_ub = host::get_batch_struct(y);
@@ -226,10 +226,10 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_BATCH_DENSE_COMPUTE_DOT_KERNEL);
 
 template <typename ValueType>
 void convergence_compute_dot(std::shared_ptr<const OmpExecutor> exec,
-                             const matrix::BatchDense<ValueType> *const x,
-                             const matrix::BatchDense<ValueType> *const y,
-                             matrix::BatchDense<ValueType> *const result,
-                             const uint32 &converged)
+                             const matrix::BatchDense<ValueType>* const x,
+                             const matrix::BatchDense<ValueType>* const y,
+                             matrix::BatchDense<ValueType>* const result,
+                             const uint32& converged)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto y_ub = host::get_batch_struct(y);
@@ -251,8 +251,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void compute_norm2(std::shared_ptr<const OmpExecutor> exec,
-                   const matrix::BatchDense<ValueType> *const x,
-                   matrix::BatchDense<remove_complex<ValueType>> *const result)
+                   const matrix::BatchDense<ValueType>* const x,
+                   matrix::BatchDense<remove_complex<ValueType>>* const result)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto res_ub = host::get_batch_struct(result);
@@ -272,9 +272,9 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 template <typename ValueType>
 void convergence_compute_norm2(
     std::shared_ptr<const OmpExecutor> exec,
-    const matrix::BatchDense<ValueType> *const x,
-    matrix::BatchDense<remove_complex<ValueType>> *const result,
-    const uint32 &converged)
+    const matrix::BatchDense<ValueType>* const x,
+    matrix::BatchDense<remove_complex<ValueType>>* const result,
+    const uint32& converged)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto res_ub = host::get_batch_struct(result);
@@ -294,8 +294,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType, typename IndexType>
 void convert_to_batch_csr(std::shared_ptr<const DefaultExecutor> exec,
-                          const matrix::BatchDense<ValueType> *const source,
-                          matrix::BatchCsr<ValueType, IndexType> *const result)
+                          const matrix::BatchDense<ValueType>* const source,
+                          matrix::BatchCsr<ValueType, IndexType>* const result)
 {
     GKO_ASSERT(source->get_size().stores_equal_sizes() == true);
     auto num_rows = result->get_size().at(0)[0];
@@ -354,8 +354,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE_AND_INT32_INDEX(
 
 template <typename ValueType>
 void count_nonzeros(std::shared_ptr<const OmpExecutor> exec,
-                    const matrix::BatchDense<ValueType> *const source,
-                    size_type *const result)
+                    const matrix::BatchDense<ValueType>* const source,
+                    size_type* const result)
 {
 #pragma omp parallel for
     for (size_type batch = 0; batch < source->get_num_batch_entries();
@@ -381,7 +381,7 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 template <typename ValueType>
 void calculate_max_nnz_per_row(
     std::shared_ptr<const OmpExecutor>,
-    const matrix::BatchDense<ValueType> *const source, size_type *const result)
+    const matrix::BatchDense<ValueType>* const source, size_type* const result)
 {
 #pragma omp parallel for
     for (size_type batch = 0; batch < source->get_num_batch_entries();
@@ -411,8 +411,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 template <typename ValueType>
 void calculate_nonzeros_per_row(
     std::shared_ptr<const OmpExecutor>,
-    const matrix::BatchDense<ValueType> *const source,
-    Array<size_type> *const result)
+    const matrix::BatchDense<ValueType>* const source,
+    Array<size_type>* const result)
 {
     size_type cumul_prev_rows = 0;
     for (size_type batch = 0; batch < source->get_num_batch_entries();
@@ -441,10 +441,10 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void calculate_total_cols(std::shared_ptr<const OmpExecutor>,
-                          const matrix::BatchDense<ValueType> *const source,
-                          size_type *const result,
-                          const size_type *const stride_factor,
-                          const size_type *const slice_size)
+                          const matrix::BatchDense<ValueType>* const source,
+                          size_type* const result,
+                          const size_type* const stride_factor,
+                          const size_type* const slice_size)
 {
 #pragma omp parallel for
     for (size_type batch = 0; batch < source->get_num_batch_entries();
@@ -483,8 +483,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void transpose(std::shared_ptr<const OmpExecutor>,
-               const matrix::BatchDense<ValueType> *const orig,
-               matrix::BatchDense<ValueType> *const trans)
+               const matrix::BatchDense<ValueType>* const orig,
+               matrix::BatchDense<ValueType>* const trans)
 {
 #pragma omp parallel for
     for (size_type batch = 0; batch < orig->get_num_batch_entries(); ++batch) {
@@ -501,8 +501,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_BATCH_DENSE_TRANSPOSE_KERNEL);
 
 template <typename ValueType>
 void conj_transpose(std::shared_ptr<const OmpExecutor>,
-                    const matrix::BatchDense<ValueType> *const orig,
-                    matrix::BatchDense<ValueType> *const trans)
+                    const matrix::BatchDense<ValueType>* const orig,
+                    matrix::BatchDense<ValueType>* const trans)
 {
 #pragma omp parallel for
     for (size_type batch = 0; batch < orig->get_num_batch_entries(); ++batch) {
@@ -520,8 +520,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void copy(std::shared_ptr<const DefaultExecutor> exec,
-          const matrix::BatchDense<ValueType> *x,
-          matrix::BatchDense<ValueType> *result)
+          const matrix::BatchDense<ValueType>* x,
+          matrix::BatchDense<ValueType>* result)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto result_ub = host::get_batch_struct(result);
@@ -538,9 +538,9 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_BATCH_DENSE_COPY_KERNEL);
 
 template <typename ValueType>
 void convergence_copy(std::shared_ptr<const DefaultExecutor> exec,
-                      const matrix::BatchDense<ValueType> *x,
-                      matrix::BatchDense<ValueType> *result,
-                      const uint32 &converged)
+                      const matrix::BatchDense<ValueType>* x,
+                      matrix::BatchDense<ValueType>* result,
+                      const uint32& converged)
 {
     const auto x_ub = host::get_batch_struct(x);
     const auto result_ub = host::get_batch_struct(result);
@@ -558,8 +558,8 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(
 
 template <typename ValueType>
 void batch_scale(std::shared_ptr<const OmpExecutor> exec,
-                 const matrix::BatchDense<ValueType> *const scale_vec,
-                 matrix::BatchDense<ValueType> *const vecs)
+                 const matrix::BatchDense<ValueType>* const scale_vec,
+                 matrix::BatchDense<ValueType>* const vecs)
 {
     const auto scale_ub = host::get_batch_struct(scale_vec);
     const auto v_ub = host::get_batch_struct(vecs);
