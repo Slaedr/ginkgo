@@ -41,7 +41,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "hip/base/exception.hip.hpp"
 #include "hip/base/types.hip.hpp"
 #include "hip/components/cooperative_groups.hip.hpp"
+#include "hip/components/reduction.hip.hpp"
 #include "hip/components/thread_ids.hip.hpp"
+#include "hip/components/uninitialized_array.hip.hpp"
 #include "hip/matrix/batch_struct.hip.hpp"
 
 
@@ -61,9 +63,6 @@ constexpr int sm_multiplier = 4;
 namespace batch_gmres {
 
 
-#include "common/cuda_hip/components/uninitialized_array.hpp.inc"
-// include all depedencies (note: do not remove this comment)
-#include "common/cuda_hip/components/reduction.hpp.inc"
 #include "common/cuda_hip/log/batch_logger.hpp.inc"
 #include "common/cuda_hip/matrix/batch_csr_kernels.hpp.inc"
 #include "common/cuda_hip/matrix/batch_dense_kernels.hpp.inc"

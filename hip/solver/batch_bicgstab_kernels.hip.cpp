@@ -144,13 +144,6 @@ static void apply_impl(
         exec, sconf.gmem_stride_bytes * nbatch / sizeof(ValueType));
     assert(sconf.gmem_stride_bytes % sizeof(ValueType) == 0);
 
-    printf(" Bicgstab: vectors in shared memory = %d\n", sconf.n_shared);
-    if (sconf.prec_shared) {
-        printf(" Bicgstab: precondiioner is in shared memory.\n");
-    }
-    printf(" Bicgstab: vectors in global memory = %d\n", sconf.n_global);
-    printf(" Hip: number of threads per warp = %d.\n", config::warp_size);
-    printf(" Bicgstab: number of threads per block = %d.\n", block_size);
     if (opts.tol_type == gko::stop::batch::ToleranceType::absolute) {
         BATCH_BICGSTAB_KERNEL_LAUNCH(SimpleAbsResidual, PrecType);
     } else {
