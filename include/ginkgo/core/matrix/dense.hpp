@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -64,6 +64,9 @@ class Hybrid;
 
 template <typename ValueType, typename IndexType>
 class Sellp;
+
+template <typename ValueType, typename IndexType>
+class AMP;
 
 template <typename ValueType, typename IndexType>
 class SparsityCsr;
@@ -132,6 +135,8 @@ class Dense
     friend class Hybrid<ValueType, int64>;
     friend class Sellp<ValueType, int32>;
     friend class Sellp<ValueType, int64>;
+    friend class AMP<ValueType, int32>;
+    friend class AMP<ValueType, int64>;
     friend class SparsityCsr<ValueType, int32>;
     friend class SparsityCsr<ValueType, int64>;
     friend class Dense<to_complex<ValueType>>;
