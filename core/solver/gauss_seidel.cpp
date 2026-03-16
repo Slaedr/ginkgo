@@ -133,7 +133,9 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
                 color_row_ptrs_, ellmat.get(), gko::detail::get_local(dense_b),
                 gko::detail::get_local(dense_x), iter == 0, &stop_status));
         } else {
-            // TODO
+            exec->run(gssdl::make_multicolor_fgs_amp(
+                color_row_ptrs_, ampmat.get(), gko::detail::get_local(dense_b),
+                gko::detail::get_local(dense_x), iter == 0, &stop_status));
         }
 
         bool one_changed = false;
