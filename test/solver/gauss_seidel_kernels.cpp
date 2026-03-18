@@ -22,6 +22,7 @@
 #include <ginkgo/core/stop/stopping_status.hpp>
 
 #include "core/test/utils.hpp"
+#include "ginkgo/core/solver/solver_base.hpp"
 #include "test/utils/common_fixture.hpp"
 
 
@@ -314,11 +315,13 @@ TEST_F(GaussSeidelKernelsEll, FiveIterationSolverIsEquivalentToRef)
         Solver::build()
             .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
             .with_color_ptrs(color_ptrs)
+            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
             .on(ref)
             ->generate(ref_mtx);
     auto dev_solver =
         Solver::build()
             .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
+            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
             .with_color_ptrs(color_ptrs)
             .on(exec)
             ->generate(dev_mtx);
@@ -558,7 +561,7 @@ TEST_F(GaussSeidelKernelsAMP, FiveIterationSolverIsEquivalentToRef)
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 77);
     auto x =
         Vec::create(ref, gko::dim<2>{static_cast<gko::size_type>(n_rows), 1});
-    x->fill(gko::zero<value_type>());
+    // x->fill(gko::zero<value_type>());
     auto d_b = gko::clone(exec, b);
     auto d_x = gko::clone(exec, x);
 

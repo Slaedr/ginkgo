@@ -63,12 +63,17 @@ public:
     using index_type = IndexType;
 
     /**
-     * This iterative solver always uses the data in the output vector x
+     * Whether the iterative solver uses the data in the output vector x
      * as an initial guess.
      *
-     * @return  true
+     * @return  Boolean that's true if the output vector will also be assumed
+     *          to contain the initial guess to be used.
      */
-    bool apply_uses_initial_guess() const override { return true; }
+    bool apply_uses_initial_guess() const override
+    {
+        return (this->parameters_.init_guess_mode ==
+                initial_guess_mode::provided);
+    }
 
     class Factory;
 
@@ -94,6 +99,13 @@ public:
          */
         std::vector<IndexType> GKO_FACTORY_PARAMETER_SCALAR(
             color_ptrs, std::vector<IndexType>());
+
+        /**
+         * Initial guess mode. The default mode is a zero initial guess.
+         * The available options are under solver::initial_guess_mode.
+         */
+        initial_guess_mode GKO_FACTORY_PARAMETER_SCALAR(
+            init_guess_mode, initial_guess_mode::zero);
     };
     GKO_ENABLE_LIN_OP_FACTORY(FwdGaussSeidel, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);

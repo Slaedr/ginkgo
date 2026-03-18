@@ -74,9 +74,152 @@ TYPED_TEST(FwdGaussSeidel, FactoryCreatesCorrectSolver)
 }
 
 
-TYPED_TEST(FwdGaussSeidel, ApplyUsesInitialGuessReturnsTrue)
+TYPED_TEST(FwdGaussSeidel, ApplyUsesInitialGuessReturnsFalseByDefault)
 {
-    ASSERT_TRUE(this->solver->apply_uses_initial_guess());
+    // Default init_guess_mode is zero, so the output x is not used as a guess.
+    ASSERT_FALSE(this->solver->apply_uses_initial_guess());
+}
+
+
+TYPED_TEST(FwdGaussSeidel, ApplyUsesInitialGuessReturnsTrueWhenModeIsProvided)
+{
+    using Solver = typename TestFixture::Solver;
+    using index_type = typename TestFixture::index_type;
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
+            .on(this->exec)
+            ->generate(this->mtx);
+
+    ASSERT_TRUE(solver->apply_uses_initial_guess());
+}
+
+
+TYPED_TEST(FwdGaussSeidel, ApplyUsesInitialGuessReturnsFalseWhenModeIsRhs)
+{
+    using Solver = typename TestFixture::Solver;
+    using index_type = typename TestFixture::index_type;
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .with_init_guess_mode(gko::solver::initial_guess_mode::rhs)
+            .on(this->exec)
+            ->generate(this->mtx);
+
+    ASSERT_FALSE(solver->apply_uses_initial_guess());
+}
+
+
+TYPED_TEST(FwdGaussSeidel, DefaultInitGuessModeIsZero)
+{
+    using Solver = typename TestFixture::Solver;
+
+    auto gs = static_cast<const Solver*>(this->solver.get());
+
+    ASSERT_EQ(gs->get_parameters().init_guess_mode,
+              gko::solver::initial_guess_mode::zero);
+}
+
+
+// Zero mode: any initial x is overwritten with zeros, so the result is
+// independent of the starting vector.
+TYPED_TEST(FwdGaussSeidel, ZeroModeIgnoresInitialX)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using Vec = gko::matrix::Dense<value_type>;
+
+    auto b = gko::initialize<Vec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x_from_zero = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto x_from_nonzero =
+        gko::initialize<Vec>({10.0, -5.0, 3.0, 7.0}, this->exec);
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(3u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .with_init_guess_mode(gko::solver::initial_guess_mode::zero)
+            .on(this->exec)
+            ->generate(this->mtx);
+
+    solver->apply(b, x_from_zero);
+    solver->apply(b, x_from_nonzero);
+
+    GKO_ASSERT_MTX_NEAR(x_from_nonzero, x_from_zero, 0.0);
+}
+
+
+// Provided mode: the exact solution is a fixed point of Gauss-Seidel, so
+// starting from it should leave x unchanged after any number of iterations.
+TYPED_TEST(FwdGaussSeidel, ProvidedModeKeepsExactSolutionAFixedPoint)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using Vec = gko::matrix::Dense<value_type>;
+
+    // x* = {4/7, -1, 6/7, 0} is the exact solution for b = {2, -3, 4, -1}.
+    auto b = gko::initialize<Vec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<Vec>({value_type{4.0 / 7.0}, value_type{-1.0},
+                                   value_type{6.0 / 7.0}, value_type{0.0}},
+                                  this->exec);
+    auto exact = x->clone();
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(3u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
+            .on(this->exec)
+            ->generate(this->mtx);
+
+    solver->apply(b, x);
+
+    GKO_ASSERT_MTX_NEAR(x, exact, 1e-6);
+}
+
+
+// Rhs mode: x is initialised to b before iterating. Applying with rhs mode
+// must give the same result as explicitly setting x = b and using provided
+// mode.
+TYPED_TEST(FwdGaussSeidel, RhsModeMatchesProvidedModeWithXEqualToB)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using Vec = gko::matrix::Dense<value_type>;
+
+    auto b = gko::initialize<Vec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+
+    // Run with rhs mode (x will be set to b internally).
+    auto x_rhs = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto solver_rhs =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(3u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .with_init_guess_mode(gko::solver::initial_guess_mode::rhs)
+            .on(this->exec)
+            ->generate(this->mtx);
+    solver_rhs->apply(b, x_rhs);
+
+    // Run with provided mode, starting x explicitly from b.
+    auto x_provided = b->clone();
+    auto solver_provided =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(3u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
+            .on(this->exec)
+            ->generate(this->mtx);
+    solver_provided->apply(b, x_provided);
+
+    GKO_ASSERT_MTX_NEAR(x_rhs, x_provided, 0.0);
 }
 
 

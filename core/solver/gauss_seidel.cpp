@@ -113,6 +113,12 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
         this->get_system_matrix(),
         std::shared_ptr<const LinOp>(dense_b, [](const LinOp*) {}), dense_x);
 
+    if (parameters_.init_guess_mode == initial_guess_mode::zero) {
+        dense_x->fill(zero<typename VectorType::value_type>());
+    } else if (parameters_.init_guess_mode == initial_guess_mode::rhs) {
+        dense_x->copy_from(dense_b);
+    }
+
     int iter = -1;
 
     auto ellmat =
