@@ -32,6 +32,7 @@
 #include <ginkgo/ginkgo.hpp>
 
 #include "benchmark/amp/amp_benchmark_common.hpp"
+#include "ginkgo/core/solver/solver_base.hpp"
 
 
 struct GmresStats {
@@ -73,11 +74,10 @@ GmresStats run_gmres(std::shared_ptr<const gko::Executor> exec,
                 gko::stop::ResidualNorm<double>::build().with_reduction_factor(
                     cfg.gmres_tol))
             .with_preconditioner(
-                // FGS::build()
-                //     .with_criteria(
-                //         gko::stop::Iteration::build().with_max_iters(1u))
-                //     .with_color_ptrs(color_ptrs)
-                Jacobi::build().with_max_block_size(1u))
+                FGS::build()
+                    .with_criteria(
+                        gko::stop::Iteration::build().with_max_iters(1u))
+                    .with_color_ptrs(color_ptrs))
             .on(exec)
             ->generate(system_mat);
 
