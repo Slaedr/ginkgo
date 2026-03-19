@@ -83,7 +83,7 @@ GKO_INLINE GKO_ATTRIBUTES auto get_bins_min_representable()
     using narrow_types_t = typename narrow_types<RealType>::type;
     constexpr int q = narrow_types<RealType>::num_types;
     std::array<RealType, q> mins = {};
-    gko::constexpr_for<0, q, 1>([&] GKO_ATTRIBUTES(auto k) {
+    gko::constexpr_for<0, q, 1>([&](auto k) {
         using bin_type = typename std::tuple_element<k, narrow_types_t>::type;
         mins[k] =
             static_cast<RealType>(gko::device_numeric_limits<bin_type>::min());
