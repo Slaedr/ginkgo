@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -31,6 +32,8 @@
 
 using json = nlohmann::json;
 using int32 = gko::int32;
+
+enum class mat_offdiag_t { laplace, random_diag_dominant, random_general };
 
 // ============================================================
 // Configuration
@@ -47,6 +50,7 @@ struct Config {
     double gmres_tol = 1e-8;
     int gmres_max_iters = 1000;
     int gmres_krylov_dim = 50;
+    mat_offdiag_t offdiag_type = mat_offdiag_t::laplace;
 };
 
 inline Config load_config(const std::string& path)
@@ -73,6 +77,22 @@ inline Config load_config(const std::string& path)
         cfg.gmres_max_iters = j["gmres_max_iters"];
     if (j.contains("gmres_krylov_dim"))
         cfg.gmres_krylov_dim = j["gmres_krylov_dim"];
+    if (j.contains("matrix_values_type")) {
+        std::string matrix_values_type = j["matrix_values_type"];
+        if (matrix_values_type == "diagonal_dominant") {
+            cfg.offdiag_type = mat_offdiag_t::random_diag_dominant;
+        } else if (matrix_values_type == "laplace") {
+            cfg.offdiag_type = mat_offdiag_t::laplace;
+        } else if (matrix_values_type == "general") {
+            cfg.offdiag_type = mat_offdiag_t::random_general;
+        } else {
+            std::cerr << "Invalid values type " << matrix_values_type
+                      << std::endl;
+            throw std::runtime_error(
+                std::string("Invalid matrix off-diagonal values type ") +
+                matrix_values_type);
+        }
+    }
     return cfg;
 }
 
@@ -116,6 +136,34 @@ double time_ms(std::shared_ptr<const gko::Executor> exec, int warmup, int reps,
     return std::chrono::duration<double, std::milli>(t1 - t0).count() / reps;
 }
 
+/// Generator functor for off-diagonal values
+struct OffdiagFn {
+    Config cfg;
+    std::mt19937 rng;
+    std::uniform_real_distribution<double> mantissa_dist;
+    std::normal_distribution<double> exp_dist;
+    double exp_bias{};
+
+    OffdiagFn(const int seed, const Config& config)
+        : cfg(config),
+          rng(seed),
+          mantissa_dist(0.1, 1.0),
+          exp_dist(0.0, 1.0),
+          exp_bias{cfg.offdiag_type == mat_offdiag_t::random_general ? 0.2
+                                                                     : 0.0}
+    {}
+
+    double operator()()
+    {
+        if (cfg.offdiag_type == mat_offdiag_t::laplace) {
+            return -1.0;
+        } else {
+            return -mantissa_dist(rng) *
+                   std::pow(10, exp_bias - std::abs(exp_dist(rng)));
+        }
+    }
+};
+
 // ============================================================
 // 3D 27-point stencil generator with 8-coloring
 // ============================================================
@@ -126,16 +174,20 @@ double time_ms(std::shared_ptr<const gko::Executor> exec, int warmup, int reps,
  * color, all nodes are independent under the 27-point stencil, making this
  * ordering suitable for multi-color Gauss-Seidel.
  *
- * Stencil values: diagonal = 26, all 26 off-diagonal neighbors = -1.
- * The matrix is strictly diagonally dominant.
+ * Diagonal entry = 26.  Off-diagonal values are drawn independently from
+ * @p gen.  To recover the original constant-coefficient stencil,
+ * pass a distribution that always returns -1.
  *
  * @param nx, ny, nz   Grid dimensions.
+ * @param gen          Generator function for off-diagonal values,
+ *                     called with no arguments.
  * @param color_ptrs   Output: color_ptrs[c] is the first row of color c,
  *                     color_ptrs[8] == n.  Size 9.
  * @return  matrix_data<double, int32> in the color-ordered layout.
  */
 inline gko::matrix_data<double, int32> generate_stencil_data(
-    int nx, int ny, int nz, std::vector<int32>& color_ptrs)
+    const int nx, const int ny, const int nz, OffdiagFn& gen,
+    std::vector<int32>& color_ptrs)
 {
     const int64_t n = static_cast<int64_t>(nx) * ny * nz;
 
@@ -169,6 +221,8 @@ inline gko::matrix_data<double, int32> generate_stencil_data(
         static_cast<gko::size_type>(n), static_cast<gko::size_type>(n)});
     data.nonzeros.reserve(27 * n);
 
+
+    double max_val{0.0}, min_val{100.0};
     for (int32 new_row = 0; new_row < static_cast<int32>(n); ++new_row) {
         int32 old_idx = new_to_old[new_row];
         int ki = old_idx / (nx * ny);
@@ -182,8 +236,13 @@ inline gko::matrix_data<double, int32> generate_stencil_data(
                     if (ni < 0 || ni >= nx || nj < 0 || nj >= ny || nk < 0 ||
                         nk >= nz)
                         continue;
-                    int32 old_col = ni + nj * nx + nk * nx * ny;
-                    double val = (di == 0 && dj == 0 && dk == 0) ? 26.0 : -1.0;
+                    const int32 old_col = ni + nj * nx + nk * nx * ny;
+                    const bool diag = (di == 0 && dj == 0 && dk == 0);
+                    const double val = diag ? 26.0 : gen();
+                    if (!diag) {
+                        max_val = std::max(max_val, std::abs(val));
+                        min_val = std::min(min_val, std::abs(val));
+                    }
                     data.nonzeros.emplace_back(new_row, old_to_new[old_col],
                                                val);
                 }
@@ -191,6 +250,8 @@ inline gko::matrix_data<double, int32> generate_stencil_data(
         }
     }
     data.sort_row_major();
+    std::cout << "\n  Generated matrix off-diagonals: max abs val = " << max_val
+              << ", min abs val = " << min_val << std::endl;
     return data;
 }
 
@@ -235,10 +296,13 @@ inline double relative_error(std::shared_ptr<const gko::Executor> exec,
 // Output helpers
 // ============================================================
 
+
 inline void print_config(const Config& cfg)
 {
     std::cout << "  Grid: " << cfg.nx << "x" << cfg.ny << "x" << cfg.nz
               << "  executor: " << cfg.executor << "\n"
+              << "  Matrix values: " << static_cast<int>(cfg.offdiag_type)
+              << "\n"
               << "  AMP tolerance: " << cfg.amp_tolerance << "\n"
               << "  Warmup / bench reps: " << cfg.warmup_reps << " / "
               << cfg.bench_reps << "\n";

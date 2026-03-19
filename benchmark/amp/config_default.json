@@ -8,5 +8,6 @@
   "amp_tolerance": 0.01,
   "gmres_tol": 1e-8,
   "gmres_max_iters": 1000,
-  "gmres_krylov_dim": 50
+  "gmres_krylov_dim": 50,
+  "matrix_values_type": "diagonal_dominant"
 }

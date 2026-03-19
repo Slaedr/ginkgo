@@ -21,6 +21,7 @@
  *   amp_tolerance     : 0.01
  */
 
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -43,8 +44,9 @@ int main(int argc, char* argv[])
 
     std::cout << "\nBuilding 3D 27-pt stencil...";
     std::cout.flush();
+    OffdiagFn fn(42, cfg);
     std::vector<int32> color_ptrs;
-    auto data = generate_stencil_data(cfg.nx, cfg.ny, cfg.nz, color_ptrs);
+    auto data = generate_stencil_data(cfg.nx, cfg.ny, cfg.nz, fn, color_ptrs);
     const int64_t n = data.size[0];
     const int64_t nnz = data.nonzeros.size();
     std::cout << " done.\n";

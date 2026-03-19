@@ -162,7 +162,8 @@ int main(int argc, char* argv[])
     std::cout << "\nBuilding 3D 27-pt stencil...";
     std::cout.flush();
     std::vector<int32> color_ptrs;
-    auto data = generate_stencil_data(cfg.nx, cfg.ny, cfg.nz, color_ptrs);
+    OffdiagFn fn(42, cfg);
+    auto data = generate_stencil_data(cfg.nx, cfg.ny, cfg.nz, fn, color_ptrs);
     const int64_t n = data.size[0];
     const int64_t nnz = data.nonzeros.size();
     std::cout << " done.\n";
