@@ -19,7 +19,6 @@
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/log/logger.hpp>
-#include <ginkgo/core/matrix/ell.hpp>
 #include <ginkgo/core/matrix/identity.hpp>
 #include <ginkgo/core/solver/solver_base.hpp>
 
@@ -41,7 +40,7 @@ enum class gs_algorithm { multicolor, syncfree };
  * (D+L) x^(n+1) = b - U x^n
  * where L is the lower triangular part of A, U is the lower triangular part,
  * and D is the diagonal part of A.
- * It works only for certain matrix types: Ell.
+ * It works only for certain matrix types: Ell, AMP with Ell.
  *
  * @tparam ValueType  precision of matrix elements
  * @tparam IndexType  precision of matrix indices
@@ -64,12 +63,17 @@ public:
     using index_type = IndexType;
 
     /**
-     * This iterative solver always uses the data in the output vector x
+     * Whether the iterative solver uses the data in the output vector x
      * as an initial guess.
      *
-     * @return  true
+     * @return  Boolean that's true if the output vector will also be assumed
+     *          to contain the initial guess to be used.
      */
-    bool apply_uses_initial_guess() const override { return true; }
+    bool apply_uses_initial_guess() const override
+    {
+        return (this->parameters_.init_guess_mode ==
+                initial_guess_mode::provided);
+    }
 
     class Factory;
 
@@ -95,6 +99,13 @@ public:
          */
         std::vector<IndexType> GKO_FACTORY_PARAMETER_SCALAR(
             color_ptrs, std::vector<IndexType>());
+
+        /**
+         * Initial guess mode. The default mode is a zero initial guess.
+         * The available options are under solver::initial_guess_mode.
+         */
+        initial_guess_mode GKO_FACTORY_PARAMETER_SCALAR(
+            init_guess_mode, initial_guess_mode::zero);
     };
     GKO_ENABLE_LIN_OP_FACTORY(FwdGaussSeidel, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);
@@ -129,8 +140,6 @@ public:
     FwdGaussSeidel& operator=(FwdGaussSeidel&&);
 
 protected:
-    using EllMatrix = matrix::Ell<ValueType, IndexType>;
-
     void apply_impl(const LinOp* b, LinOp* x) const override;
 
     void apply_impl(const LinOp* alpha, const LinOp* b, const LinOp* beta,

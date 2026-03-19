@@ -410,7 +410,8 @@ void generate_ell_rownorms_storage(
     // const auto grid_size = ceildiv(nrows, block_size);
     const auto block_size = default_block_size;
     gko::array<int> max_nnz_arr(exec, q * num_blocks);
-    max_nnz_arr.fill(0);
+    thrust::fill(thrust::device, max_nnz_arr.get_data(),
+                 max_nnz_arr.get_data() + q * num_blocks, 0);
     const auto max_nnz_ptr = max_nnz_arr.get_data();
     const auto rownorms_ptr = rownorms.get_data();
 
