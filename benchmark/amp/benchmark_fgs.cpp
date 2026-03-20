@@ -166,6 +166,7 @@ int main(int argc, char* argv[])
     }
 
     // ---- AMP<double> ----
+    std::string amp_details;
     {
         using Ell = gko::matrix::Ell<double, int32>;
         using Amp = gko::matrix::AMP<double, int32>;
@@ -208,6 +209,7 @@ int main(int argc, char* argv[])
                         {"gflops", gflops},
                         {"speedup", baseline_ms / ms},
                         {"rel_error_vs_ell_double", err}});
+        amp_details = compute_amp_details(mat.get(), rows);
     }
 
     results["fgs"] = rows;
@@ -215,6 +217,7 @@ int main(int argc, char* argv[])
     std::string out = "fgs_results.json";
     std::ofstream of(out);
     of << std::setw(2) << results << "\n";
+    std::cout << amp_details << std::endl;
     std::cout << "\nResults written to " << out << "\n";
     return 0;
 }

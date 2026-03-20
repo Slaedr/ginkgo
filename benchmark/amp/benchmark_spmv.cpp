@@ -19,6 +19,7 @@
  *   warmup_reps       : 5
  *   bench_reps        : 20
  *   amp_tolerance     : 0.01
+ *   matrix_values_type: "laplace" | "diagonal_dominant" | "general" ("laplace")
  */
 
 #include <cmath>
@@ -200,6 +201,7 @@ int main(int argc, char* argv[])
     }
 #endif
 
+    std::string amp_details;
     // ---- AMP<double> ----
     {
         using Ell = gko::matrix::Ell<double, int32>;
@@ -225,6 +227,7 @@ int main(int argc, char* argv[])
                             [&] { mat->apply(b, x); });
 
         record("AMP<double>", ms, gko::share(std::move(x)));
+        amp_details = compute_amp_details(mat.get(), rows);
     }
 
     results["spmv"] = rows;
@@ -232,6 +235,7 @@ int main(int argc, char* argv[])
     std::string out = "spmv_results.json";
     std::ofstream of(out);
     of << std::setw(2) << results << "\n";
+    std::cout << amp_details << std::endl;
     std::cout << "\nResults written to " << out << "\n";
     return 0;
 }

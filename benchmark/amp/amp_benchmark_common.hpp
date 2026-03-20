@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -296,6 +297,27 @@ inline double relative_error(std::shared_ptr<const gko::Executor> exec,
 // Output helpers
 // ============================================================
 
+inline std::string compute_amp_details(
+    const gko::matrix::AMP<double, int32>* const mtx, json& rows)
+{
+    std::stringstream sstream;
+    using Ell = gko::matrix::Ell<double, int32>;
+    constexpr int q = gko::matrix::AMP<double, int32>::num_precisions;
+    sstream << "AMP matrix precision buckets:\n";
+    json amps = json::array();
+    for (int k = 0; k < q; k++) {
+        auto ellmat = static_cast<const Ell*>(mtx->get_bin_matrix(k));
+        GKO_ASSERT(ellmat);
+        const auto max_nnz_per_row = ellmat->get_num_stored_elements_per_row();
+        sstream << "    Bin " << k << ": max_nnz_per_row = " << max_nnz_per_row
+                << "\n";
+        amps.push_back({{"bin", k}, {"max_nnz_per_row", max_nnz_per_row}});
+    }
+    std::string str;
+    sstream >> str;
+    rows.back()["amp_details"] = amps;
+    return str;
+}
 
 inline void print_config(const Config& cfg)
 {

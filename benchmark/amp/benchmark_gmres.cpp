@@ -242,6 +242,7 @@ int main(int argc, char* argv[])
     }
 
     // ---- AMP<double> system ----
+    std::string amp_details;
     {
         using Ell = gko::matrix::Ell<double, int32>;
         using Amp = gko::matrix::AMP<double, int32>;
@@ -256,6 +257,7 @@ int main(int argc, char* argv[])
                            ->generate(ell_dev));
         auto s = run_gmres(exec, mat, b, color_ptrs, cfg);
         print_row("AMP<double>", s, ref_s);
+        amp_details = compute_amp_details(mat.get(), rows);
     }
 
     results["gmres"] = rows;
@@ -263,6 +265,7 @@ int main(int argc, char* argv[])
     std::string out = "gmres_results.json";
     std::ofstream of(out);
     of << std::setw(2) << results << "\n";
+    std::cout << amp_details << std::endl;
     std::cout << "\nResults written to " << out << "\n";
     return 0;
 }
