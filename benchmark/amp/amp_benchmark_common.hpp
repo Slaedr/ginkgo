@@ -47,6 +47,7 @@ struct Config {
     std::string executor = "cuda";
     int warmup_reps = 5;
     int bench_reps = 20;
+    int solver_reps = 3;
     float amp_tolerance = 0.01f;
     double gmres_tol = 1e-8;
     int gmres_max_iters = 1000;
@@ -303,7 +304,7 @@ inline std::string compute_amp_details(
     std::stringstream sstream;
     using Ell = gko::matrix::Ell<double, int32>;
     constexpr int q = gko::matrix::AMP<double, int32>::num_precisions;
-    sstream << "AMP matrix precision buckets:\n";
+    sstream << "AMP matrix recision buckets:\n";
     json amps = json::array();
     for (int k = 0; k < q; k++) {
         auto ellmat = static_cast<const Ell*>(mtx->get_bin_matrix(k));
@@ -313,10 +314,8 @@ inline std::string compute_amp_details(
                 << "\n";
         amps.push_back({{"bin", k}, {"max_nnz_per_row", max_nnz_per_row}});
     }
-    std::string str;
-    sstream >> str;
     rows.back()["amp_details"] = amps;
-    return str;
+    return sstream.str();
 }
 
 inline void print_config(const Config& cfg)

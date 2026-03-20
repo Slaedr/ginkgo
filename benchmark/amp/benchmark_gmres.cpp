@@ -51,13 +51,13 @@ struct GmresStats {
 GmresStats run_gmres(std::shared_ptr<const gko::Executor> exec,
                      std::shared_ptr<const gko::LinOp> system_mat,
                      std::shared_ptr<const gko::matrix::Dense<double>> b,
+                     std::shared_ptr<const gko::matrix::Dense<double>> x_ref,
                      const std::vector<int32>& color_ptrs, const Config& cfg)
 {
     using Vec = gko::matrix::Dense<double>;
     using RVec = gko::matrix::Dense<gko::remove_complex<double>>;
     using Gmres = gko::solver::Gmres<double>;
     using FGS = gko::solver::FwdGaussSeidel<double, int32>;
-    using Jacobi = gko::preconditioner::Jacobi<double, int32>;
 
     const auto n = system_mat->get_size()[0];
 
@@ -91,11 +91,13 @@ GmresStats run_gmres(std::shared_ptr<const gko::Executor> exec,
     solver->add_logger(logger);
 
     auto x = Vec::create(exec, gko::dim<2>{n, 1});
-    x->fill(0.0);
 
     exec->synchronize();
     auto t_solve0 = std::chrono::high_resolution_clock::now();
-    solver->apply(b, x);
+    for (int irep = 0; irep < cfg.solver_reps; irep++) {
+        x->fill(0.0);
+        solver->apply(b, x);
+    }
     exec->synchronize();
     auto t_solve1 = std::chrono::high_resolution_clock::now();
 
@@ -112,10 +114,8 @@ GmresStats run_gmres(std::shared_ptr<const gko::Executor> exec,
     const double final_res_norm =
         gko::clone(exec->get_master(), rnorm)->at(0, 0);
 
-    // --- Solution error vs analytical solution x* = ones ---
-    auto ones = Vec::create(exec, gko::dim<2>{n, 1});
-    ones->fill(1.0);
-    const double err = relative_error(exec, x.get(), ones.get());
+    // --- Solution error vs reference solution ---
+    const double err = relative_error(exec, x.get(), x_ref.get());
 
     return {setup_ms,
             solve_ms,
@@ -126,7 +126,7 @@ GmresStats run_gmres(std::shared_ptr<const gko::Executor> exec,
 }
 
 // Build RHS b = A_ell_double * ones  (so x* = ones)
-std::shared_ptr<gko::matrix::Dense<double>> generate_rhs(
+std::shared_ptr<gko::matrix::Dense<double>> generate_easy_rhs(
     std::shared_ptr<const gko::Executor> exec,
     const gko::matrix_data<double>& data)
 {
@@ -146,8 +146,77 @@ std::shared_ptr<gko::matrix::Dense<double>> generate_rhs(
     return gko::share(std::move(rhs));
 }
 
+std::shared_ptr<const gko::matrix::Dense<double>> generate_rhs(
+    std::shared_ptr<const gko::Executor> exec, const size_t n)
+{
+    using Vec = gko::matrix::Dense<double>;
+    auto hrhs = Vec::create(exec->get_master(),
+                            gko::dim<2>{static_cast<gko::size_type>(n), 1});
+    auto harr = hrhs->get_values();
+    for (uint32_t i = 0; i < n; i++) {
+        const auto x = static_cast<double>(i);
+        harr[i] = 2.0 * std::sin(4 * 3.1415 * x / n);
+    }
+    auto rhs =
+        Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+    rhs->copy_from(hrhs);
+    return gko::share(std::move(rhs));
+}
+
+std::shared_ptr<const gko::matrix::Dense<double>> compute_reference_solution(
+    std::shared_ptr<const gko::matrix::Ell<double, int32>> mat,
+    const std::vector<int32>& color_ptrs,
+    std::shared_ptr<const gko::matrix::Dense<double>> rhs)
+{
+    using Vec = gko::matrix::Dense<double>;
+    using RVec = gko::matrix::Dense<gko::remove_complex<double>>;
+    using Gmres = gko::solver::Gmres<double>;
+    using FGS = gko::solver::FwdGaussSeidel<double, int32>;
+
+    const auto n = mat->get_size()[0];
+    auto exec = mat->get_executor();
+    const double ref_tol = 1e-14;
+
+    // --- Setup ---
+    exec->synchronize();
+    auto t_setup0 = std::chrono::high_resolution_clock::now();
+
+    auto solver =
+        Gmres::build()
+            .with_krylov_dim(60u)
+            .with_criteria(
+                gko::stop::Iteration::build().with_max_iters(2000),
+                gko::stop::ResidualNorm<double>::build().with_reduction_factor(
+                    ref_tol))
+            .with_preconditioner(
+                FGS::build()
+                    .with_criteria(
+                        gko::stop::Iteration::build().with_max_iters(1u))
+                    .with_color_ptrs(color_ptrs))
+            .on(exec)
+            ->generate(mat);
+
+    // --- Solve ---
+    auto logger = gko::share(gko::log::Convergence<double>::create());
+    solver->add_logger(logger);
+
+    auto x = gko::share(Vec::create(exec, gko::dim<2>{n, 1}));
+
+    solver->apply(rhs, x);
+
+    if (!logger->has_converged()) {
+        const std::string err = "Reference solve did not converge to " +
+                                std::to_string(ref_tol) + "!\n";
+        std::cout << err;
+        throw std::runtime_error(err);
+    }
+
+    return x;
+}
+
 int main(int argc, char* argv[])
 {
+    using Vec = gko::matrix::Dense<double>;
     std::cout << "Num args = " << argc << std::endl;
     const Config cfg = (argc >= 2) ? load_config(argv[1]) : Config();
 
@@ -166,11 +235,19 @@ int main(int argc, char* argv[])
     auto data = generate_stencil_data(cfg.nx, cfg.ny, cfg.nz, fn, color_ptrs);
     const int64_t n = data.size[0];
     const int64_t nnz = data.nonzeros.size();
+    std::cout << "\n  Constructing Ell matrix...";
+    using EllD = gko::matrix::Ell<double, int32>;
+    auto ell_ref = EllD::create(exec->get_master());
+    ell_ref->read(data);
+    std::shared_ptr<const EllD> ellmat = gko::share(gko::clone(exec, ell_ref));
     std::cout << " done.\n";
 
     // Build RHS b = A_ell_double * ones  (so x* = ones)
-    const std::shared_ptr<const gko::matrix::Dense<double>> b =
-        generate_rhs(exec, data);
+    std::cout << "Generating RHS and reference solution...\n";
+    const std::shared_ptr<const Vec> b = generate_rhs(exec, n);
+    const std::shared_ptr<const Vec> x_ref =
+        compute_reference_solution(ellmat, color_ptrs, b);
+    std::cout << "Generated reference solution.\n";
 
     // Initial residual norm ||b||_2 (x_0 = 0, so r_0 = b)
     json results;
@@ -232,11 +309,7 @@ int main(int argc, char* argv[])
     GmresStats ref_s;
     // ---- ELL<double> system ----
     {
-        using Ell = gko::matrix::Ell<double, int32>;
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(data);
-        auto mat = gko::share(gko::clone(exec, ell_ref));
-        auto s = run_gmres(exec, mat, b, color_ptrs, cfg);
+        auto s = run_gmres(exec, ellmat, b, x_ref, color_ptrs, cfg);
         print_row("ELL<double>", s, s);
         ref_s = s;
     }
@@ -244,18 +317,14 @@ int main(int argc, char* argv[])
     // ---- AMP<double> system ----
     std::string amp_details;
     {
-        using Ell = gko::matrix::Ell<double, int32>;
         using Amp = gko::matrix::AMP<double, int32>;
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(data);
-        auto ell_dev = gko::share(gko::clone(exec, ell_ref));
         auto mat =
             gko::share(Amp::build()
                            .with_tolerance(cfg.amp_tolerance)
                            .with_strategy(Amp::tolerance_type::componentwise)
                            .on(exec)
-                           ->generate(ell_dev));
-        auto s = run_gmres(exec, mat, b, color_ptrs, cfg);
+                           ->generate(ellmat));
+        auto s = run_gmres(exec, mat, b, x_ref, color_ptrs, cfg);
         print_row("AMP<double>", s, ref_s);
         amp_details = compute_amp_details(mat.get(), rows);
     }
@@ -266,6 +335,6 @@ int main(int argc, char* argv[])
     std::ofstream of(out);
     of << std::setw(2) << results << "\n";
     std::cout << amp_details << std::endl;
-    std::cout << "\nResults written to " << out << "\n";
+    std::cout << "Results written to " << out << "\n";
     return 0;
 }

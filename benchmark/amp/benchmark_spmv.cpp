@@ -236,6 +236,6 @@ int main(int argc, char* argv[])
     std::ofstream of(out);
     of << std::setw(2) << results << "\n";
     std::cout << amp_details << std::endl;
-    std::cout << "\nResults written to " << out << "\n";
+    std::cout << "Results written to " << out << "\n";
     return 0;
 }
