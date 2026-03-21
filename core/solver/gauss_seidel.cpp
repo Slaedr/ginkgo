@@ -8,6 +8,7 @@
 
 #include <ginkgo/core/base/precision_dispatch.hpp>
 #include <ginkgo/core/matrix/amp.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 #include <ginkgo/core/solver/solver_base.hpp>
@@ -25,6 +26,7 @@ namespace {
 
 GKO_REGISTER_OPERATION(multicolor_fgs_ell, gssdl::multicolor_fgs_ell);
 GKO_REGISTER_OPERATION(multicolor_fgs_amp, gssdl::multicolor_fgs_amp);
+GKO_REGISTER_OPERATION(multicolor_fgs_csr, gssdl::multicolor_fgs_csr);
 
 
 }  // anonymous namespace
@@ -127,7 +129,10 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
     auto ampmat =
         std::dynamic_pointer_cast<const matrix::AMP<ValueType, IndexType>>(
             this->get_system_matrix());
-    if (!ellmat && !ampmat) {
+    auto csrmat =
+        std::dynamic_pointer_cast<const matrix::Csr<ValueType, IndexType>>(
+            this->get_system_matrix());
+    if (!ellmat && !ampmat && !csrmat) {
         GKO_NOT_SUPPORTED(this->get_system_matrix());
     }
 
@@ -138,9 +143,13 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
             exec->run(gssdl::make_multicolor_fgs_ell(
                 color_row_ptrs_, ellmat.get(), gko::detail::get_local(dense_b),
                 gko::detail::get_local(dense_x), iter == 0, &stop_status));
-        } else {
+        } else if (ampmat) {
             exec->run(gssdl::make_multicolor_fgs_amp(
                 color_row_ptrs_, ampmat.get(), gko::detail::get_local(dense_b),
+                gko::detail::get_local(dense_x), iter == 0, &stop_status));
+        } else {
+            exec->run(gssdl::make_multicolor_fgs_csr(
+                color_row_ptrs_, csrmat.get(), gko::detail::get_local(dense_b),
                 gko::detail::get_local(dense_x), iter == 0, &stop_status));
         }
 

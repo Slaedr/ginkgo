@@ -183,6 +183,75 @@ GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_MULTICOLOR_FWD_GS_AMP_KERNEL);
 
 
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void multicolor_fgs_csr(std::shared_ptr<const ReferenceExecutor> exec,
+                        const std::vector<IndexType>& color_ptrs,
+                        const matrix::Csr<MatrixValueType, IndexType>* const a,
+                        const matrix::Dense<InputValueType>* const b,
+                        matrix::Dense<OutputValueType>* const x,
+                        const bool first_iter,
+                        array<stopping_status>* const stop_status)
+{
+    if (first_iter) {
+        for (size_type j = 0; j < stop_status->get_size(); ++j) {
+            stop_status->get_data()[j].reset();
+        }
+    }
+
+    if (color_ptrs.size() < 2) {
+        return;
+    }
+
+    const auto num_colors = color_ptrs.size() - 1;
+    const auto num_cols_rhs = b->get_size()[1];
+    const auto row_ptrs = a->get_const_row_ptrs();
+    const auto col_idxs = a->get_const_col_idxs();
+    const auto values = a->get_const_values();
+    auto* const x_vals = x->get_values();
+    const auto* const b_vals = b->get_const_values();
+    const auto x_stride = x->get_stride();
+    const auto b_stride = b->get_stride();
+
+    using highest_type = gko::highest_precision<InputValueType, MatrixValueType,
+                                                OutputValueType>;
+
+    for (size_type color = 0; color < num_colors; ++color) {
+        const auto row_begin = color_ptrs[color];
+        const auto row_end = color_ptrs[color + 1];
+
+        for (IndexType row = row_begin; row < row_end; ++row) {
+            for (size_type irhs = 0; irhs < num_cols_rhs; ++irhs) {
+                auto sum =
+                    static_cast<highest_type>(b_vals[row * b_stride + irhs]);
+                auto diag = zero<MatrixValueType>();
+
+                for (auto k = row_ptrs[row]; k < row_ptrs[row + 1]; ++k) {
+                    const auto col = col_idxs[k];
+                    const auto val = values[k];
+                    if (col == row) {
+                        diag = val;
+                    } else {
+                        sum -= static_cast<highest_type>(val) *
+                               static_cast<highest_type>(
+                                   x_vals[col * x_stride + irhs]);
+                    }
+                }
+
+                if (diag != zero<MatrixValueType>()) {
+                    x_vals[row * x_stride + irhs] =
+                        static_cast<OutputValueType>(
+                            sum / static_cast<highest_type>(diag));
+                }
+            }
+        }
+    }
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_MULTICOLOR_FWD_GS_CSR_KERNEL);
+
+
 }  // namespace gssdl
 }  // namespace reference
 }  // namespace kernels
