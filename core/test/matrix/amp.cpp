@@ -519,3 +519,116 @@ TYPED_TEST(Amp, CanExtractDiagonal)
     EXPECT_EQ(diag->get_size()[0],
               std::min(mtx->get_size()[0], mtx->get_size()[1]));
 }
+
+
+TYPED_TEST(Amp, ReadFromMatrixDataProducesCorrectSize)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+
+    gko::matrix_data<value_type, index_type> data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+
+    // Create empty AMP via factory with empty ELL input
+    auto ell_empty = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx = Mtx::build().on(this->exec)->generate(ell_empty);
+    mtx->read(data);
+
+    ASSERT_EQ(mtx->get_size(), gko::dim<2>(3, 3));
+    // At least one bin should be non-null
+    bool has_bin = false;
+    for (int i = 0; i < Mtx::num_precisions; ++i) {
+        if (mtx->get_bin_matrix(i) != nullptr) {
+            has_bin = true;
+        }
+    }
+    EXPECT_TRUE(has_bin);
+}
+
+
+TYPED_TEST(Amp, ReadProducesSameResultAsFactoryGenerate)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+    using Dense = typename TestFixture::Dense;
+
+    gko::matrix_data<value_type, index_type> data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+
+    // Method 1: read directly (via empty factory-generated AMP)
+    auto ell_empty = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx_read = Mtx::build().on(this->exec)->generate(ell_empty);
+    mtx_read->read(data);
+
+    // Method 2: factory generate from ELL
+    auto ell = gko::share(Ell::create(this->exec));
+    ell->read(data);
+    auto mtx_gen = Mtx::build().on(this->exec)->generate(ell);
+
+    // Both should produce the same dense result
+    auto dense_read = Dense::create(this->exec);
+    auto dense_gen = Dense::create(this->exec);
+    mtx_read->convert_to(dense_read.get());
+    mtx_gen->convert_to(dense_gen.get());
+
+    GKO_ASSERT_MTX_NEAR(dense_read, dense_gen, 0.0);
+}
+
+
+TYPED_TEST(Amp, ClonePreservesParameters)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+
+    const float custom_tol = 1e-3f;
+    auto ell = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx = Mtx::build()
+                   .with_tolerance(custom_tol)
+                   .with_strategy(Mtx::tolerance_type::normwise)
+                   .on(this->exec)
+                   ->generate(ell);
+
+    auto clone = gko::clone(mtx);
+
+    EXPECT_EQ(clone->get_parameters().tolerance, custom_tol);
+    EXPECT_EQ(clone->get_parameters().strategy, Mtx::tolerance_type::normwise);
+}
+
+
+TYPED_TEST(Amp, ReadAfterCloneUsesPreservedParameters)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+    using Dense = typename TestFixture::Dense;
+
+    const float custom_tol = 1e-6f;
+    gko::matrix_data<value_type, index_type> data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+
+    // Create configured empty AMP, clone it, then read data into clone
+    auto ell_empty = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto amp_template = Mtx::build()
+                            .with_tolerance(custom_tol)
+                            .on(this->exec)
+                            ->generate(ell_empty);
+    auto amp_clone = gko::clone(amp_template);
+    amp_clone->read(data);
+
+    ASSERT_EQ(amp_clone->get_size(), gko::dim<2>(3, 3));
+    EXPECT_EQ(amp_clone->get_parameters().tolerance, custom_tol);
+    // Verify it produces a valid matrix by converting to dense
+    auto dense = Dense::create(this->exec);
+    amp_clone->convert_to(dense.get());
+    EXPECT_EQ(dense->get_size(), gko::dim<2>(3, 3));
+}

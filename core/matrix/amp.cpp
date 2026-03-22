@@ -60,9 +60,14 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
 {
     if (&other != this) {
         EnableLinOp<AMP>::operator=(other);
+        this->parameters_ = other.parameters_;
         for (int i = 0; i < num_precisions; i++) {
-            this->mat_bins_[i] =
-                other.mat_bins_[i]->clone(this->get_executor());
+            if (other.mat_bins_[i]) {
+                this->mat_bins_[i] =
+                    other.mat_bins_[i]->clone(this->get_executor());
+            } else {
+                this->mat_bins_[i] = nullptr;
+            }
         }
     }
     return *this;
@@ -231,6 +236,18 @@ template <typename ValueType, typename IndexType>
 AMP<ValueType, IndexType>::AMP(AMP&& other) : AMP(other.get_executor())
 {
     *this = std::move(other);
+}
+
+
+template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::read(
+    const matrix_data<ValueType, IndexType>& data)
+{
+    auto exec = this->get_executor();
+    auto ell = Ell<ValueType, IndexType>::create(exec);
+    ell->read(data);
+    this->set_size(ell->get_size());
+    mat_bins_ = generate_amp(ell.get());
 }
 
 
