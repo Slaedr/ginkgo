@@ -386,19 +386,33 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
     int* const __restrict__ data, const int len, const int stride)
 {
     const auto group = group::this_thread_block();
-    // multireduce(group, max_bins_nnz_blocks, stride, q,
-    //             [](int a, int b) { return a < b ? b : a; });
     const auto local_id = group.thread_rank();
+    const auto block_size = group.size();
 
-    for (int k = group.size() / 2; k >= config::warp_size; k /= 2) {
+    // Pre-reduction: if len > block_size, each thread serially reduces
+    // its strided portion into the first block_size elements.
+    if (len > block_size) {
+        for (int j = 0; j < q; j++) {
+            int local_max = 0;
+            for (int idx = local_id; idx < len; idx += block_size) {
+                local_max = max(local_max, data[j * stride + idx]);
+            }
+            data[j * stride + local_id] = local_max;
+        }
         group.sync();
-        if (local_id < k && local_id < len) {
+    }
+
+    const int reduced_len = min(len, static_cast<int>(block_size));
+
+    for (int k = block_size / 2; k >= config::warp_size; k /= 2) {
+        group.sync();
+        if (local_id < k && local_id < reduced_len) {
             for (int j = 0; j < q; j++) {
                 const int a = data[j * stride + local_id];
-                const int b =
-                    (local_id + k < len) ? data[j * stride + local_id + k] : 0;
-                const int ans = max(a, b);
-                data[j * stride + local_id] = ans;
+                const int b = (local_id + k < reduced_len)
+                                  ? data[j * stride + local_id + k]
+                                  : 0;
+                data[j * stride + local_id] = max(a, b);
             }
         }
     }
@@ -411,7 +425,7 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
         return;
     }
     for (int j = 0; j < q; j++) {
-        auto val = warp.thread_rank() < len
+        auto val = warp.thread_rank() < reduced_len
                        ? data[j * stride + warp.thread_rank()]
                        : 0;
         auto result = reduce(warp, val, [](int a, int b) { return max(a, b); });
