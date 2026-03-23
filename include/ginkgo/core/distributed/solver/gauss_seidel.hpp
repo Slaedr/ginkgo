@@ -96,8 +96,9 @@ private:
     std::shared_ptr<const RowGatherer<LocalIndexType>> row_gatherer_;
     std::vector<std::shared_ptr<const LinOp>> color_solvers_;
     mutable gko::detail::DenseCache<ValueType> b_corrected_cache_;
-    mutable detail::VectorCache<ValueType> recv_cache_;
-    mutable detail::VectorCache<ValueType> host_recv_cache_;
+    // Double-buffered recv caches for overlapping halo exchange with compute
+    mutable detail::VectorCache<ValueType> recv_cache_[2];
+    mutable detail::VectorCache<ValueType> host_recv_cache_[2];
 };
 
 

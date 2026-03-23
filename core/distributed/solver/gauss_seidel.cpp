@@ -107,9 +107,12 @@ void FwdGaussSeidel<ValueType, LocalIndexType, GlobalIndexType>::
         dim<2>{static_cast<size_type>(row_gatherer_->get_size()[0]), ncols};
     auto local_recv_dim =
         dim<2>{static_cast<size_type>(coll_comm->get_recv_size()), ncols};
-    recv_cache_.init(exec, base_comm, global_recv_dim, local_recv_dim);
-    host_recv_cache_.init(exec->get_master(), base_comm, global_recv_dim,
-                          local_recv_dim);
+    const bool needs_host_buf = mpi::requires_host_buffer(exec, comm);
+    for (int i = 0; i < 2; ++i) {
+        recv_cache_[i].init(exec, base_comm, global_recv_dim, local_recv_dim);
+        host_recv_cache_[i].init(exec->get_master(), base_comm, global_recv_dim,
+                                 local_recv_dim);
+    }
 
     // Setup b_corrected cache (local Dense)
     b_corrected_cache_.init(exec, dim<2>{local_nrows, ncols});
@@ -130,24 +133,35 @@ void FwdGaussSeidel<ValueType, LocalIndexType, GlobalIndexType>::
     auto* local_b = gko::detail::get_local(dense_b);
     auto* local_x = gko::detail::get_local(dense_x);
 
+    auto start_exchange = [&](int buf) {
+        auto recv_ptr = needs_host_buf ? host_recv_cache_[buf].get()
+                                       : recv_cache_[buf].get();
+        return row_gatherer_->apply_async(dense_x, recv_ptr);
+    };
+
+    auto finish_exchange = [&](mpi::request& req, int buf) {
+        req.wait();
+        if (needs_host_buf) {
+            recv_cache_[buf]->copy_from(host_recv_cache_[buf].get());
+        }
+        return recv_cache_[buf]->get_local_vector();
+    };
+
     int iter = -1;
 
     while (true) {
         ++iter;
 
+        int cur_buf = 0;
+        auto req = start_exchange(cur_buf);
+
         for (int c = 0; c < num_colors; ++c) {
-            // Halo exchange: gather remote x values
-            auto recv_ptr = mpi::requires_host_buffer(exec, comm)
-                                ? host_recv_cache_.get()
-                                : recv_cache_.get();
-            auto req = row_gatherer_->apply_async(dense_x, recv_ptr);
-            req.wait();
+            auto* recv_local = finish_exchange(req, cur_buf);
 
-            if (recv_ptr != recv_cache_.get()) {
-                recv_cache_->copy_from(host_recv_cache_.get());
+            int next_buf = 1 - cur_buf;
+            if (c + 1 < num_colors) {
+                req = start_exchange(next_buf);
             }
-
-            auto* recv_local = recv_cache_->get_local_vector();
 
             // RHS correction: b_corrected = b_local - A_nonlocal * recv
             b_corrected_cache_->copy_from(local_b);
@@ -156,6 +170,8 @@ void FwdGaussSeidel<ValueType, LocalIndexType, GlobalIndexType>::
 
             // Local FGS sweep for this color
             color_solvers_[c]->apply(b_corrected_cache_.get(), local_x);
+
+            cur_buf = next_buf;
         }
 
         // Check stopping criterion
