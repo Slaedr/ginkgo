@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -425,6 +425,14 @@ public:
     std::shared_ptr<const LinOp> get_non_local_matrix() const
     {
         return non_local_mtx_;
+    }
+
+    /**
+     * Returns the row gatherer used for halo exchange.
+     */
+    std::shared_ptr<const RowGatherer<LocalIndexType>> get_row_gatherer() const
+    {
+        return row_gatherer_;
     }
 
     /**
