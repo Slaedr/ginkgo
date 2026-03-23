@@ -63,21 +63,20 @@ __device__ void ell_amp_spmv_impl(
     if (irhs >= nrhs) {
         return;
     }
-    // Initialize y to zero before accumulating across all bins
-    y[irow * y_stride + irhs] = zero<OValueType>();
+    using highest_type =
+        gko::highest_precision<IValueType, MValueType, OValueType>;
+    auto sum = zero<highest_type>();
     gko::constexpr_for<0, q, 1>([&](auto k) {
         using value_type = typename std::tuple_element<
             k, typename narrow_types<MValueType>::type>::type;
         // We need mult type because complex numbers of different precisions
         // don't get automatically promoted.
         using mult_type = gko::highest_precision<value_type, IValueType>;
-        using highest_type = gko::highest_precision<mult_type, OValueType>;
         const auto stride = bin_strides[k];
         auto avals = std::get<k>(bin_values);
         auto acols = bin_col_idxs[k];
         const auto max_nnz = bin_max_nnz_row[k];
         if (max_nnz > 0) {
-            highest_type sum = 0;
             for (int j = 0; j < max_nnz; j++) {
                 if (acols[irow + j * stride] >= 0) {
                     sum += static_cast<highest_type>(
@@ -86,9 +85,9 @@ __device__ void ell_amp_spmv_impl(
                             x[acols[irow + j * stride] * x_stride + irhs]));
                 }
             }
-            y[irow * y_stride + irhs] += static_cast<OValueType>(sum);
         }
     });
+    y[irow * y_stride + irhs] = static_cast<OValueType>(sum);
 }
 
 template <typename IValueType, typename MValueType, typename OValueType,
@@ -113,8 +112,9 @@ __device__ void ell_amp_adv_spmv_impl(
     if (irhs >= nrhs) {
         return;
     }
-    // Scale y by beta before accumulating alpha * A * x across all bins
-    y[irow * y_stride + irhs] = beta * y[irow * y_stride + irhs];
+    using highest_type =
+        gko::highest_precision<IValueType, MValueType, OValueType>;
+    auto sum = zero<highest_type>();
     const auto alval = static_cast<highest_type>(alpha);
     gko::constexpr_for<0, q, 1>([&](auto k) {
         using value_type = typename std::tuple_element<
@@ -125,7 +125,6 @@ __device__ void ell_amp_adv_spmv_impl(
         auto acols = bin_col_idxs[k];
         const auto max_nnz = bin_max_nnz_row[k];
         if (max_nnz > 0) {
-            highest_type sum = 0;
             for (int j = 0; j < max_nnz; j++) {
                 if (acols[irow + j * stride] >= 0) {
                     sum += static_cast<highest_type>(
@@ -134,9 +133,10 @@ __device__ void ell_amp_adv_spmv_impl(
                             x[acols[irow + j * stride] * x_stride + irhs]));
                 }
             }
-            y[irow * y_stride + irhs] += static_cast<OValueType>(alval * sum);
         }
     });
+    y[irow * y_stride + irhs] =
+        beta * y[irow * y_stride + irhs] + static_cast<OValueType>(alval * sum);
 }
 
 template <typename IValueType, typename MValueType, typename OValueType,
