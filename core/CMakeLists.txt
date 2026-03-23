@@ -12,6 +12,7 @@ set(config_source
 )
 if(GINKGO_BUILD_MPI)
     list(APPEND config_source config/schwarz_config.cpp)
+    list(APPEND config_source config/dist_fgs_config.cpp)
 endif()
 # MSVC: LNK1189 issue
 # CLANG in MSYS2 (MINGW): too many exported symbols
