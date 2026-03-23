@@ -44,7 +44,7 @@ using ScalarDCPtrTuple =
 // spmv kernel: 1 thread block-column per RHS
 // TODO: Optimize cache usage using intrinsics
 template <typename IValueType, typename MValueType, typename OValueType,
-          typename IndexType, typename InitialCombiner, typename Combiner>
+          typename IndexType>
 __device__ void ell_amp_spmv_impl(
     const size_type nrows, const uint32 nrhs,
     precision_array<size_type, MValueType> bin_strides,
@@ -52,7 +52,7 @@ __device__ void ell_amp_spmv_impl(
     precision_array<const IndexType*, MValueType> bin_col_idxs,
     ScalarDCPtrTuple<MValueType> bin_values, const uint32 x_stride,
     const IValueType* const __restrict__ x, const uint32 y_stride,
-    OValueType* const __restrict__ y, InitialCombiner initial_op, Combiner op)
+    OValueType* const __restrict__ y)
 {
     constexpr int q = narrow_types<MValueType>::num_types;
     const auto irow = blockIdx.x * blockDim.x + threadIdx.x;
@@ -63,19 +63,20 @@ __device__ void ell_amp_spmv_impl(
     if (irhs >= nrhs) {
         return;
     }
+    using highest_type =
+        gko::highest_precision<IValueType, MValueType, OValueType>;
+    auto sum = zero<highest_type>();
     gko::constexpr_for<0, q, 1>([&](auto k) {
         using value_type = typename std::tuple_element<
             k, typename narrow_types<MValueType>::type>::type;
         // We need mult type because complex numbers of different precisions
         // don't get automatically promoted.
         using mult_type = gko::highest_precision<value_type, IValueType>;
-        using highest_type = gko::highest_precision<mult_type, OValueType>;
         const auto stride = bin_strides[k];
         auto avals = std::get<k>(bin_values);
         auto acols = bin_col_idxs[k];
         const auto max_nnz = bin_max_nnz_row[k];
         if (max_nnz > 0) {
-            highest_type sum = 0;
             for (int j = 0; j < max_nnz; j++) {
                 if (acols[irow + j * stride] >= 0) {
                     sum += static_cast<highest_type>(
@@ -84,14 +85,58 @@ __device__ void ell_amp_spmv_impl(
                             x[acols[irow + j * stride] * x_stride + irhs]));
                 }
             }
-            if constexpr (k == 0) {
-                y[irow * y_stride + irhs] =
-                    initial_op(sum, y[irow * y_stride + irhs]);
-            } else {
-                y[irow * y_stride + irhs] += op(sum);
+        }
+    });
+    y[irow * y_stride + irhs] = static_cast<OValueType>(sum);
+}
+
+template <typename IValueType, typename MValueType, typename OValueType,
+          typename IndexType>
+__device__ void ell_amp_adv_spmv_impl(
+    const size_type nrows, const uint32 nrhs, const MValueType alpha,
+    const OValueType beta, precision_array<size_type, MValueType> bin_strides,
+    precision_array<size_type, MValueType> bin_max_nnz_row,
+    precision_array<const IndexType*, MValueType> bin_col_idxs,
+    ScalarDCPtrTuple<MValueType> bin_values, const uint32 x_stride,
+    const IValueType* const __restrict__ x, const uint32 y_stride,
+    OValueType* const __restrict__ y)
+{
+    using highest_type =
+        gko::highest_precision<IValueType, MValueType, OValueType>;
+    constexpr int q = narrow_types<MValueType>::num_types;
+    const auto irow = blockIdx.x * blockDim.x + threadIdx.x;
+    if (irow >= nrows) {
+        return;
+    }
+    const auto irhs = blockIdx.y;
+    if (irhs >= nrhs) {
+        return;
+    }
+    using highest_type =
+        gko::highest_precision<IValueType, MValueType, OValueType>;
+    auto sum = zero<highest_type>();
+    const auto alval = static_cast<highest_type>(alpha);
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        using value_type = typename std::tuple_element<
+            k, typename narrow_types<MValueType>::type>::type;
+        using mult_type = gko::highest_precision<value_type, IValueType>;
+        const auto stride = bin_strides[k];
+        auto avals = std::get<k>(bin_values);
+        auto acols = bin_col_idxs[k];
+        const auto max_nnz = bin_max_nnz_row[k];
+        if (max_nnz > 0) {
+            for (int j = 0; j < max_nnz; j++) {
+                if (acols[irow + j * stride] >= 0) {
+                    sum += static_cast<highest_type>(
+                        static_cast<mult_type>(avals[irow + j * stride]) *
+                        static_cast<mult_type>(
+                            x[acols[irow + j * stride] * x_stride + irhs]));
+                }
             }
         }
     });
+    y[irow * y_stride + irhs] =
+        beta * y[irow * y_stride + irhs] + static_cast<OValueType>(alval * sum);
 }
 
 template <typename IValueType, typename MValueType, typename OValueType,
@@ -107,8 +152,7 @@ __global__ __launch_bounds__(default_block_size) void ell_amp_basic_spmv(
 {
     ell_amp_spmv_impl<IValueType, MValueType, OValueType, IndexType>(
         nrows, nrhs, bin_strides, bin_max_nnz_row, bin_col_idxs, bin_values,
-        x_stride, x, y_stride, y, [](auto sum, auto& x) { return sum; },
-        [](auto x) { return x; });
+        x_stride, x, y_stride, y);
 }
 
 template <typename IValueType, typename MValueType, typename OValueType,
@@ -124,21 +168,9 @@ __global__ __launch_bounds__(default_block_size) void ell_amp_adv_spmv(
     const OValueType* const __restrict__ beta, const uint32 y_stride,
     OValueType* const __restrict__ y)
 {
-    using highest_type =
-        gko::highest_precision<IValueType, MValueType, OValueType>;
-    const auto alval = static_cast<highest_type>(alpha[0]);
-    const auto beval = beta[0];
-    ell_amp_spmv_impl<IValueType, MValueType, OValueType, IndexType>(
-        nrows, nrhs, bin_strides, bin_max_nnz_row, bin_col_idxs, bin_values,
-        x_stride, x, y_stride, y,
-        [alval, beval](auto sum, OValueType& x) {
-            return static_cast<OValueType>(
-                beval * x + alval * static_cast<highest_type>(sum));
-        },
-        [alval](auto sum) {
-            return static_cast<OValueType>(alval *
-                                           static_cast<highest_type>(sum));
-        });
+    ell_amp_adv_spmv_impl<IValueType, MValueType, OValueType, IndexType>(
+        nrows, nrhs, alpha[0], beta[0], bin_strides, bin_max_nnz_row,
+        bin_col_idxs, bin_values, x_stride, x, y_stride, y);
 }
 
 template <typename InputValueType, typename MatrixValueType,

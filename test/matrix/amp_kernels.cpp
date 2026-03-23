@@ -302,3 +302,77 @@ TEST_F(Amp, ExtractDiagonalIsEquivalentToRef)
 
     GKO_ASSERT_MTX_NEAR(diag_ref, diag_exec, 0);
 }
+
+
+TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0IsEmpty)
+{
+    using T = value_type;
+    // Build a constant 1D tridiagonal stencil [-1, 2, -1]
+    const int n = 64;
+    auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
+    dns_ref->fill(0.0);
+    for (int i = 0; i < n; i++) {
+        dns_ref->at(i, i) = 2.0;
+        if (i > 0) dns_ref->at(i, i - 1) = -1.0;
+        if (i < n - 1) dns_ref->at(i, i + 1) = -1.0;
+    }
+    auto ell_ref = Mtx::create(ref);
+    dns_ref->convert_to(ell_ref.get());
+    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
+        gko::share(ell_ref->clone()));
+    // Verify bin 0 is actually empty
+    auto bin0 = dynamic_cast<const Mtx*>(amp_ref->get_bin_matrix(0));
+    ASSERT_NE(bin0, nullptr);
+    ASSERT_EQ(bin0->get_num_stored_elements_per_row(), 0);
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(n, 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = Vec::create(ref, gko::dim<2>{n, 1});
+    auto c_d = Vec::create(exec, gko::dim<2>{n, 1});
+
+    gko::kernels::reference::amp::spmv(ref, amp_ref.get(), b_ref.get(),
+                                       c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv(exec, amp_d.get(), b_d.get(),
+                                                  c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
+{
+    using T = value_type;
+    const int n = 64;
+    auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
+    dns_ref->fill(0.0);
+    for (int i = 0; i < n; i++) {
+        dns_ref->at(i, i) = 2.0;
+        if (i > 0) dns_ref->at(i, i - 1) = -1.0;
+        if (i < n - 1) dns_ref->at(i, i + 1) = -1.0;
+    }
+    auto ell_ref = Mtx::create(ref);
+    dns_ref->convert_to(ell_ref.get());
+    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
+        gko::share(ell_ref->clone()));
+    // Verify bin 0 is actually empty
+    auto bin0 = dynamic_cast<const Mtx*>(amp_ref->get_bin_matrix(0));
+    ASSERT_NE(bin0, nullptr);
+    ASSERT_EQ(bin0->get_num_stored_elements_per_row(), 0);
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(n, 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = gen_vec(n, 1);
+    auto c_d = gko::clone(exec, c_ref);
+    auto alpha_ref = gko::initialize<Vec>({2.0}, ref);
+    auto alpha_d = gko::clone(exec, alpha_ref);
+    auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
+    auto beta_d = gko::clone(exec, beta_ref);
+
+    gko::kernels::reference::amp::advanced_spmv(ref, alpha_ref.get(),
+                                                amp_ref.get(), b_ref.get(),
+                                                beta_ref.get(), c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv(
+        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
