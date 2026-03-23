@@ -11,6 +11,7 @@
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/matrix/amp.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 #include <ginkgo/core/stop/stopping_status.hpp>
@@ -624,6 +625,224 @@ TYPED_TEST(GaussSeidelKernelAMPAccuracy, MultipleRHSMatchesELLWithinTol)
                 << ", ell=" << ell_val;
         }
     }
+}
+
+
+template <typename ValueIndexType>
+class GaussSeidelKernelCSR : public ::testing::Test {
+protected:
+    using value_type =
+        typename std::tuple_element<0, decltype(ValueIndexType())>::type;
+    using index_type =
+        typename std::tuple_element<1, decltype(ValueIndexType())>::type;
+    using Mtx = gko::matrix::Csr<value_type, index_type>;
+    using Vec = gko::matrix::Dense<value_type>;
+
+    GaussSeidelKernelCSR()
+        : exec(gko::ReferenceExecutor::create()),
+          // Same 4x4 matrix as ELL tests, 2 colors:
+          //   color 0: rows 0, 1
+          //   color 1: rows 2, 3
+          //
+          // A = [ 2  0  1  0 ]
+          //     [ 0  3  0  1 ]
+          //     [ 1  0  4  0 ]
+          //     [ 0  1  0  5 ]
+          mtx(gko::initialize<Mtx>(
+              // clang-format off
+              {{2.0, 0.0, 1.0, 0.0},
+               {0.0, 3.0, 0.0, 1.0},
+               {1.0, 0.0, 4.0, 0.0},
+               {0.0, 1.0, 0.0, 5.0}},
+              // clang-format on
+              exec)),
+          color_ptrs{0, 2, 4}
+    {}
+
+    std::shared_ptr<const gko::ReferenceExecutor> exec;
+    std::unique_ptr<Mtx> mtx;
+    std::vector<index_type> color_ptrs;
+};
+
+TYPED_TEST_SUITE(GaussSeidelKernelCSR, gko::test::ValueIndexTypesBase,
+                 PairTypenameNameGenerator);
+
+
+TYPED_TEST(GaussSeidelKernelCSR, SingleIterationFromZero)
+{
+    using Vec = typename TestFixture::Vec;
+    using value_type = typename TestFixture::value_type;
+
+    auto b = gko::initialize<Vec>({2.0, 3.0, 3.0, 2.0}, this->exec);
+    auto x = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x.get(), true,
+        &stop);
+
+    // x[0] = 2/2 = 1, x[1] = 3/3 = 1
+    // x[2] = (3 - 1*1)/4 = 0.5, x[3] = (2 - 1*1)/5 = 0.2
+    GKO_ASSERT_MTX_NEAR(x, l({1.0, 1.0, 0.5, 0.2}), r<value_type>::value);
+}
+
+
+TYPED_TEST(GaussSeidelKernelCSR, UsesCurrentXAsInitialGuess)
+{
+    using Vec = typename TestFixture::Vec;
+    using value_type = typename TestFixture::value_type;
+
+    auto b = gko::initialize<Vec>({2.0, 3.0, 3.0, 2.0}, this->exec);
+    auto x = gko::initialize<Vec>({0.5, 0.5, 0.5, -0.5}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x.get(), true,
+        &stop);
+
+    GKO_ASSERT_MTX_NEAR(x,
+                        l({value_type{0.75}, value_type{7.0 / 6.0},
+                           value_type{0.5625}, value_type{1.0 / 6.0}}),
+                        r<value_type>::value);
+}
+
+
+TYPED_TEST(GaussSeidelKernelCSR, MultipleRHS)
+{
+    using Vec = typename TestFixture::Vec;
+    using value_type = typename TestFixture::value_type;
+    using T = value_type;
+
+    auto b = gko::initialize<Vec>(
+        {I<T>{2.0, 4.0}, I<T>{3.0, 6.0}, I<T>{3.0, 6.0}, I<T>{2.0, 4.0}},
+        this->exec);
+    auto x = gko::initialize<Vec>(
+        {I<T>{0.0, 0.0}, I<T>{0.0, 0.0}, I<T>{0.0, 0.0}, I<T>{0.0, 0.0}},
+        this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 2);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x.get(), true,
+        &stop);
+
+    GKO_ASSERT_MTX_NEAR(x, l({{1.0, 2.0}, {1.0, 2.0}, {0.5, 1.0}, {0.2, 0.4}}),
+                        r<value_type>::value);
+}
+
+
+TYPED_TEST(GaussSeidelKernelCSR, FirstIterResetsStopStatus)
+{
+    using Vec = typename TestFixture::Vec;
+
+    auto b = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    auto x = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 2);
+
+    gko::stopping_status stopped{};
+    stopped.stop(1);
+    stop.get_data()[0] = stopped;
+    stop.get_data()[1] = stopped;
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x.get(), true,
+        &stop);
+
+    gko::stopping_status non_stopped{};
+    non_stopped.reset();
+    EXPECT_EQ(stop.get_data()[0], non_stopped);
+    EXPECT_EQ(stop.get_data()[1], non_stopped);
+}
+
+
+TYPED_TEST(GaussSeidelKernelCSR, SubsequentIterDoesNotResetStopStatus)
+{
+    using Vec = typename TestFixture::Vec;
+
+    auto b = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    auto x = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 2);
+
+    gko::stopping_status stopped{};
+    stopped.stop(1);
+    stop.get_data()[0] = stopped;
+    stop.get_data()[1] = stopped;
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x.get(), false,
+        &stop);
+
+    EXPECT_EQ(stop.get_data()[0], stopped);
+    EXPECT_EQ(stop.get_data()[1], stopped);
+}
+
+
+TYPED_TEST(GaussSeidelKernelCSR, DiagonalOnlyMatrixSolvesExactlyInOneStep)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+
+    auto diag = gko::initialize<Mtx>(
+        {{4.0, 0.0, 0.0}, {0.0, 2.0, 0.0}, {0.0, 0.0, 5.0}}, this->exec);
+    auto b = gko::initialize<Vec>({8.0, 6.0, 10.0}, this->exec);
+    auto x = gko::initialize<Vec>({0.0, 0.0, 0.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+    std::vector<index_type> single_color{0, 3};
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, single_color, diag.get(), b.get(), x.get(), true, &stop);
+
+    GKO_ASSERT_MTX_NEAR(x, l({2.0, 3.0, 2.0}), r<value_type>::value);
+}
+
+
+TYPED_TEST(GaussSeidelKernelCSR, EmptyColorPtrsDoesNothing)
+{
+    using Vec = typename TestFixture::Vec;
+    using index_type = typename TestFixture::index_type;
+
+    auto b = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0}, this->exec);
+    auto x = gko::initialize<Vec>({5.0, 6.0, 7.0, 8.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+    std::vector<index_type> empty_ptrs{};
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, empty_ptrs, this->mtx.get(), b.get(), x.get(), true, &stop);
+
+    GKO_ASSERT_MTX_NEAR(x, l({5.0, 6.0, 7.0, 8.0}), 0.0);
+}
+
+
+TYPED_TEST(GaussSeidelKernelCSR, MatchesELLKernelExactly)
+{
+    using Vec = typename TestFixture::Vec;
+    using Ell = gko::matrix::Ell<typename TestFixture::value_type,
+                                 typename TestFixture::index_type>;
+    using value_type = typename TestFixture::value_type;
+
+    auto ell = gko::initialize<Ell>(
+        // clang-format off
+        {{2.0, 0.0, 1.0, 0.0},
+         {0.0, 3.0, 0.0, 1.0},
+         {1.0, 0.0, 4.0, 0.0},
+         {0.0, 1.0, 0.0, 5.0}},
+        // clang-format on
+        this->exec);
+
+    auto b = gko::initialize<Vec>({2.0, 3.0, 3.0, 2.0}, this->exec);
+    auto x_csr = gko::initialize<Vec>({0.5, 0.5, 0.5, -0.5}, this->exec);
+    auto x_ell = gko::initialize<Vec>({0.5, 0.5, 0.5, -0.5}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x_csr.get(),
+        true, &stop);
+    gko::kernels::reference::gssdl::multicolor_fgs_ell(
+        this->exec, this->color_ptrs, ell.get(), b.get(), x_ell.get(), true,
+        &stop);
+
+    GKO_ASSERT_MTX_NEAR(x_csr, x_ell, r<value_type>::value);
 }
 
 

@@ -40,7 +40,7 @@ enum class gs_algorithm { multicolor, syncfree };
  * (D+L) x^(n+1) = b - U x^n
  * where L is the lower triangular part of A, U is the lower triangular part,
  * and D is the diagonal part of A.
- * It works only for certain matrix types: Ell, AMP with Ell.
+ * It works only for certain matrix types: Ell, AMP with Ell, Csr.
  *
  * @tparam ValueType  precision of matrix elements
  * @tparam IndexType  precision of matrix indices
