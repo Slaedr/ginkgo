@@ -862,6 +862,76 @@ TYPED_TEST(AMPDouble, ExtractDiagonalSumsOverBins)
 }
 
 
+TEST(AMPEmptyBin0, SpmvIsCorrectWhenBin0IsEmpty)
+{
+    using ValueType = double;
+    using IndexType = int;
+    using Mtx = gko::matrix::AMP<ValueType, IndexType>;
+    using Ell = gko::matrix::Ell<ValueType, IndexType>;
+    using Vec = gko::matrix::Dense<ValueType>;
+    auto exec = gko::ReferenceExecutor::create();
+    // 4x4 constant 1D stencil: [-1, 2, -1] (tridiagonal)
+    // clang-format off
+    auto dns = gko::initialize<gko::matrix::Dense<ValueType>>(
+        {{ 2.0, -1.0,  0.0,  0.0},
+         {-1.0,  2.0, -1.0,  0.0},
+         { 0.0, -1.0,  2.0, -1.0},
+         { 0.0,  0.0, -1.0,  2.0}}, exec);
+    // clang-format on
+    auto ell = Ell::create(exec);
+    dns->convert_to(ell.get());
+
+    auto amp = Mtx::build().with_tolerance(0.01f).on(exec)->generate(
+        gko::share(ell->clone()));
+
+    auto bin0 = dynamic_cast<const Ell*>(amp->get_bin_matrix(0));
+    ASSERT_NE(bin0, nullptr);
+    EXPECT_EQ(bin0->get_num_stored_elements_per_row(), 0);
+
+    auto x = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0}, exec);
+    auto y_amp = Vec::create(exec, gko::dim<2>{4, 1});
+    auto y_ref = Vec::create(exec, gko::dim<2>{4, 1});
+
+    amp->apply(x, y_amp);
+    ell->apply(x, y_ref);
+
+    GKO_ASSERT_MTX_NEAR(y_amp, y_ref, 0.01);
+}
+
+
+TEST(AMPEmptyBin0, AdvancedSpmvIsCorrectWhenBin0IsEmpty)
+{
+    using ValueType = double;
+    using IndexType = int;
+    using Mtx = gko::matrix::AMP<ValueType, IndexType>;
+    using Ell = gko::matrix::Ell<ValueType, IndexType>;
+    using Vec = gko::matrix::Dense<ValueType>;
+    auto exec = gko::ReferenceExecutor::create();
+    // clang-format off
+    auto dns = gko::initialize<gko::matrix::Dense<ValueType>>(
+        {{ 2.0, -1.0,  0.0,  0.0},
+         {-1.0,  2.0, -1.0,  0.0},
+         { 0.0, -1.0,  2.0, -1.0},
+         { 0.0,  0.0, -1.0,  2.0}}, exec);
+    // clang-format on
+    auto ell = Ell::create(exec);
+    dns->convert_to(ell.get());
+    auto amp = Mtx::build().with_tolerance(0.01f).on(exec)->generate(
+        gko::share(ell->clone()));
+
+    auto alpha = gko::initialize<Vec>({2.0}, exec);
+    auto beta = gko::initialize<Vec>({-1.0}, exec);
+    auto x = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0}, exec);
+    auto y_amp = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, exec);
+    auto y_ref = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, exec);
+
+    amp->apply(alpha, x, beta, y_amp);
+    ell->apply(alpha, x, beta, y_ref);
+
+    GKO_ASSERT_MTX_NEAR(y_amp, y_ref, 0.01);
+}
+
+
 template <typename ValueType>
 class AMPFloat : public ::testing::Test {
 protected:
