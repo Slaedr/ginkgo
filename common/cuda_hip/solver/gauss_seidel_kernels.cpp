@@ -9,6 +9,9 @@
 
 #include "common/cuda_hip/base/config.hpp"
 #include "common/cuda_hip/base/types.hpp"
+#include "common/cuda_hip/components/cooperative_groups.hpp"
+#include "common/cuda_hip/components/reduction.hpp"
+#include "common/cuda_hip/components/thread_ids.hpp"
 #include "common/unified/matrix/amp_algorithms.hpp"
 #include "core/base/mixed_precision_types.hpp"
 #include "core/base/utils.hpp"
@@ -25,6 +28,7 @@ namespace GKO_DEVICE_NAMESPACE {
 namespace gssdl {
 
 namespace gkerd = gko::kernels::GKO_DEVICE_NAMESPACE;
+using gkerd::reduce;
 
 constexpr int default_block_size = 1024;
 
@@ -255,6 +259,9 @@ GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_MULTICOLOR_FWD_GS_AMP_KERNEL);
 
 
+constexpr int warp_size = config::warp_size;
+constexpr int warps_per_block = default_block_size / warp_size;
+
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void mc_fgs_csr(
@@ -268,31 +275,46 @@ __global__ __launch_bounds__(default_block_size) void mc_fgs_csr(
 {
     using highest_type = gko::highest_precision<InputValueType, MatrixValueType,
                                                 OutputValueType>;
-    const auto row = begin_row + blockDim.x * blockIdx.x + threadIdx.x;
+    const auto warp =
+        group::tiled_partition<warp_size>(group::this_thread_block());
+    const auto lane = warp.thread_rank();
+    const auto warp_id = thread::get_subwarp_id_flat<warp_size, IndexType>();
+    const auto row = begin_row + warp_id;
     if (row >= end_row) {
         return;
     }
     const auto irhs = blockIdx.y;
-    if (first_iter && blockIdx.x == 0 && threadIdx.x == 0) {
+    if (first_iter && warp_id == 0 && lane == 0) {
         stopstatus[irhs].reset();
     }
-    auto sum = static_cast<highest_type>(b[row * b_stride + irhs]);
+
+    const auto row_start = row_ptrs[row];
+    const auto row_end_nnz = row_ptrs[row + 1];
+    auto partial_sum = zero<highest_type>();
     auto diag = zero<MatrixValueType>();
 
-    for (auto k = row_ptrs[row]; k < row_ptrs[row + 1]; ++k) {
+    for (auto k = row_start + lane; k < row_end_nnz; k += warp_size) {
         const auto col = col_idxs[k];
         const auto val = values[k];
         if (col == row) {
             diag = val;
         } else {
-            sum -= static_cast<highest_type>(val) *
-                   static_cast<highest_type>(x[col * x_stride + irhs]);
+            partial_sum -= static_cast<highest_type>(val) *
+                           static_cast<highest_type>(x[col * x_stride + irhs]);
         }
     }
 
-    if (diag != zero<MatrixValueType>()) {
-        x[row * x_stride + irhs] =
-            static_cast<OutputValueType>(sum / static_cast<highest_type>(diag));
+    auto sum = reduce(warp, partial_sum,
+                      [](highest_type a, highest_type b) { return a + b; });
+    auto warp_diag = reduce(
+        warp, diag, [](MatrixValueType a, MatrixValueType b) { return a + b; });
+
+    if (lane == 0) {
+        sum += static_cast<highest_type>(b[row * b_stride + irhs]);
+        if (warp_diag != zero<MatrixValueType>()) {
+            x[row * x_stride + irhs] = static_cast<OutputValueType>(
+                sum / static_cast<highest_type>(warp_diag));
+        }
     }
 }
 
@@ -328,9 +350,9 @@ void multicolor_fgs_csr(std::shared_ptr<const DefaultExecutor> exec,
         const auto row_begin = color_ptrs[color];
         const auto row_end = color_ptrs[color + 1];
         const auto nrows = row_end - row_begin;
-        const dim3 nblocks{
-            static_cast<uint32>(ceildiv(nrows, default_block_size)),
-            static_cast<uint32>(num_rhs), 1u};
+        // One warp per row: warps_per_block rows per block
+        const dim3 nblocks{static_cast<uint32>(ceildiv(nrows, warps_per_block)),
+                           static_cast<uint32>(num_rhs), 1u};
         mc_fgs_csr<d_i_val_type, d_m_val_type, d_o_val_type, IndexType>
             <<<nblocks, default_block_size, 0, exec->get_stream()>>>(
                 row_ptrs_dev, col_idxs_dev, values_dev, row_begin, row_end,
