@@ -304,7 +304,7 @@ inline std::string compute_amp_details(
     std::stringstream sstream;
     using Ell = gko::matrix::Ell<double, int32>;
     constexpr int q = gko::matrix::AMP<double, int32>::num_precisions;
-    sstream << "AMP matrix recision buckets:\n";
+    sstream << "AMP matrix precision buckets:\n";
     json amps = json::array();
     for (int k = 0; k < q; k++) {
         auto ellmat = static_cast<const Ell*>(mtx->get_bin_matrix(k));
