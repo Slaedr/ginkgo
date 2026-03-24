@@ -228,6 +228,7 @@ if(GINKGO_BUILD_MPI)
     ginkgo_compile_features(mpi_timer)
 endif()
 
+add_subdirectory(amp)
 add_subdirectory(blas)
 add_subdirectory(conversion)
 add_subdirectory(matrix_generator)

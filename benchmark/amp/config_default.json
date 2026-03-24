@@ -1,0 +1,13 @@
+{
+  "nx": 64,
+  "ny": 64,
+  "nz": 64,
+  "executor": "omp",
+  "warmup_reps": 2,
+  "bench_reps": 10,
+  "amp_tolerance": 0.01,
+  "gmres_tol": 1e-8,
+  "gmres_max_iters": 1000,
+  "gmres_krylov_dim": 50,
+  "matrix_values_type": "diagonal_dominant"
+}
