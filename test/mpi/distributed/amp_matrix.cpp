@@ -62,7 +62,7 @@ protected:
         {n, 1}, {{0, 0, 1.0}, {1, 0, 1.0}, {2, 0, 1.0}, {3, 0, 1.0}}};
 
     std::shared_ptr<part_type> partition = gko::share(
-        part_type::build_from_global_size_uniform(ref, comm.size(), n));
+        part_type::build_from_global_size_uniform(exec, comm.size(), n));
 
     std::shared_ptr<dist_mat> create_amp_dist_matrix()
     {
