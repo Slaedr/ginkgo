@@ -10,6 +10,7 @@
 
 #include <ginkgo/core/base/amp_types.hpp>
 #include <ginkgo/core/base/lin_op.hpp>
+#include <ginkgo/core/base/matrix_data.hpp>
 #include <ginkgo/core/base/polymorphic_object.hpp>
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
@@ -40,7 +41,8 @@ class Dense;
 template <typename ValueType = default_precision, typename IndexType = int32>
 class AMP : public EnableLinOp<AMP<ValueType, IndexType>>,
             public ConvertibleTo<Dense<ValueType>>,
-            public DiagonalExtractable<ValueType> {
+            public DiagonalExtractable<ValueType>,
+            public ReadableFromMatrixData<ValueType, IndexType> {
     friend class EnablePolymorphicObject<AMP, LinOp>;
     friend class Dense<ValueType>;
     friend class AMP<to_complex<ValueType>, IndexType>;
@@ -71,6 +73,8 @@ public:
     void move_to(Dense<ValueType>* other) override;
 
     std::unique_ptr<Diagonal<ValueType>> extract_diagonal() const override;
+
+    void read(const matrix_data<ValueType, IndexType>& data) override;
 
     /**
      * Returns a pointer to the i-th bin matrix.
