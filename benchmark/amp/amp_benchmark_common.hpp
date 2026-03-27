@@ -28,11 +28,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include <ginkgo/ginkgo.hpp>
-
+#include "benchmark/amp/types.hpp"
 
 using json = nlohmann::json;
-using int32 = gko::int32;
 
 enum class mat_offdiag_t { laplace, random_diag_dominant, random_general };
 
@@ -98,46 +96,6 @@ inline Config load_config(const std::string& path)
     return cfg;
 }
 
-// ============================================================
-// Executor factory
-// ============================================================
-
-inline std::shared_ptr<gko::Executor> make_executor(const std::string& name)
-{
-    auto omp = gko::OmpExecutor::create();
-    if (name == "cuda") return gko::CudaExecutor::create(0, omp);
-    if (name == "hip") return gko::HipExecutor::create(0, omp);
-    if (name == "omp") return omp;
-    if (name == "reference") return gko::ReferenceExecutor::create();
-    throw std::runtime_error("Unknown executor: " + name);
-}
-
-// ============================================================
-// Timing
-// ============================================================
-
-/**
- * Time an operation using wall-clock with executor synchronization.
- * Returns average time per rep in milliseconds.
- */
-template <typename Fn>
-double time_ms(std::shared_ptr<const gko::Executor> exec, int warmup, int reps,
-               Fn&& fn)
-{
-    for (int i = 0; i < warmup; ++i) {
-        fn();
-        exec->synchronize();
-    }
-    exec->synchronize();
-    auto t0 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < reps; ++i) {
-        fn();
-    }
-    exec->synchronize();
-    auto t1 = std::chrono::high_resolution_clock::now();
-    return std::chrono::duration<double, std::milli>(t1 - t0).count() / reps;
-}
-
 /// Generator functor for off-diagonal values
 struct OffdiagFn {
     Config cfg;
@@ -167,94 +125,45 @@ struct OffdiagFn {
 };
 
 // ============================================================
-// 3D 27-point stencil generator with 8-coloring
+// Executor factory
+// ============================================================
+
+inline std::shared_ptr<gko::Executor> make_executor(const std::string& name)
+{
+    auto omp = gko::OmpExecutor::create();
+    if (name == "cuda") return gko::CudaExecutor::create(0, omp);
+    if (name == "hip") return gko::HipExecutor::create(0, omp);
+    if (name == "omp") return omp;
+    if (name == "reference") return gko::ReferenceExecutor::create();
+    throw std::runtime_error("Unknown executor: " + name);
+}
+
+// ============================================================
+// Timing
 // ============================================================
 
 /**
- * Builds matrix_data for a 3D NxNxN 27-point stencil with rows ordered by
- * 8-color partitioning (color = (i%2) + 2*(j%2) + 4*(k%2)).  Within each
- * color, all nodes are independent under the 27-point stencil, making this
- * ordering suitable for multi-color Gauss-Seidel.
- *
- * Diagonal entry = 26.  Off-diagonal values are drawn independently from
- * @p gen.  To recover the original constant-coefficient stencil,
- * pass a distribution that always returns -1.
- *
- * @param nx, ny, nz   Grid dimensions.
- * @param gen          Generator function for off-diagonal values,
- *                     called with no arguments.
- * @param color_ptrs   Output: color_ptrs[c] is the first row of color c,
- *                     color_ptrs[8] == n.  Size 9.
- * @return  matrix_data<double, int32> in the color-ordered layout.
+ * Time an operation using wall-clock with executor synchronization.
+ * Returns average time per rep in milliseconds.
  */
-inline gko::matrix_data<double, int32> generate_stencil_data(
-    const int nx, const int ny, const int nz, OffdiagFn& gen,
-    std::vector<int32>& color_ptrs)
+template <typename Fn>
+double time_ms(comm_t comm, std::shared_ptr<const gko::Executor> exec,
+               int warmup, int reps, Fn&& fn)
 {
-    const int64_t n = static_cast<int64_t>(nx) * ny * nz;
-
-    std::vector<int32> old_to_new(n);
-    std::vector<int32> new_to_old(n);
-    std::vector<int32> cnt(8, 0);
-
-    for (int k = 0; k < nz; ++k)
-        for (int j = 0; j < ny; ++j)
-            for (int i = 0; i < nx; ++i)
-                ++cnt[(i % 2) + 2 * (j % 2) + 4 * (k % 2)];
-
-    color_ptrs.resize(9);
-    color_ptrs[0] = 0;
-    for (int c = 0; c < 8; ++c) color_ptrs[c + 1] = color_ptrs[c] + cnt[c];
-
-    std::vector<int32> fill(8, 0);
-    for (int k = 0; k < nz; ++k) {
-        for (int j = 0; j < ny; ++j) {
-            for (int i = 0; i < nx; ++i) {
-                int32 old_idx = i + j * nx + k * nx * ny;
-                int color = (i % 2) + 2 * (j % 2) + 4 * (k % 2);
-                int32 new_idx = color_ptrs[color] + fill[color]++;
-                old_to_new[old_idx] = new_idx;
-                new_to_old[new_idx] = old_idx;
-            }
-        }
+    for (int i = 0; i < warmup; ++i) {
+        fn();
+        exec->synchronize();
     }
-
-    gko::matrix_data<double, int32> data(gko::dim<2>{
-        static_cast<gko::size_type>(n), static_cast<gko::size_type>(n)});
-    data.nonzeros.reserve(27 * n);
-
-
-    double max_val{0.0}, min_val{100.0};
-    for (int32 new_row = 0; new_row < static_cast<int32>(n); ++new_row) {
-        int32 old_idx = new_to_old[new_row];
-        int ki = old_idx / (nx * ny);
-        int ji = (old_idx % (nx * ny)) / nx;
-        int ii = old_idx % nx;
-
-        for (int dk = -1; dk <= 1; ++dk) {
-            for (int dj = -1; dj <= 1; ++dj) {
-                for (int di = -1; di <= 1; ++di) {
-                    int ni = ii + di, nj = ji + dj, nk = ki + dk;
-                    if (ni < 0 || ni >= nx || nj < 0 || nj >= ny || nk < 0 ||
-                        nk >= nz)
-                        continue;
-                    const int32 old_col = ni + nj * nx + nk * nx * ny;
-                    const bool diag = (di == 0 && dj == 0 && dk == 0);
-                    const double val = diag ? 26.0 : gen();
-                    if (!diag) {
-                        max_val = std::max(max_val, std::abs(val));
-                        min_val = std::min(min_val, std::abs(val));
-                    }
-                    data.nonzeros.emplace_back(new_row, old_to_new[old_col],
-                                               val);
-                }
-            }
-        }
+    exec->synchronize();
+    comm->synchronize();
+    auto t0 = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < reps; ++i) {
+        fn();
     }
-    data.sort_row_major();
-    std::cout << "\n  Generated matrix off-diagonals: max abs val = " << max_val
-              << ", min abs val = " << min_val << std::endl;
-    return data;
+    exec->synchronize();
+    comm->synchronize();
+    auto t1 = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration<double, std::milli>(t1 - t0).count() / reps;
 }
 
 // ============================================================
@@ -329,10 +238,12 @@ inline void print_config(const Config& cfg)
               << cfg.bench_reps << "\n";
 }
 
-inline void print_perf_header(const std::string& title, int64_t n, int64_t nnz)
+inline void print_perf_header(const std::string& title, int64_t n, int64_t nnz,
+                              const int num_procs)
 {
     std::cout << "\n=== " << title << " ===\n";
-    std::cout << "  n = " << n << "  nnz = " << nnz << "\n";
+    std::cout << "  n = " << n << "  nnz = " << nnz
+              << "   procs = " << num_procs << "\n";
     std::cout << std::left << std::setw(20) << "Format" << std::setw(14)
               << "Time (ms)" << std::setw(14) << "GFLOP/s" << std::setw(10)
               << "Speedup" << std::setw(14) << "Rel. error"

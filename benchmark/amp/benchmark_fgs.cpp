@@ -31,6 +31,7 @@
 #include <ginkgo/ginkgo.hpp>
 
 #include "benchmark/amp/amp_benchmark_common.hpp"
+#include "benchmark/amp/matrix_generation.hpp"
 
 
 int main(int argc, char* argv[])

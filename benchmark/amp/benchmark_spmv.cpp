@@ -32,30 +32,46 @@
 #include <ginkgo/ginkgo.hpp>
 
 #include "benchmark/amp/amp_benchmark_common.hpp"
+#include "benchmark/amp/matrix_generation.hpp"
+#include "benchmark/utils/general.hpp"
 
 
 int main(int argc, char* argv[])
 {
+    gko::experimental::mpi::environment mpi_env{argc, argv};
+
+    const auto comm = gko::experimental::mpi::communicator(MPI_COMM_WORLD);
+    const auto rank = comm.rank();
+    const auto do_print = rank == 0;
     const Config cfg = (argc >= 2) ? load_config(argv[1]) : Config();
 
-    std::cout << "AMPLify SpMV Benchmark\n";
-    print_config(cfg);
+    if (do_print) {
+        std::cout << "AMPLify SpMV Benchmark\n";
+        print_config(cfg);
+    }
 
-    auto exec = make_executor(cfg.executor);
+    auto exec = executor_factory_mpi.at(cfg.executor)(comm.get());
 
-    std::cout << "\nBuilding 3D 27-pt stencil...";
-    std::cout.flush();
+    if (do_print) {
+        std::cout << "\nBuilding 3D 27-pt stencil...";
+        std::cout.flush();
+    }
     OffdiagFn fn(42, cfg);
-    std::vector<int32> color_ptrs;
-    auto data = generate_stencil_data(cfg.nx, cfg.ny, cfg.nz, fn, color_ptrs);
-    const int64_t n = data.size[0];
-    const int64_t nnz = data.nonzeros.size();
-    std::cout << " done.\n";
+    const std::array<int, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
+    // std::vector<int32> color_ptrs;
+    const auto data = generate_problem_data(comm, local_grid_dims, fn);
+    const int64_t n = data.mat_data.size[0];
+    const int64_t nnz = data.mat_data.nonzeros.size();
+    if (do_print) {
+        std::cout << " done.\n";
+    }
 
     // SpMV flops = 2 * nnz (one multiply + one add per nonzero)
-    const double flops = 2.0 * static_cast<double>(nnz);
+    const double flops = 2.0 * static_cast<double>(nnz) * comm.size();
 
-    print_perf_header("SpMV", n, nnz);
+    if (do_print) {
+        print_perf_header("SpMV", n, nnz, comm.size());
+    }
 
     json results;
     results["config"] = {{"nx", cfg.nx},
@@ -69,12 +85,12 @@ int main(int argc, char* argv[])
 
     double baseline_ms = 1.0;
     // Reference output (ELL<double> result) for error comparison.
-    std::shared_ptr<gko::matrix::Dense<double>> ref_out;
+    std::shared_ptr<dist_vec_t<scalar_t>> ref_out;
 
     // Convenience lambda: time, compute error, print, record.
     // x_dev is the output vector after one (post-warmup) apply.
-    auto record = [&](const std::string& label, double ms,
-                      std::shared_ptr<gko::matrix::Dense<double>> x_dev) {
+    auto record = [&](const std::string& label, const double ms,
+                      std::shared_ptr<dist_vec_t<scalar_t>> x_dev) {
         double gflops = flops / (ms * 1e6);
         double err = relative_error(exec, x_dev.get(), ref_out.get());
         print_perf_row(label, ms, gflops, baseline_ms, err);

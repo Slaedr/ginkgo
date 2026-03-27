@@ -32,7 +32,7 @@
 #include <ginkgo/ginkgo.hpp>
 
 #include "benchmark/amp/amp_benchmark_common.hpp"
-#include "ginkgo/core/solver/solver_base.hpp"
+#include "benchmark/amp/matrix_generation.hpp"
 
 
 struct GmresStats {
