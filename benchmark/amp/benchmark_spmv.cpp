@@ -3,18 +3,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 /**
- * AMPLify SpMV benchmark
+ * AMPLify distributed SpMV benchmark
  *
  * Compares SpMV performance for ELL<double>, ELL<float>, ELL<half> (if
- * enabled at build time), and AMP<double> on a 3D 27-point stencil.
+ * enabled at build time), and AMP<double> on a distributed 3D 27-point
+ * stencil, using MPI for multi-GPU parallelism.
  *
- * The input vector is all-ones.  After timing, the output of each format
- * is compared against ELL<double> (the reference) to quantify accuracy loss.
+ * The index space is uniformly partitioned across MPI ranks.  Each rank
+ * generates its own local stencil rows (with global indices) and feeds
+ * them to read_distributed.
  *
- * Usage: benchmark_spmv [config.json]
+ * Usage: mpirun -np <P> benchmark_spmv [config.json]
  *
  * Config JSON keys (all optional, defaults shown):
- *   nx, ny, nz        : grid dimensions (64)
+ *   nx, ny, nz        : local grid dimensions per rank (64)
  *   executor          : "cuda" | "hip" | "omp" | "reference"  ("cuda")
  *   warmup_reps       : 5
  *   bench_reps        : 20
@@ -33,7 +35,6 @@
 
 #include "benchmark/amp/amp_benchmark_common.hpp"
 #include "benchmark/amp/matrix_generation.hpp"
-#include "benchmark/utils/general.hpp"
 
 
 int main(int argc, char* argv[])
@@ -42,58 +43,80 @@ int main(int argc, char* argv[])
 
     const auto comm = gko::experimental::mpi::communicator(MPI_COMM_WORLD);
     const auto rank = comm.rank();
+    const auto num_procs = comm.size();
     const auto do_print = rank == 0;
     const Config cfg = (argc >= 2) ? load_config(argv[1]) : Config();
 
     if (do_print) {
-        std::cout << "AMPLify SpMV Benchmark\n";
+        std::cout << "AMPLify Distributed SpMV Benchmark\n";
         print_config(cfg);
     }
 
-    auto exec = executor_factory_mpi.at(cfg.executor)(comm.get());
+    auto exec = make_executor(cfg.executor);
 
+    // ---- Generate local stencil data (rows have global indices) ----
     if (do_print) {
         std::cout << "\nBuilding 3D 27-pt stencil...";
         std::cout.flush();
     }
-    OffdiagFn fn(42, cfg);
+    OffdiagFn fn(42 + rank, cfg);
     const std::array<int, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
-    // std::vector<int32> color_ptrs;
     const auto data = generate_problem_data(comm, local_grid_dims, fn);
-    const int64_t n = data.mat_data.size[0];
-    const int64_t nnz = data.mat_data.nonzeros.size();
+
+    const gko::size_type local_n =
+        static_cast<gko::size_type>(cfg.nx) * cfg.ny * cfg.nz;
+    const gko::size_type global_n = local_n * num_procs;
+    const int64_t local_nnz =
+        static_cast<int64_t>(data.mat_data.nonzeros.size());
     if (do_print) {
         std::cout << " done.\n";
     }
 
+    // Prepare global-sized matrix_data for read_distributed
+    auto mat_data = data.mat_data;
+    mat_data.size = {global_n, global_n};
+
+    // ---- Create uniform partition ----
+    using partition_t =
+        gko::experimental::distributed::Partition<local_idx_t, global_idx_t>;
+    auto partition = gko::share(partition_t::build_from_global_size_uniform(
+        exec->get_master(), num_procs, static_cast<global_idx_t>(global_n)));
+
     // SpMV flops = 2 * nnz (one multiply + one add per nonzero)
-    const double flops = 2.0 * static_cast<double>(nnz) * comm.size();
+    // Gather global nnz for GFLOP/s calculation
+    int64_t global_nnz = 0;
+    MPI_Allreduce(&local_nnz, &global_nnz, 1, MPI_INT64_T, MPI_SUM, comm.get());
+    const double flops = 2.0 * static_cast<double>(global_nnz);
 
     if (do_print) {
-        print_perf_header("SpMV", n, nnz, comm.size());
+        print_perf_header("SpMV", static_cast<int64_t>(global_n), global_nnz,
+                          num_procs);
     }
 
     json results;
     results["config"] = {{"nx", cfg.nx},
                          {"ny", cfg.ny},
                          {"nz", cfg.nz},
-                         {"n", n},
-                         {"nnz", nnz},
+                         {"local_n", local_n},
+                         {"global_n", global_n},
+                         {"local_nnz", local_nnz},
+                         {"global_nnz", global_nnz},
+                         {"num_procs", num_procs},
                          {"executor", cfg.executor},
                          {"amp_tolerance", cfg.amp_tolerance}};
     json rows = json::array();
 
     double baseline_ms = 1.0;
-    // Reference output (ELL<double> result) for error comparison.
     std::shared_ptr<dist_vec_t<scalar_t>> ref_out;
 
-    // Convenience lambda: time, compute error, print, record.
-    // x_dev is the output vector after one (post-warmup) apply.
+    // Convenience lambda: compute error, print (rank 0), record JSON.
     auto record = [&](const std::string& label, const double ms,
                       std::shared_ptr<dist_vec_t<scalar_t>> x_dev) {
-        double gflops = flops / (ms * 1e6);
-        double err = relative_error(exec, x_dev.get(), ref_out.get());
-        print_perf_row(label, ms, gflops, baseline_ms, err);
+        const double gflops = flops / (ms * 1e6);
+        const double err = relative_error(exec, x_dev.get(), ref_out.get());
+        if (do_print) {
+            print_perf_row(label, ms, gflops, baseline_ms, err);
+        }
         rows.push_back({{"format", label},
                         {"time_ms", ms},
                         {"gflops", gflops},
@@ -103,28 +126,26 @@ int main(int argc, char* argv[])
 
     // ---- ELL<double> (reference) ----
     {
-        using Ell = gko::matrix::Ell<double, int32>;
-        using Vec = gko::matrix::Dense<double>;
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(data);
-        auto mat = gko::share(gko::clone(exec, ell_ref));
-        auto b =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        auto mat = dist_mtx_t<double>::create(
+            exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
+        mat->read_distributed(mat_data, partition);
+
+        auto b = dist_vec_t<double>::create(
+            exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         b->fill(1.0);
-        auto x =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        auto x = dist_vec_t<double>::create(
+            exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         x->fill(0.0);
 
-        double ms = time_ms(exec, cfg.warmup_reps, cfg.bench_reps,
-                            [&] { mat->apply(b, x); });
+        const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
+                                  [&] { mat->apply(b, x); });
         baseline_ms = ms;
-
-        // Capture the reference output (one clean apply after warmup)
         ref_out = gko::clone(exec, x);
 
-        // ELL<double> error vs itself is always 0; record explicitly.
-        double gflops = flops / (ms * 1e6);
-        print_perf_row("ELL<double>", ms, gflops, baseline_ms, 0.0);
+        const double gflops = flops / (ms * 1e6);
+        if (do_print) {
+            print_perf_row("ELL<double>", ms, gflops, baseline_ms, 0.0);
+        }
         rows.push_back({{"format", "ELL<double>"},
                         {"time_ms", ms},
                         {"gflops", gflops},
@@ -134,124 +155,118 @@ int main(int argc, char* argv[])
 
     // ---- ELL<float> ----
     {
-        using Ell = gko::matrix::Ell<float, int32>;
-        using Vec = gko::matrix::Dense<float>;
-        using VecD = gko::matrix::Dense<double>;
-        gko::matrix_data<float, int32> fdata;
-        fdata.size = data.size;
-        fdata.nonzeros.reserve(data.nonzeros.size());
-        for (auto& nz : data.nonzeros)
+        // Convert matrix data to float
+        gko::matrix_data<float, global_idx_t> fdata;
+        fdata.size = mat_data.size;
+        fdata.nonzeros.reserve(mat_data.nonzeros.size());
+        for (const auto& nz : mat_data.nonzeros) {
             fdata.nonzeros.emplace_back(nz.row, nz.column,
                                         static_cast<float>(nz.value));
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(fdata);
-        auto mat = gko::share(gko::clone(exec, ell_ref));
-        auto b =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        }
+
+        auto mat = dist_mtx_t<float>::create(
+            exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
+        mat->read_distributed(fdata, partition);
+
+        auto b = dist_vec_t<float>::create(exec, comm, gko::dim<2>{global_n, 1},
+                                           gko::dim<2>{local_n, 1});
         b->fill(1.0f);
-        auto x =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        auto x = dist_vec_t<float>::create(exec, comm, gko::dim<2>{global_n, 1},
+                                           gko::dim<2>{local_n, 1});
         x->fill(0.0f);
 
-        double ms = time_ms(exec, cfg.warmup_reps, cfg.bench_reps,
-                            [&] { mat->apply(b, x); });
+        const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
+                                  [&] { mat->apply(b, x); });
 
-        // Convert float result to double for error comparison
-        gko::matrix_data<double, int32> xd_data;
-        {
-            gko::matrix_data<float, int32> xf_data;
-            gko::clone(exec->get_master(), x)->write(xf_data);
-            xd_data.size = xf_data.size;
-            xd_data.nonzeros.reserve(xf_data.nonzeros.size());
-            for (auto& nz : xf_data.nonzeros)
-                xd_data.nonzeros.emplace_back(nz.row, nz.column,
-                                              static_cast<double>(nz.value));
-        }
-        auto x_d = VecD::create(exec);
-        x_d->read(xd_data);
-
-        record("ELL<float>", ms, gko::share(std::move(x_d)));
+        auto x_d = to_dist_double(exec, comm, x.get());
+        record("ELL<float>", ms, x_d);
     }
 
 #ifdef GINKGO_HAVE_AMP_HALF
     // ---- ELL<half> ----
     {
         using Half = gko::amp::half;
-        using Ell = gko::matrix::Ell<Half, int32>;
-        using Vec = gko::matrix::Dense<Half>;
-        using VecD = gko::matrix::Dense<double>;
-        gko::matrix_data<Half, int32> hdata;
-        hdata.size = data.size;
-        hdata.nonzeros.reserve(data.nonzeros.size());
-        for (auto& nz : data.nonzeros)
+
+        gko::matrix_data<Half, global_idx_t> hdata;
+        hdata.size = mat_data.size;
+        hdata.nonzeros.reserve(mat_data.nonzeros.size());
+        for (const auto& nz : mat_data.nonzeros) {
             hdata.nonzeros.emplace_back(nz.row, nz.column,
                                         static_cast<Half>(nz.value));
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(hdata);
-        auto mat = gko::share(gko::clone(exec, ell_ref));
-        auto b =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        }
+
+        auto mat = dist_mtx_t<Half>::create(
+            exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
+        mat->read_distributed(hdata, partition);
+
+        auto b = dist_vec_t<Half>::create(exec, comm, gko::dim<2>{global_n, 1},
+                                          gko::dim<2>{local_n, 1});
         b->fill(Half{1.0f});
-        auto x =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        auto x = dist_vec_t<Half>::create(exec, comm, gko::dim<2>{global_n, 1},
+                                          gko::dim<2>{local_n, 1});
         x->fill(Half{0.0f});
 
-        double ms = time_ms(exec, cfg.warmup_reps, cfg.bench_reps,
-                            [&] { mat->apply(b, x); });
+        const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
+                                  [&] { mat->apply(b, x); });
 
-        // Convert half result to double for error comparison
-        gko::matrix_data<double, int32> xd_data;
-        {
-            gko::matrix_data<Half, int32> xh_data;
-            gko::clone(exec->get_master(), x)->write(xh_data);
-            xd_data.size = xh_data.size;
-            xd_data.nonzeros.reserve(xh_data.nonzeros.size());
-            for (auto& nz : xh_data.nonzeros)
-                xd_data.nonzeros.emplace_back(nz.row, nz.column,
-                                              static_cast<double>(nz.value));
-        }
-        auto x_d = VecD::create(exec);
-        x_d->read(xd_data);
-
-        record("ELL<half>", ms, gko::share(std::move(x_d)));
+        auto x_d = to_dist_double(exec, comm, x.get());
+        record("ELL<half>", ms, x_d);
     }
 #endif
 
     std::string amp_details;
     // ---- AMP<double> ----
     {
-        using Ell = gko::matrix::Ell<double, int32>;
-        using Amp = gko::matrix::AMP<double, int32>;
-        using Vec = gko::matrix::Dense<double>;
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(data);
-        auto ell_dev = gko::share(gko::clone(exec, ell_ref));
-        auto mat =
-            gko::share(Amp::build()
-                           .with_tolerance(cfg.amp_tolerance)
-                           .with_strategy(Amp::tolerance_type::componentwise)
-                           .on(exec)
-                           ->generate(ell_dev));
-        auto b =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        using Ell = gko::matrix::Ell<double, local_idx_t>;
+        using Amp = gko::matrix::AMP<double, local_idx_t>;
+        using Csr = gko::matrix::Csr<double, local_idx_t>;
+
+        // Create AMP template from an empty ELL
+        auto ell_empty =
+            gko::share(Ell::create(exec->get_master(), gko::dim<2>{0, 0}));
+        auto amp_template =
+            Amp::build()
+                .with_tolerance(cfg.amp_tolerance)
+                .with_strategy(Amp::tolerance_type::componentwise)
+                .on(exec)
+                ->generate(ell_empty);
+        auto csr_template = Csr::create(exec);
+
+        auto mat = gko::share(dist_mtx_t<double>::create(
+            exec, comm, amp_template.get(), csr_template.get()));
+        mat->read_distributed(mat_data, partition);
+
+        auto b = dist_vec_t<double>::create(
+            exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         b->fill(1.0);
-        auto x =
-            Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
+        auto x = dist_vec_t<double>::create(
+            exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         x->fill(0.0);
 
-        double ms = time_ms(exec, cfg.warmup_reps, cfg.bench_reps,
-                            [&] { mat->apply(b, x); });
+        const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
+                                  [&] { mat->apply(b, x); });
 
         record("AMP<double>", ms, gko::share(std::move(x)));
-        amp_details = compute_amp_details(mat.get(), rows);
+
+        // AMP details from the local block
+        const auto local_mat =
+            dynamic_cast<const Amp*>(mat->get_local_matrix().get());
+        if (local_mat && do_print) {
+            amp_details = compute_amp_details(local_mat, rows);
+        }
     }
 
-    results["spmv"] = rows;
+    // ---- Output results (rank 0 only) ----
+    if (do_print) {
+        results["spmv"] = rows;
 
-    std::string out = "spmv_results.json";
-    std::ofstream of(out);
-    of << std::setw(2) << results << "\n";
-    std::cout << amp_details << std::endl;
-    std::cout << "Results written to " << out << "\n";
+        const std::string out = "spmv_results.json";
+        std::ofstream of(out);
+        of << std::setw(2) << results << "\n";
+        if (!amp_details.empty()) {
+            std::cout << amp_details << std::endl;
+        }
+        std::cout << "Results written to " << out << "\n";
+    }
     return 0;
 }

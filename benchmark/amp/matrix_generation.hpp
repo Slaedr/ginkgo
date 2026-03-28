@@ -14,7 +14,7 @@ inline int min3(int a, int b, int c) { return std::min(a, std::min(b, c)); }
 
 inline int max3(int a, int b, int c) { return std::max(a, std::max(b, c)); }
 
-inline void std::array<int, 3> cubic_radical_search(const int n)
+inline std::array<int, 3> cubic_radical_search(const int n)
 {
     int x = n, y = 1, z = 1;
     double best = 0.0;
@@ -89,19 +89,19 @@ struct MulticolorOrdering {
 };
 
 inline MulticolorOrdering compute_multicolor_ordering(
-    const std::array<int>& local_grid_dims)
+    const std::array<int, 3>& local_grid_dims)
 {
     const int ln = local_grid_dims[0] * local_grid_dims[1] * local_grid_dims[2];
     std::vector<int> old_to_new(ln);
     std::vector<int> new_to_old(ln);
     std::vector<int> cnt(8, 0);
 
-    for (int k = 0; k < local_grid_dimz[2]; ++k)
-        for (int j = 0; j < local_grid_dimz[1]; ++j)
-            for (int i = 0; i < local_grid_dimz[0]; ++i)
+    for (int k = 0; k < local_grid_dims[2]; ++k)
+        for (int j = 0; j < local_grid_dims[1]; ++j)
+            for (int i = 0; i < local_grid_dims[0]; ++i)
                 ++cnt[(i % 2) + 2 * (j % 2) + 4 * (k % 2)];
 
-    color_ptrs.resize(9);
+    std::vector<int> color_ptrs(9);
     color_ptrs[0] = 0;
     for (int c = 0; c < 8; ++c) {
         color_ptrs[c + 1] = color_ptrs[c] + cnt[c];
@@ -138,10 +138,10 @@ global_idx_t get_global_from_local(const std::array<int, 3>& owner_rank,
                                    const std::array<int, 3>& local_grid_dims,
                                    const int local_flat_idx)
 {
-    const std::array<global_idx_t, 3> global_grid_dims =
-        mult(local_grid_dims, comm_size_dir);
-    const std::array<global_idx_t, 3> global_idx_base =
-        mult(local_grid_dims, owner_rank);
+    const auto global_grid_dims =
+        mult<global_idx_t>(local_grid_dims, comm_size_dir);
+    const auto global_idx_base =
+        mult<global_idx_t>(local_grid_dims, owner_rank);
     return get_natural_flat_index_from_3d(global_grid_dims, global_idx_base) +
            local_flat_idx;
 }
@@ -178,27 +178,26 @@ inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
     const std::array<int, 3> my_ranks =
         get_natural_3d_indices_from_flat(proc_dims, comm.rank());
     const int ln = local_grid_dims[0] * local_grid_dims[1] * local_grid_dims[2];
-    const std::array<global_idx_t, 3> my_offsets =
-        mult(my_ranks, local_grid_dims);
+    const auto my_offsets = mult<global_idx_t>(my_ranks, local_grid_dims);
 
-    gko::matrix_data<double, int32> data(gko::dim<2>{
+    gko::matrix_data<double, global_idx_t> data(gko::dim<2>{
         static_cast<gko::size_type>(ln), static_cast<gko::size_type>(ln)});
     data.nonzeros.reserve(27 * ln);
 
 
     scalar_t max_val{0.0}, min_val{100.0};
-    for (int new_row = 0; new_row < static_cast<int32>(n); ++new_row) {
+    for (int new_row = 0; new_row < ln; ++new_row) {
         const global_idx_t global_new_row = get_global_from_local(
-            nbd_rank, proc_dims, local_grid_dims, local_new_flat_idx);
+            my_ranks, proc_dims, local_grid_dims, new_row);
         const int old_row = ordering.new_to_old[new_row];
-        const std::array<int 3> old_idx =
+        const std::array<int, 3> old_idx =
             get_natural_3d_indices_from_flat(local_grid_dims, old_row);
 
         for (int dk = -1; dk <= 1; ++dk) {
             for (int dj = -1; dj <= 1; ++dj) {
                 for (int di = -1; di <= 1; ++di) {
                     const std::array<int, 3> dst{di, dj, dk};
-                    std::array<int 3> nbd_old_idx = add(old_idx, dst);
+                    std::array<int, 3> nbd_old_idx = add<int>(old_idx, dst);
                     // Get new local index of the stencil point,
                     //   in the subdomain that point belongs to
                     std::array<int, 3> nbd_rank = my_ranks;
@@ -223,7 +222,8 @@ inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
                         max_val = std::max(max_val, std::abs(val));
                         min_val = std::min(min_val, std::abs(val));
                     }
-                    data.nonzeros.emplace_back(new_row, global_new_col, val);
+                    data.nonzeros.emplace_back(global_new_row, global_new_col,
+                                               val);
                 }
             }
         }
@@ -245,8 +245,7 @@ inline ProblemData generate_problem_data(
     OffdiagFn& gen)
 {
     const auto ordering = compute_multicolor_ordering(local_grid_dims);
-    auto matdata =
-        generate_stencil_data(comm, local_grid_dims, OffdiagFn & gen, ordering);
+    auto matdata = generate_stencil_data(comm, local_grid_dims, gen, ordering);
     return ProblemData{matdata, ordering.color_ptrs};
 }
 

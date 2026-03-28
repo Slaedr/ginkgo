@@ -6,12 +6,13 @@
 #define GKO_BENCHMARK_AMP_AMP_BENCHMARK_COMMON_HPP_
 
 /**
- * Common utilities for AMPLify single-GPU benchmarks:
+ * Common utilities for AMPLify benchmarks:
  *   - Configuration (JSON file or defaults)
- *   - Executor creation
- *   - Wall-clock timing with GPU synchronization
+ *   - Executor creation (single-GPU and MPI-distributed)
+ *   - Wall-clock timing with GPU + MPI synchronization
  *   - 3D 27-point stencil generation with 8-color ordering
  *   - Solution error computation using Ginkgo Dense ops
+ *   - Distributed matrix/vector helpers
  *   - Output helpers
  */
 
@@ -124,10 +125,8 @@ struct OffdiagFn {
     }
 };
 
-// ============================================================
 // Executor factory
-// ============================================================
-
+// NOTE: We assume that only one GPU is exposed per rank.
 inline std::shared_ptr<gko::Executor> make_executor(const std::string& name)
 {
     auto omp = gko::OmpExecutor::create();
@@ -155,13 +154,13 @@ double time_ms(comm_t comm, std::shared_ptr<const gko::Executor> exec,
         exec->synchronize();
     }
     exec->synchronize();
-    comm->synchronize();
+    comm.synchronize();
     auto t0 = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < reps; ++i) {
         fn();
     }
     exec->synchronize();
-    comm->synchronize();
+    comm.synchronize();
     auto t1 = std::chrono::high_resolution_clock::now();
     return std::chrono::duration<double, std::milli>(t1 - t0).count() / reps;
 }
@@ -201,6 +200,48 @@ inline double relative_error(std::shared_ptr<const gko::Executor> exec,
     auto rn = gko::clone(master, ref_norm);
     double rn_val = rn->at(0, 0);
     return (rn_val > 0.0) ? (dn->at(0, 0) / rn_val) : dn->at(0, 0);
+}
+
+/**
+ * Compute the relative L2 error between distributed vectors.
+ */
+inline double relative_error(std::shared_ptr<const gko::Executor> exec,
+                             const dist_vec_t<double>* x,
+                             const dist_vec_t<double>* ref_vec)
+{
+    using RVec = gko::matrix::Dense<gko::remove_complex<double>>;
+
+    auto diff = gko::clone(exec, x);
+    auto neg_one = gko::initialize<gko::matrix::Dense<double>>({-1.0}, exec);
+    diff->add_scaled(neg_one, ref_vec);
+
+    auto diff_norm = RVec::create(exec, gko::dim<2>{1, 1});
+    auto ref_norm = RVec::create(exec, gko::dim<2>{1, 1});
+    diff->compute_norm2(diff_norm);
+    ref_vec->compute_norm2(ref_norm);
+
+    auto master = exec->get_master();
+    auto dn = gko::clone(master, diff_norm);
+    auto rn = gko::clone(master, ref_norm);
+    const double rn_val = rn->at(0, 0);
+    return (rn_val > 0.0) ? (dn->at(0, 0) / rn_val) : dn->at(0, 0);
+}
+
+/**
+ * Convert a lower-precision distributed vector to dist_vec_t<double>.
+ * Uses Dense::convert_to for the local vector conversion.
+ */
+template <typename ValueType>
+std::shared_ptr<dist_vec_t<double>> to_dist_double(
+    std::shared_ptr<const gko::Executor> exec, comm_t comm,
+    const dist_vec_t<ValueType>* src)
+{
+    const auto local_src = src->get_local_vector();
+    auto local_dst =
+        gko::matrix::Dense<double>::create(exec, local_src->get_size());
+    local_src->convert_to(local_dst.get());
+    return gko::share(
+        dist_vec_t<double>::create(exec, comm, std::move(local_dst)));
 }
 
 // ============================================================
