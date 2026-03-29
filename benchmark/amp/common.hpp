@@ -330,7 +330,7 @@ inline void print_perf_header(const std::string& title, int64_t n, int64_t nnz,
               << std::setw(14) << "GFLOP/s" << std::setw(10) << "Speedup"
               << std::setw(14) << "Rel. error"
               << "\n"
-              << std::string(72, '-') << "\n";
+              << std::string(86, '-') << "\n";
 }
 
 inline void print_perf_row(const std::string& label, const double setup_ms,
@@ -341,7 +341,7 @@ inline void print_perf_row(const std::string& label, const double setup_ms,
               << std::fixed << std::setprecision(3) << setup_ms << std::setw(14)
               << std::fixed << std::setprecision(3) << ms << std::setw(14)
               << std::fixed << std::setprecision(2) << gflops << std::setw(10)
-              << std::fixed << std::setprecision(2) << (baseline_ms / ms) << "x"
+              << std::fixed << std::setprecision(2) << baseline_ms / ms
               << std::setw(14) << std::scientific << std::setprecision(2)
               << rel_error << "\n";
 }

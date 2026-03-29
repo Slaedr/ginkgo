@@ -89,9 +89,15 @@ int main(int argc, char* argv[])
         using Vec = gko::matrix::Dense<double>;
         using Solver = gko::solver::FwdGaussSeidel<double, int>;
 
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(data);
-        auto mat = gko::share(gko::clone(exec, ell_ref));
+        exec->synchronize();
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto mat = gko::share(Ell::create(exec));
+        mat->read(data);
+        exec->synchronize();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         auto solver =
             Solver::build()
                 .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
@@ -115,8 +121,9 @@ int main(int argc, char* argv[])
         ref_out = gko::clone(exec, x);
 
         const double gflops = flops / (ms * 1e6);
-        print_perf_row("ELL<double>", 0.0, ms, gflops, baseline_ms, 0.0);
+        print_perf_row("ELL<double>", setup_ms, ms, gflops, baseline_ms, 0.0);
         rows.push_back({{"format", "ELL<double>"},
+                        {"setup_ms", setup_ms},
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", 1.0},
@@ -136,9 +143,16 @@ int main(int argc, char* argv[])
         for (auto& nz : data.nonzeros)
             fdata.nonzeros.emplace_back(nz.row, nz.column,
                                         static_cast<float>(nz.value));
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(fdata);
-        auto mat = gko::share(gko::clone(exec, ell_ref));
+
+        exec->synchronize();
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto mat = gko::share(Ell::create(exec));
+        mat->read(fdata);
+        exec->synchronize();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         auto solver =
             Solver::build()
                 .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
@@ -173,8 +187,9 @@ int main(int argc, char* argv[])
 
         const double gflops = flops / (ms * 1e6);
         const double err = relative_error(exec, x_d.get(), ref_out.get());
-        print_perf_row("ELL<float>", 0.0, ms, gflops, baseline_ms, err);
+        print_perf_row("ELL<float>", setup_ms, ms, gflops, baseline_ms, err);
         rows.push_back({{"format", "ELL<float>"},
+                        {"setup_ms", setup_ms},
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", baseline_ms / ms},
@@ -189,15 +204,21 @@ int main(int argc, char* argv[])
         using Vec = gko::matrix::Dense<double>;
         using Solver = gko::solver::FwdGaussSeidel<double, int>;
 
-        auto ell_ref = Ell::create(exec->get_master());
-        ell_ref->read(data);
-        auto ell_dev = gko::share(gko::clone(exec, ell_ref));
+        exec->synchronize();
+        auto t0 = std::chrono::high_resolution_clock::now();
+        auto ell = gko::share(Ell::create(exec));
+        ell->read(data);
         auto mat =
             gko::share(Amp::build()
                            .with_tolerance(cfg.amp_tolerance)
                            .with_strategy(Amp::tolerance_type::componentwise)
                            .on(exec)
-                           ->generate(ell_dev));
+                           ->generate(ell));
+        exec->synchronize();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         auto solver =
             Solver::build()
                 .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
@@ -220,8 +241,9 @@ int main(int argc, char* argv[])
 
         const double gflops = flops / (ms * 1e6);
         const double err = relative_error(exec, x.get(), ref_out.get());
-        print_perf_row("AMP<double>", 0.0, ms, gflops, baseline_ms, err);
+        print_perf_row("AMP<double>", setup_ms, ms, gflops, baseline_ms, err);
         rows.push_back({{"format", "AMP<double>"},
+                        {"setup_ms", setup_ms},
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", baseline_ms / ms},
