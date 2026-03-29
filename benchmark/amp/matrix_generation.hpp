@@ -8,7 +8,9 @@
 #include <array>
 #include <vector>
 
-#include "benchmark/amp/types.hpp"
+#include <ginkgo/ginkgo.hpp>
+
+using comm_t = gko::experimental::mpi::communicator;
 
 inline int min3(int a, int b, int c) { return std::min(a, std::min(b, c)); }
 
@@ -133,10 +135,12 @@ inline MulticolorOrdering compute_multicolor_ordering(
  * @param local_grid_dims  The common size of the local grid of each subdomain.
  * @param local_flat_idx  Flattened local index of the point in question.
  */
-global_idx_t get_global_from_local(const std::array<int, 3>& owner_rank,
-                                   const std::array<int, 3>& comm_size_dir,
-                                   const std::array<int, 3>& local_grid_dims,
-                                   const int local_flat_idx)
+template <typename global_idx_t>
+std::enable_if_t<std::is_integral_v<global_idx_t>, global_idx_t>
+get_global_from_local(const std::array<int, 3>& owner_rank,
+                      const std::array<int, 3>& comm_size_dir,
+                      const std::array<int, 3>& local_grid_dims,
+                      const int local_flat_idx)
 {
     const auto global_grid_dims =
         mult<global_idx_t>(local_grid_dims, comm_size_dir);
@@ -144,6 +148,18 @@ global_idx_t get_global_from_local(const std::array<int, 3>& owner_rank,
         mult<global_idx_t>(local_grid_dims, owner_rank);
     return get_natural_flat_index_from_3d(global_grid_dims, global_idx_base) +
            local_flat_idx;
+}
+
+template <typename T>
+bool is_valid_point(const std::array<T, 3>& point,
+                    const std::array<T, 3>& grid_dims)
+{
+    for (int i = 0; i < 3; i++) {
+        if (point[i] < 0 || point[i] >= grid_dims[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // ============================================================
@@ -167,9 +183,10 @@ global_idx_t get_global_from_local(const std::array<int, 3>& owner_rank,
  *                     called with no arguments.
  * @param color_ptrs   Output: color_ptrs[c] is the first row of color c,
  *                     color_ptrs[8] == n.  Size 9.
- * @return  matrix_data<double, int32> in the color-ordered layout.
+ * @return  matrix nonzeros in the color-ordered layout.
  */
-template <typename OffdiagFn>
+template <typename scalar_t, typename global_idx_t, typename local_idx_t,
+          typename OffdiagFn>
 inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
     comm_t comm, const std::array<local_idx_t, 3>& local_grid_dims,
     OffdiagFn& gen, const MulticolorOrdering& ordering)
@@ -179,15 +196,19 @@ inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
         get_natural_3d_indices_from_flat(proc_dims, comm.rank());
     const int ln = local_grid_dims[0] * local_grid_dims[1] * local_grid_dims[2];
     const auto my_offsets = mult<global_idx_t>(my_ranks, local_grid_dims);
+    const auto global_grid_dims =
+        mult<global_idx_t>(proc_dims, local_grid_dims);
+    const auto global_n =
+        global_grid_dims[0] * global_grid_dims[1] * global_grid_dims[2];
 
-    gko::matrix_data<double, global_idx_t> data(gko::dim<2>{
+    gko::matrix_data<scalar_t, global_idx_t> data(gko::dim<2>{
         static_cast<gko::size_type>(ln), static_cast<gko::size_type>(ln)});
     data.nonzeros.reserve(27 * ln);
 
 
     scalar_t max_val{0.0}, min_val{100.0};
     for (int new_row = 0; new_row < ln; ++new_row) {
-        const global_idx_t global_new_row = get_global_from_local(
+        const auto global_new_row = get_global_from_local<global_idx_t>(
             my_ranks, proc_dims, local_grid_dims, new_row);
         const int old_row = ordering.new_to_old[new_row];
         const std::array<int, 3> old_idx =
@@ -204,18 +225,28 @@ inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
                     for (int i = 0; i < 3; i++) {
                         if (nbd_old_idx[i] < 0) {
                             nbd_rank[i]--;
-                            nbd_old_idx[i] = local_grid_dims[i] - 1;
+                            nbd_old_idx[i] =
+                                local_grid_dims[i] + nbd_old_idx[i];
                         } else if (nbd_old_idx[i] >= local_grid_dims[i]) {
                             nbd_rank[i]++;
-                            nbd_old_idx[i] -= local_grid_dims[i];
+                            nbd_old_idx[i] =
+                                nbd_old_idx[i] % local_grid_dims[i];
                         }
+                    }
+                    const std::array<global_idx_t, 3> nbd_offsets =
+                        mult<global_idx_t>(nbd_rank, local_grid_dims);
+                    const std::array<global_idx_t, 3> global_nbd_old_idx =
+                        add<global_idx_t>(nbd_offsets, nbd_old_idx);
+                    if (!is_valid_point(global_nbd_old_idx, global_grid_dims)) {
+                        continue;
                     }
                     const local_idx_t local_new_flat_idx =
                         ordering.old_to_new[get_natural_flat_index_from_3d(
                             local_grid_dims, nbd_old_idx)];
-                    const global_idx_t global_new_col = get_global_from_local(
-                        nbd_rank, proc_dims, local_grid_dims,
-                        local_new_flat_idx);
+                    const auto global_new_col =
+                        get_global_from_local<global_idx_t>(nbd_rank, proc_dims,
+                                                            local_grid_dims,
+                                                            local_new_flat_idx);
                     const bool diag = (di == 0 && dj == 0 && dk == 0);
                     const auto val = static_cast<scalar_t>(diag ? 26.0 : gen());
                     if (!diag) {
@@ -229,24 +260,30 @@ inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
         }
     }
     data.sort_row_major();
-    std::cout << "\n  Generated matrix off-diagonals: max abs val = " << max_val
-              << ", min abs val = " << min_val << std::endl;
+    if (comm.rank() == 0) {
+        std::cout << "\n  Generated matrix off-diagonals: max abs val = "
+                  << max_val << ", min abs val = " << min_val << std::endl;
+    }
     return data;
 }
 
+template <typename scalar_t, typename global_idx_t, typename local_idx_t>
 struct ProblemData {
     gko::matrix_data<scalar_t, global_idx_t> mat_data;
-    std::vector<int> color_ptrs;
+    std::vector<local_idx_t> color_ptrs;
 };
 
-template <typename OffdiagFn>
-inline ProblemData generate_problem_data(
+template <typename scalar_t, typename global_idx_t, typename local_idx_t,
+          typename OffdiagFn>
+inline ProblemData<scalar_t, global_idx_t, local_idx_t> generate_problem_data(
     comm_t comm, const std::array<local_idx_t, 3>& local_grid_dims,
     OffdiagFn& gen)
 {
     const auto ordering = compute_multicolor_ordering(local_grid_dims);
-    auto matdata = generate_stencil_data(comm, local_grid_dims, gen, ordering);
-    return ProblemData{matdata, ordering.color_ptrs};
+    auto matdata = generate_stencil_data<scalar_t, global_idx_t>(
+        comm, local_grid_dims, gen, ordering);
+    return ProblemData<scalar_t, global_idx_t, local_idx_t>{
+        matdata, ordering.color_ptrs};
 }
 
 

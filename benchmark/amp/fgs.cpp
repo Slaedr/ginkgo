@@ -30,12 +30,22 @@
 
 #include <ginkgo/ginkgo.hpp>
 
-#include "benchmark/amp/amp_benchmark_common.hpp"
+#include "benchmark/amp/common.hpp"
 #include "benchmark/amp/matrix_generation.hpp"
 
 
 int main(int argc, char* argv[])
 {
+    gko::experimental::mpi::environment mpi_env{argc, argv};
+    const auto comm = gko::experimental::mpi::communicator(MPI_COMM_WORLD);
+    if (comm.size() != 1) {
+        if (comm.rank() == 0) {
+            std::cerr << "Error: benchmark_fgs must be run with exactly 1 "
+                         "MPI rank.\n";
+        }
+        return 1;
+    }
+
     const Config cfg = (argc >= 2) ? load_config(argv[1]) : Config();
 
     std::cout << "AMPLify FGS Benchmark (single sweep)\n";
@@ -45,17 +55,20 @@ int main(int argc, char* argv[])
 
     std::cout << "\nBuilding 3D 27-pt stencil...";
     std::cout.flush();
-    std::vector<int32> color_ptrs;
     OffdiagFn fn(42, cfg);
-    auto data = generate_stencil_data(cfg.nx, cfg.ny, cfg.nz, fn, color_ptrs);
-    const int64_t n = data.size[0];
-    const int64_t nnz = data.nonzeros.size();
+    const std::array<int, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
+    const auto problem =
+        generate_problem_data<double, int>(comm, local_grid_dims, fn);
+    const auto& data = problem.mat_data;
+    const auto& color_ptrs = problem.color_ptrs;
+    const int64_t n = static_cast<int64_t>(data.size[0]);
+    const int64_t nnz = static_cast<int64_t>(data.nonzeros.size());
     std::cout << " done.\n";
 
     // FGS flops per sweep ≈ 2*nnz (SpMV-equivalent work + division per row)
     const double flops = 2.0 * static_cast<double>(nnz);
 
-    print_perf_header("FGS (single sweep)", n, nnz);
+    print_perf_header("FGS (single sweep)", n, nnz, comm.size());
 
     json results;
     results["config"] = {{"nx", cfg.nx},
@@ -72,9 +85,9 @@ int main(int argc, char* argv[])
 
     // ---- ELL<double> (reference) ----
     {
-        using Ell = gko::matrix::Ell<double, int32>;
+        using Ell = gko::matrix::Ell<double, int>;
         using Vec = gko::matrix::Dense<double>;
-        using Solver = gko::solver::FwdGaussSeidel<double, int32>;
+        using Solver = gko::solver::FwdGaussSeidel<double, int>;
 
         auto ell_ref = Ell::create(exec->get_master());
         ell_ref->read(data);
@@ -93,15 +106,16 @@ int main(int argc, char* argv[])
             Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
         x->fill(0.0);
 
-        double ms = time_ms(exec, cfg.warmup_reps, cfg.bench_reps, [&] {
-            // x->fill(0.0);
-            solver->apply(b, x);
-        });
+        const double ms =
+            time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps, [&] {
+                // x->fill(0.0);
+                solver->apply(b, x);
+            });
         baseline_ms = ms;
         ref_out = gko::clone(exec, x);
 
-        double gflops = flops / (ms * 1e6);
-        print_perf_row("ELL<double>", ms, gflops, baseline_ms, 0.0);
+        const double gflops = flops / (ms * 1e6);
+        print_perf_row("ELL<double>", 0.0, ms, gflops, baseline_ms, 0.0);
         rows.push_back({{"format", "ELL<double>"},
                         {"time_ms", ms},
                         {"gflops", gflops},
@@ -111,12 +125,12 @@ int main(int argc, char* argv[])
 
     // ---- ELL<float> ----
     {
-        using Ell = gko::matrix::Ell<float, int32>;
+        using Ell = gko::matrix::Ell<float, int>;
         using Vec = gko::matrix::Dense<float>;
         using VecD = gko::matrix::Dense<double>;
-        using Solver = gko::solver::FwdGaussSeidel<float, int32>;
+        using Solver = gko::solver::FwdGaussSeidel<float, int>;
 
-        gko::matrix_data<float, int32> fdata;
+        gko::matrix_data<float, int> fdata;
         fdata.size = data.size;
         fdata.nonzeros.reserve(data.nonzeros.size());
         for (auto& nz : data.nonzeros)
@@ -139,15 +153,16 @@ int main(int argc, char* argv[])
             Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
         x->fill(0.0f);
 
-        double ms = time_ms(exec, cfg.warmup_reps, cfg.bench_reps, [&] {
-            // x->fill(0.0f);
-            solver->apply(b, x);
-        });
+        const double ms =
+            time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps, [&] {
+                // x->fill(0.0f);
+                solver->apply(b, x);
+            });
 
         // Convert float result to double for error comparison
-        gko::matrix_data<float, int32> xf_data;
+        gko::matrix_data<float, int> xf_data;
         gko::clone(exec->get_master(), x)->write(xf_data);
-        gko::matrix_data<double, int32> xd_data;
+        gko::matrix_data<double, int> xd_data;
         xd_data.size = xf_data.size;
         xd_data.nonzeros.reserve(xf_data.nonzeros.size());
         for (auto& nz : xf_data.nonzeros)
@@ -156,9 +171,9 @@ int main(int argc, char* argv[])
         auto x_d = VecD::create(exec);
         x_d->read(xd_data);
 
-        double gflops = flops / (ms * 1e6);
-        double err = relative_error(exec, x_d.get(), ref_out.get());
-        print_perf_row("ELL<float>", ms, gflops, baseline_ms, err);
+        const double gflops = flops / (ms * 1e6);
+        const double err = relative_error(exec, x_d.get(), ref_out.get());
+        print_perf_row("ELL<float>", 0.0, ms, gflops, baseline_ms, err);
         rows.push_back({{"format", "ELL<float>"},
                         {"time_ms", ms},
                         {"gflops", gflops},
@@ -169,10 +184,10 @@ int main(int argc, char* argv[])
     // ---- AMP<double> ----
     std::string amp_details;
     {
-        using Ell = gko::matrix::Ell<double, int32>;
-        using Amp = gko::matrix::AMP<double, int32>;
+        using Ell = gko::matrix::Ell<double, int>;
+        using Amp = gko::matrix::AMP<double, int>;
         using Vec = gko::matrix::Dense<double>;
-        using Solver = gko::solver::FwdGaussSeidel<double, int32>;
+        using Solver = gko::solver::FwdGaussSeidel<double, int>;
 
         auto ell_ref = Ell::create(exec->get_master());
         ell_ref->read(data);
@@ -197,14 +212,15 @@ int main(int argc, char* argv[])
             Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
         x->fill(0.0);
 
-        double ms = time_ms(exec, cfg.warmup_reps, cfg.bench_reps, [&] {
-            // x->fill(0.0);
-            solver->apply(b, x);
-        });
+        const double ms =
+            time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps, [&] {
+                // x->fill(0.0);
+                solver->apply(b, x);
+            });
 
-        double gflops = flops / (ms * 1e6);
-        double err = relative_error(exec, x.get(), ref_out.get());
-        print_perf_row("AMP<double>", ms, gflops, baseline_ms, err);
+        const double gflops = flops / (ms * 1e6);
+        const double err = relative_error(exec, x.get(), ref_out.get());
+        print_perf_row("AMP<double>", 0.0, ms, gflops, baseline_ms, err);
         rows.push_back({{"format", "AMP<double>"},
                         {"time_ms", ms},
                         {"gflops", gflops},

@@ -33,12 +33,20 @@
 
 #include <ginkgo/ginkgo.hpp>
 
-#include "benchmark/amp/amp_benchmark_common.hpp"
+#include "benchmark/amp/common.hpp"
 #include "benchmark/amp/matrix_generation.hpp"
 
+template <typename scalar_t>
+using dist_vec_t = gko::experimental::distributed::Vector<scalar_t>;
+template <typename scalar_t>
+using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, int, long>;
 
 int main(int argc, char* argv[])
 {
+    using scalar_t = double;
+    using local_idx_t = int;
+    using global_idx_t = long;
+
     gko::experimental::mpi::environment mpi_env{argc, argv};
 
     const auto comm = gko::experimental::mpi::communicator(MPI_COMM_WORLD);
@@ -52,7 +60,8 @@ int main(int argc, char* argv[])
         print_config(cfg);
     }
 
-    auto exec = make_executor(cfg.executor);
+    // auto exec = make_executor(cfg.executor);
+    auto exec = executor_factory_mpi.at(cfg.executor)(comm.get());
 
     // ---- Generate local stencil data (rows have global indices) ----
     if (do_print) {
@@ -60,9 +69,9 @@ int main(int argc, char* argv[])
         std::cout.flush();
     }
     OffdiagFn fn(42 + rank, cfg);
-    const std::array<int, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
-    const auto data = generate_problem_data(comm, local_grid_dims, fn);
-
+    const std::array<local_idx_t, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
+    const auto data = generate_problem_data<scalar_t, global_idx_t>(
+        comm, local_grid_dims, fn);
     const gko::size_type local_n =
         static_cast<gko::size_type>(cfg.nx) * cfg.ny * cfg.nz;
     const gko::size_type global_n = local_n * num_procs;
@@ -110,14 +119,16 @@ int main(int argc, char* argv[])
     std::shared_ptr<dist_vec_t<scalar_t>> ref_out;
 
     // Convenience lambda: compute error, print (rank 0), record JSON.
-    auto record = [&](const std::string& label, const double ms,
+    auto record = [&](const std::string& label, const double setup_ms,
+                      const double ms,
                       std::shared_ptr<dist_vec_t<scalar_t>> x_dev) {
         const double gflops = flops / (ms * 1e6);
         const double err = relative_error(exec, x_dev.get(), ref_out.get());
         if (do_print) {
-            print_perf_row(label, ms, gflops, baseline_ms, err);
+            print_perf_row(label, setup_ms, ms, gflops, baseline_ms, err);
         }
         rows.push_back({{"format", label},
+                        {"setup_ms", setup_ms},
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", baseline_ms / ms},
@@ -126,6 +137,11 @@ int main(int argc, char* argv[])
 
     // ---- ELL<double> (reference) ----
     {
+        // Time setup (matrix creation + read_distributed)
+        exec->synchronize();
+        comm.synchronize();
+
+        const auto t0 = std::chrono::high_resolution_clock::now();
         auto mat = dist_mtx_t<double>::create(
             exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
         mat->read_distributed(mat_data, partition);
@@ -137,6 +153,12 @@ int main(int argc, char* argv[])
             exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         x->fill(0.0);
 
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
         baseline_ms = ms;
@@ -144,9 +166,11 @@ int main(int argc, char* argv[])
 
         const double gflops = flops / (ms * 1e6);
         if (do_print) {
-            print_perf_row("ELL<double>", ms, gflops, baseline_ms, 0.0);
+            print_perf_row("ELL<double>", setup_ms, ms, gflops, baseline_ms,
+                           0.0);
         }
         rows.push_back({{"format", "ELL<double>"},
+                        {"setup_ms", setup_ms},
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", 1.0},
@@ -164,6 +188,11 @@ int main(int argc, char* argv[])
                                         static_cast<float>(nz.value));
         }
 
+        // Time setup (matrix creation + read_distributed)
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
+
         auto mat = dist_mtx_t<float>::create(
             exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
         mat->read_distributed(fdata, partition);
@@ -175,11 +204,17 @@ int main(int argc, char* argv[])
                                            gko::dim<2>{local_n, 1});
         x->fill(0.0f);
 
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
 
         auto x_d = to_dist_double(exec, comm, x.get());
-        record("ELL<float>", ms, x_d);
+        record("ELL<float>", setup_ms, ms, x_d);
     }
 
 #ifdef GINKGO_HAVE_AMP_HALF
@@ -195,6 +230,11 @@ int main(int argc, char* argv[])
                                         static_cast<Half>(nz.value));
         }
 
+        // Time setup (matrix creation + read_distributed)
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
+
         auto mat = dist_mtx_t<Half>::create(
             exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
         mat->read_distributed(hdata, partition);
@@ -206,11 +246,17 @@ int main(int argc, char* argv[])
                                           gko::dim<2>{local_n, 1});
         x->fill(Half{0.0f});
 
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
 
         auto x_d = to_dist_double(exec, comm, x.get());
-        record("ELL<half>", ms, x_d);
+        record("ELL<half>", setup_ms, ms, x_d);
     }
 #endif
 
@@ -220,6 +266,11 @@ int main(int argc, char* argv[])
         using Ell = gko::matrix::Ell<double, local_idx_t>;
         using Amp = gko::matrix::AMP<double, local_idx_t>;
         using Csr = gko::matrix::Csr<double, local_idx_t>;
+
+        // Time setup (matrix creation + read_distributed)
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
 
         // Create AMP template from an empty ELL
         auto ell_empty =
@@ -243,10 +294,16 @@ int main(int argc, char* argv[])
             exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         x->fill(0.0);
 
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
 
-        record("AMP<double>", ms, gko::share(std::move(x)));
+        record("AMP<double>", setup_ms, ms, gko::share(std::move(x)));
 
         // AMP details from the local block
         const auto local_mat =

@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#ifndef GKO_BENCHMARK_AMP_AMP_BENCHMARK_COMMON_HPP_
-#define GKO_BENCHMARK_AMP_AMP_BENCHMARK_COMMON_HPP_
+#ifndef GKO_BENCHMARK_AMP_COMMON_HPP_
+#define GKO_BENCHMARK_AMP_COMMON_HPP_
 
 /**
  * Common utilities for AMPLify benchmarks:
@@ -29,11 +29,13 @@
 
 #include <nlohmann/json.hpp>
 
-#include "benchmark/amp/types.hpp"
-
 using json = nlohmann::json;
 
-enum class mat_offdiag_t { laplace, random_diag_dominant, random_general };
+using comm_t = gko::experimental::mpi::communicator;
+
+namespace gkodist = gko::experimental::distributed;
+
+enum class mat_offdiag_t { hpcg, random_diag_dominant, random_general };
 
 // ============================================================
 // Configuration
@@ -51,7 +53,7 @@ struct Config {
     double gmres_tol = 1e-8;
     int gmres_max_iters = 1000;
     int gmres_krylov_dim = 50;
-    mat_offdiag_t offdiag_type = mat_offdiag_t::laplace;
+    mat_offdiag_t offdiag_type = mat_offdiag_t::hpcg;
 };
 
 inline Config load_config(const std::string& path)
@@ -82,8 +84,8 @@ inline Config load_config(const std::string& path)
         std::string matrix_values_type = j["matrix_values_type"];
         if (matrix_values_type == "diagonal_dominant") {
             cfg.offdiag_type = mat_offdiag_t::random_diag_dominant;
-        } else if (matrix_values_type == "laplace") {
-            cfg.offdiag_type = mat_offdiag_t::laplace;
+        } else if (matrix_values_type == "hpcg") {
+            cfg.offdiag_type = mat_offdiag_t::hpcg;
         } else if (matrix_values_type == "general") {
             cfg.offdiag_type = mat_offdiag_t::random_general;
         } else {
@@ -116,7 +118,7 @@ struct OffdiagFn {
 
     double operator()()
     {
-        if (cfg.offdiag_type == mat_offdiag_t::laplace) {
+        if (cfg.offdiag_type == mat_offdiag_t::hpcg) {
             return -1.0;
         } else {
             return -mantissa_dist(rng) *
@@ -129,13 +131,50 @@ struct OffdiagFn {
 // NOTE: We assume that only one GPU is exposed per rank.
 inline std::shared_ptr<gko::Executor> make_executor(const std::string& name)
 {
-    auto omp = gko::OmpExecutor::create();
-    if (name == "cuda") return gko::CudaExecutor::create(0, omp);
-    if (name == "hip") return gko::HipExecutor::create(0, omp);
-    if (name == "omp") return omp;
-    if (name == "reference") return gko::ReferenceExecutor::create();
+    auto ref = gko::ReferenceExecutor::create();
+    if (name == "cuda") return gko::CudaExecutor::create(0, ref);
+    if (name == "hip") return gko::HipExecutor::create(0, ref);
+    if (name == "omp") return gko::OmpExecutor::create();
+    if (name == "reference") return ref;
     throw std::runtime_error("Unknown executor: " + name);
 }
+
+const std::map<std::string,
+               std::function<std::shared_ptr<gko::Executor>(MPI_Comm)>>
+    executor_factory_mpi{
+        {"reference",
+         [](MPI_Comm) { return gko::ReferenceExecutor::create(); }},
+        {"omp", [](MPI_Comm) { return gko::OmpExecutor::create(); }},
+        {"cuda",
+         [](MPI_Comm comm) {
+             auto device_id = gko::experimental::mpi::map_rank_to_device_id(
+                 comm, gko::CudaExecutor::get_num_devices());
+             return gko::CudaExecutor::create(
+                 device_id, gko::ReferenceExecutor::create(),
+                 std::make_shared<gko::CudaAllocator>());
+         }},
+        {"hip",
+         [](MPI_Comm comm) {
+             auto device_id = gko::experimental::mpi::map_rank_to_device_id(
+                 comm, gko::HipExecutor::get_num_devices());
+             return gko::HipExecutor::create(
+                 device_id, gko::ReferenceExecutor::create(),
+                 std::make_shared<gko::HipAllocator>());
+         }},
+        {"dpcpp", [](MPI_Comm comm) {
+             int device_id = 0;
+             if (gko::DpcppExecutor::get_num_devices("gpu")) {
+                 device_id = gko::experimental::mpi::map_rank_to_device_id(
+                     comm, gko::DpcppExecutor::get_num_devices("gpu"));
+             } else if (gko::DpcppExecutor::get_num_devices("cpu")) {
+                 device_id = gko::experimental::mpi::map_rank_to_device_id(
+                     comm, gko::DpcppExecutor::get_num_devices("cpu"));
+             } else {
+                 GKO_NOT_IMPLEMENTED;
+             }
+             return gko::DpcppExecutor::create(
+                 device_id, gko::ReferenceExecutor::create());
+         }}};
 
 // ============================================================
 // Timing
@@ -205,14 +244,15 @@ inline double relative_error(std::shared_ptr<const gko::Executor> exec,
 /**
  * Compute the relative L2 error between distributed vectors.
  */
-inline double relative_error(std::shared_ptr<const gko::Executor> exec,
-                             const dist_vec_t<double>* x,
-                             const dist_vec_t<double>* ref_vec)
+template <typename scalar_t>
+inline scalar_t relative_error(std::shared_ptr<const gko::Executor> exec,
+                               const gkodist::Vector<scalar_t>* x,
+                               const gkodist::Vector<scalar_t>* ref_vec)
 {
-    using RVec = gko::matrix::Dense<gko::remove_complex<double>>;
+    using RVec = gko::matrix::Dense<gko::remove_complex<scalar_t>>;
 
     auto diff = gko::clone(exec, x);
-    auto neg_one = gko::initialize<gko::matrix::Dense<double>>({-1.0}, exec);
+    auto neg_one = gko::initialize<gko::matrix::Dense<scalar_t>>({-1.0}, exec);
     diff->add_scaled(neg_one, ref_vec);
 
     auto diff_norm = RVec::create(exec, gko::dim<2>{1, 1});
@@ -223,25 +263,25 @@ inline double relative_error(std::shared_ptr<const gko::Executor> exec,
     auto master = exec->get_master();
     auto dn = gko::clone(master, diff_norm);
     auto rn = gko::clone(master, ref_norm);
-    const double rn_val = rn->at(0, 0);
+    const scalar_t rn_val = rn->at(0, 0);
     return (rn_val > 0.0) ? (dn->at(0, 0) / rn_val) : dn->at(0, 0);
 }
 
 /**
- * Convert a lower-precision distributed vector to dist_vec_t<double>.
+ * Convert a lower-precision distributed vector to dist::Vector<double>.
  * Uses Dense::convert_to for the local vector conversion.
  */
-template <typename ValueType>
-std::shared_ptr<dist_vec_t<double>> to_dist_double(
+template <typename scalar_t>
+std::shared_ptr<gkodist::Vector<double>> to_dist_double(
     std::shared_ptr<const gko::Executor> exec, comm_t comm,
-    const dist_vec_t<ValueType>* src)
+    const gkodist::Vector<scalar_t>* src)
 {
     const auto local_src = src->get_local_vector();
     auto local_dst =
         gko::matrix::Dense<double>::create(exec, local_src->get_size());
     local_src->convert_to(local_dst.get());
     return gko::share(
-        dist_vec_t<double>::create(exec, comm, std::move(local_dst)));
+        gkodist::Vector<double>::create(exec, comm, std::move(local_dst)));
 }
 
 // ============================================================
@@ -249,11 +289,11 @@ std::shared_ptr<dist_vec_t<double>> to_dist_double(
 // ============================================================
 
 inline std::string compute_amp_details(
-    const gko::matrix::AMP<double, int32>* const mtx, json& rows)
+    const gko::matrix::AMP<double, int>* const mtx, json& rows)
 {
     std::stringstream sstream;
-    using Ell = gko::matrix::Ell<double, int32>;
-    constexpr int q = gko::matrix::AMP<double, int32>::num_precisions;
+    using Ell = gko::matrix::Ell<double, int>;
+    constexpr int q = gko::matrix::AMP<double, int>::num_precisions;
     sstream << "AMP matrix precision buckets:\n";
     json amps = json::array();
     for (int k = 0; k < q; k++) {
@@ -285,17 +325,20 @@ inline void print_perf_header(const std::string& title, int64_t n, int64_t nnz,
     std::cout << "\n=== " << title << " ===\n";
     std::cout << "  n = " << n << "  nnz = " << nnz
               << "   procs = " << num_procs << "\n";
-    std::cout << std::left << std::setw(20) << "Format" << std::setw(14)
-              << "Time (ms)" << std::setw(14) << "GFLOP/s" << std::setw(10)
-              << "Speedup" << std::setw(14) << "Rel. error"
+    std::cout << std::left << std::setw(20) << "Format" << std::setw(17)
+              << "Setup time (ms)" << std::setw(14) << "Op Time (ms)"
+              << std::setw(14) << "GFLOP/s" << std::setw(10) << "Speedup"
+              << std::setw(14) << "Rel. error"
               << "\n"
               << std::string(72, '-') << "\n";
 }
 
-inline void print_perf_row(const std::string& label, double ms, double gflops,
-                           double baseline_ms, double rel_error)
+inline void print_perf_row(const std::string& label, const double setup_ms,
+                           double ms, double gflops, double baseline_ms,
+                           double rel_error)
 {
-    std::cout << std::left << std::setw(20) << label << std::setw(14)
+    std::cout << std::left << std::setw(20) << label << std::setw(17)
+              << std::fixed << std::setprecision(3) << setup_ms << std::setw(14)
               << std::fixed << std::setprecision(3) << ms << std::setw(14)
               << std::fixed << std::setprecision(2) << gflops << std::setw(10)
               << std::fixed << std::setprecision(2) << (baseline_ms / ms) << "x"
@@ -303,4 +346,4 @@ inline void print_perf_row(const std::string& label, double ms, double gflops,
               << rel_error << "\n";
 }
 
-#endif  // GKO_BENCHMARK_AMP_AMP_BENCHMARK_COMMON_HPP_
+#endif  // GKO_BENCHMARK_AMP_COMMON_HPP_
