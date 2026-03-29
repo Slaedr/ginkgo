@@ -86,16 +86,23 @@ std::shared_ptr<const DistVec> generate_rhs(
  */
 std::shared_ptr<const DistVec> compute_reference_solution(
     comm_t comm, std::shared_ptr<const gko::Executor> exec,
-    const std::vector<local_idx_t>& color_ptrs,
-    std::shared_ptr<const gko::LinOp> system_mat,
+    std::shared_ptr<const gko::experimental::distributed::Partition<
+        local_idx_t, global_idx_t>>
+        partition,
+    const ProblemData<double, global_idx_t, local_idx_t>& prob,
     std::shared_ptr<const DistVec> rhs, const gko::size_type global_n,
     const gko::size_type local_n)
 {
+    // ---- Build ELL<double> distributed matrix ----
+    auto system_mat = gko::share(
+        DistMtx::create(exec, comm, gko::with_matrix_type<gko::matrix::Ell>()));
+    system_mat->read_distributed(prob.mat_data, partition);
+
     const double ref_tol = 1e-14;
 
     auto local_factory = gko::share(
         FGS::build()
-            .with_color_ptrs(color_ptrs)
+            .with_color_ptrs(prob.color_ptrs)
             .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
             .on(exec));
     // auto local_factory = gko::share(
@@ -171,13 +178,14 @@ GmresStats run_gmres(comm_t comm, std::shared_ptr<const gko::Executor> exec,
                 Schwarz::build().with_local_solver(fgs_factory).on(exec))
             .on(exec)
             ->generate(system_mat);
-    auto x = DistVec::create(exec, comm, gko::dim<2>{global_n, 1},
-                             gko::dim<2>{local_n, 1});
     exec->synchronize();
     comm.synchronize();
     const auto t_setup1 = std::chrono::high_resolution_clock::now();
     const double setup_ms =
         std::chrono::duration<double, std::milli>(t_setup1 - t_setup0).count();
+
+    auto x = DistVec::create(exec, comm, gko::dim<2>{global_n, 1},
+                             gko::dim<2>{local_n, 1});
 
     // --- Solve ---
     auto logger = gko::share(gko::log::Convergence<double>::create());
@@ -269,18 +277,6 @@ int main(int argc, char* argv[])
     int64_t global_nnz = 0;
     MPI_Allreduce(&local_nnz, &global_nnz, 1, MPI_INT64_T, MPI_SUM, comm.get());
 
-    // ---- Build ELL<double> distributed matrix ----
-    if (do_print) {
-        std::cout << "Building distributed ELL<double> matrix...";
-        std::cout.flush();
-    }
-    auto ell_mat = gko::share(
-        DistMtx::create(exec, comm, gko::with_matrix_type<gko::matrix::Ell>()));
-    ell_mat->read_distributed(mat_data, partition);
-    if (do_print) {
-        std::cout << " done.\n";
-    }
-
     // ---- Generate RHS and reference solution ----
     if (do_print) {
         std::cout << "Generating RHS and reference solution...\n";
@@ -302,8 +298,8 @@ int main(int argc, char* argv[])
         }
     }
 
-    const auto x_ref = compute_reference_solution(
-        comm, exec, data.color_ptrs, ell_mat, b, global_n, local_n);
+    const auto x_ref = compute_reference_solution(comm, exec, partition, data,
+                                                  b, global_n, local_n);
     if (do_print) {
         std::cout << "Generated reference solution.\n";
     }
@@ -365,8 +361,21 @@ int main(int argc, char* argv[])
 
     // ---- ELL<double> system ----
     {
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
+        auto ell_mat = gko::share(DistMtx::create(
+            exec, comm, gko::with_matrix_type<gko::matrix::Ell>()));
+        ell_mat->read_distributed(mat_data, partition);
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         auto s = run_gmres(comm, exec, data.color_ptrs, ell_mat, b, x_ref,
                            global_n, local_n, cfg);
+        s.setup_ms += setup_ms;
         print_row("ELL<double>", s, s);
         ref_s = s;
     }
@@ -378,8 +387,12 @@ int main(int argc, char* argv[])
         using Amp = gko::matrix::AMP<double, local_idx_t>;
         using Csr = gko::matrix::Csr<double, local_idx_t>;
 
-        auto ell_empty =
-            gko::share(Ell::create(exec->get_master(), gko::dim<2>{0, 0}));
+        // Time AMP matrix generation
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
+
+        auto ell_empty = gko::share(Ell::create(exec, gko::dim<2>{0, 0}));
         auto amp_template =
             Amp::build()
                 .with_tolerance(cfg.amp_tolerance)
@@ -388,11 +401,6 @@ int main(int argc, char* argv[])
                 ->generate(ell_empty);
         auto csr_template = Csr::create(exec);
 
-        // Time AMP matrix generation
-        exec->synchronize();
-        comm.synchronize();
-        const auto t0 = std::chrono::high_resolution_clock::now();
-
         auto amp_mat = gko::share(DistMtx::create(
             exec, comm, amp_template.get(), csr_template.get()));
         amp_mat->read_distributed(mat_data, partition);
@@ -400,19 +408,18 @@ int main(int argc, char* argv[])
         exec->synchronize();
         comm.synchronize();
         const auto t1 = std::chrono::high_resolution_clock::now();
-        const double amp_setup_ms =
+        const double setup_ms =
             std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         auto s = run_gmres(comm, exec, data.color_ptrs, amp_mat, b, x_ref,
                            global_n, local_n, cfg);
-        s.setup_ms += amp_setup_ms;
+        s.setup_ms += setup_ms;
         print_row("AMP<double>", s, ref_s);
-        rows.back()["amp_setup_ms"] = amp_setup_ms;
 
         const auto local_mat =
             dynamic_cast<const Amp*>(amp_mat->get_local_matrix().get());
         if (local_mat && do_print) {
-            amp_details = compute_amp_details(local_mat, rows);
+            amp_details = compute_amp_details(local_mat, 0.0, rows);
         }
     }
 

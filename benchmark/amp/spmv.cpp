@@ -140,11 +140,17 @@ int main(int argc, char* argv[])
         // Time setup (matrix creation + read_distributed)
         exec->synchronize();
         comm.synchronize();
-
         const auto t0 = std::chrono::high_resolution_clock::now();
+
         auto mat = dist_mtx_t<double>::create(
             exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
         mat->read_distributed(mat_data, partition);
+
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         auto b = dist_vec_t<double>::create(
             exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
@@ -152,12 +158,6 @@ int main(int argc, char* argv[])
         auto x = dist_vec_t<double>::create(
             exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         x->fill(0.0);
-
-        exec->synchronize();
-        comm.synchronize();
-        const auto t1 = std::chrono::high_resolution_clock::now();
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
@@ -179,6 +179,11 @@ int main(int argc, char* argv[])
 
     // ---- ELL<float> ----
     {
+        // Time setup (matrix creation + read_distributed)
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
+
         // Convert matrix data to float
         gko::matrix_data<float, global_idx_t> fdata;
         fdata.size = mat_data.size;
@@ -187,15 +192,15 @@ int main(int argc, char* argv[])
             fdata.nonzeros.emplace_back(nz.row, nz.column,
                                         static_cast<float>(nz.value));
         }
-
-        // Time setup (matrix creation + read_distributed)
-        exec->synchronize();
-        comm.synchronize();
-        const auto t0 = std::chrono::high_resolution_clock::now();
-
         auto mat = dist_mtx_t<float>::create(
             exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
         mat->read_distributed(fdata, partition);
+
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         auto b = dist_vec_t<float>::create(exec, comm, gko::dim<2>{global_n, 1},
                                            gko::dim<2>{local_n, 1});
@@ -204,11 +209,6 @@ int main(int argc, char* argv[])
                                            gko::dim<2>{local_n, 1});
         x->fill(0.0f);
 
-        exec->synchronize();
-        comm.synchronize();
-        const auto t1 = std::chrono::high_resolution_clock::now();
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
@@ -222,6 +222,11 @@ int main(int argc, char* argv[])
     {
         using Half = gko::amp::half;
 
+        // Time setup (matrix creation + read_distributed)
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
+
         gko::matrix_data<Half, global_idx_t> hdata;
         hdata.size = mat_data.size;
         hdata.nonzeros.reserve(mat_data.nonzeros.size());
@@ -230,14 +235,15 @@ int main(int argc, char* argv[])
                                         static_cast<Half>(nz.value));
         }
 
-        // Time setup (matrix creation + read_distributed)
-        exec->synchronize();
-        comm.synchronize();
-        const auto t0 = std::chrono::high_resolution_clock::now();
-
         auto mat = dist_mtx_t<Half>::create(
             exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
         mat->read_distributed(hdata, partition);
+
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         auto b = dist_vec_t<Half>::create(exec, comm, gko::dim<2>{global_n, 1},
                                           gko::dim<2>{local_n, 1});
@@ -245,12 +251,6 @@ int main(int argc, char* argv[])
         auto x = dist_vec_t<Half>::create(exec, comm, gko::dim<2>{global_n, 1},
                                           gko::dim<2>{local_n, 1});
         x->fill(Half{0.0f});
-
-        exec->synchronize();
-        comm.synchronize();
-        const auto t1 = std::chrono::high_resolution_clock::now();
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
@@ -273,8 +273,7 @@ int main(int argc, char* argv[])
         const auto t0 = std::chrono::high_resolution_clock::now();
 
         // Create AMP template from an empty ELL
-        auto ell_empty =
-            gko::share(Ell::create(exec->get_master(), gko::dim<2>{0, 0}));
+        auto ell_empty = gko::share(Ell::create(exec, gko::dim<2>{0, 0}));
         auto amp_template =
             Amp::build()
                 .with_tolerance(cfg.amp_tolerance)
@@ -287,18 +286,18 @@ int main(int argc, char* argv[])
             exec, comm, amp_template.get(), csr_template.get()));
         mat->read_distributed(mat_data, partition);
 
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
         auto b = dist_vec_t<double>::create(
             exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         b->fill(1.0);
         auto x = dist_vec_t<double>::create(
             exec, comm, gko::dim<2>{global_n, 1}, gko::dim<2>{local_n, 1});
         x->fill(0.0);
-
-        exec->synchronize();
-        comm.synchronize();
-        const auto t1 = std::chrono::high_resolution_clock::now();
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         const double ms = time_ms(comm, exec, cfg.warmup_reps, cfg.bench_reps,
                                   [&] { mat->apply(b, x); });
@@ -309,7 +308,7 @@ int main(int argc, char* argv[])
         const auto local_mat =
             dynamic_cast<const Amp*>(mat->get_local_matrix().get());
         if (local_mat && do_print) {
-            amp_details = compute_amp_details(local_mat, rows);
+            amp_details = compute_amp_details(local_mat, 0.0 / 0.0, rows);
         }
     }
 

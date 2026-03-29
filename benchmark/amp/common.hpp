@@ -284,26 +284,42 @@ std::shared_ptr<gkodist::Vector<double>> to_dist_double(
         gkodist::Vector<double>::create(exec, comm, std::move(local_dst)));
 }
 
+template <typename scalar_t>
+std::shared_ptr<gko::matrix::Dense<double>> to_double_vec(
+    std::shared_ptr<const gko::Executor> exec,
+    const gko::matrix::Dense<scalar_t>* const src)
+{
+    auto local_dst =
+        gko::share(gko::matrix::Dense<double>::create(exec, src->get_size()));
+    src->convert_to(local_dst.get());
+    return local_dst;
+}
+
 // ============================================================
 // Output helpers
 // ============================================================
 
 inline std::string compute_amp_details(
-    const gko::matrix::AMP<double, int>* const mtx, json& rows)
+    const gko::matrix::AMP<double, int>* const mtx, const double amp_setup_ms,
+    json& rows)
 {
     std::stringstream sstream;
     using Ell = gko::matrix::Ell<double, int>;
     constexpr int q = gko::matrix::AMP<double, int>::num_precisions;
-    sstream << "AMP matrix precision buckets:\n";
+    sstream << "\nAMP details";
+    sstream << "\n  AMP matrix precision buckets:\n";
     json amps = json::array();
     for (int k = 0; k < q; k++) {
         auto ellmat = static_cast<const Ell*>(mtx->get_bin_matrix(k));
         GKO_ASSERT(ellmat);
         const auto max_nnz_per_row = ellmat->get_num_stored_elements_per_row();
-        sstream << "    Bin " << k << ": max_nnz_per_row = " << max_nnz_per_row
+        sstream << "     Bin " << k << ": max_nnz_per_row = " << max_nnz_per_row
                 << "\n";
         amps.push_back({{"bin", k}, {"max_nnz_per_row", max_nnz_per_row}});
     }
+    amps.push_back({"amp_setup_ms", amp_setup_ms});
+    sstream << "  AMP setup time (ms) = " << std::setprecision(3)
+            << amp_setup_ms << "\n";
     rows.back()["amp_details"] = amps;
     return sstream.str();
 }
@@ -327,7 +343,7 @@ inline void print_perf_header(const std::string& title, int64_t n, int64_t nnz,
               << "   procs = " << num_procs << "\n";
     std::cout << std::left << std::setw(20) << "Format" << std::setw(17)
               << "Setup time (ms)" << std::setw(14) << "Op Time (ms)"
-              << std::setw(14) << "GFLOP/s" << std::setw(10) << "Speedup"
+              << std::setw(10) << "GFLOP/s" << std::setw(12) << "Op speedup"
               << std::setw(14) << "Rel. error"
               << "\n"
               << std::string(86, '-') << "\n";
@@ -339,8 +355,8 @@ inline void print_perf_row(const std::string& label, const double setup_ms,
 {
     std::cout << std::left << std::setw(20) << label << std::setw(17)
               << std::fixed << std::setprecision(3) << setup_ms << std::setw(14)
-              << std::fixed << std::setprecision(3) << ms << std::setw(14)
-              << std::fixed << std::setprecision(2) << gflops << std::setw(10)
+              << std::fixed << std::setprecision(3) << ms << std::setw(10)
+              << std::fixed << std::setprecision(2) << gflops << std::setw(12)
               << std::fixed << std::setprecision(2) << baseline_ms / ms
               << std::setw(14) << std::scientific << std::setprecision(2)
               << rel_error << "\n";

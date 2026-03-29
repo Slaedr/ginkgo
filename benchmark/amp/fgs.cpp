@@ -93,17 +93,16 @@ int main(int argc, char* argv[])
         auto t0 = std::chrono::high_resolution_clock::now();
         auto mat = gko::share(Ell::create(exec));
         mat->read(data);
-        exec->synchronize();
-        auto t1 = std::chrono::high_resolution_clock::now();
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(t1 - t0).count();
-
         auto solver =
             Solver::build()
                 .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
                 .with_color_ptrs(color_ptrs)
                 .on(exec)
                 ->generate(mat);
+        exec->synchronize();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         auto b =
             Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
@@ -137,28 +136,27 @@ int main(int argc, char* argv[])
         using VecD = gko::matrix::Dense<double>;
         using Solver = gko::solver::FwdGaussSeidel<float, int>;
 
+        exec->synchronize();
+        auto t0 = std::chrono::high_resolution_clock::now();
         gko::matrix_data<float, int> fdata;
         fdata.size = data.size;
         fdata.nonzeros.reserve(data.nonzeros.size());
-        for (auto& nz : data.nonzeros)
+        for (auto& nz : data.nonzeros) {
             fdata.nonzeros.emplace_back(nz.row, nz.column,
                                         static_cast<float>(nz.value));
-
-        exec->synchronize();
-        auto t0 = std::chrono::high_resolution_clock::now();
+        }
         auto mat = gko::share(Ell::create(exec));
         mat->read(fdata);
         exec->synchronize();
-        auto t1 = std::chrono::high_resolution_clock::now();
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(t1 - t0).count();
-
         auto solver =
             Solver::build()
                 .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
                 .with_color_ptrs(color_ptrs)
                 .on(exec)
                 ->generate(mat);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
 
         auto b =
             Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
@@ -208,6 +206,8 @@ int main(int argc, char* argv[])
         auto t0 = std::chrono::high_resolution_clock::now();
         auto ell = gko::share(Ell::create(exec));
         ell->read(data);
+        exec->synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
         auto mat =
             gko::share(Amp::build()
                            .with_tolerance(cfg.amp_tolerance)
@@ -215,16 +215,19 @@ int main(int argc, char* argv[])
                            .on(exec)
                            ->generate(ell));
         exec->synchronize();
-        auto t1 = std::chrono::high_resolution_clock::now();
-        const double setup_ms =
-            std::chrono::duration<double, std::milli>(t1 - t0).count();
-
+        auto t2 = std::chrono::high_resolution_clock::now();
         auto solver =
             Solver::build()
                 .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
                 .with_color_ptrs(color_ptrs)
                 .on(exec)
                 ->generate(mat);
+        exec->synchronize();
+        auto t3 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t3 - t0).count();
+        const double amp_setup_ms =
+            std::chrono::duration<double, std::milli>(t2 - t1).count();
 
         auto b =
             Vec::create(exec, gko::dim<2>{static_cast<gko::size_type>(n), 1});
@@ -248,7 +251,7 @@ int main(int argc, char* argv[])
                         {"gflops", gflops},
                         {"speedup", baseline_ms / ms},
                         {"rel_error_vs_ell_double", err}});
-        amp_details = compute_amp_details(mat.get(), rows);
+        amp_details = compute_amp_details(mat.get(), amp_setup_ms, rows);
     }
 
     results["fgs"] = rows;
