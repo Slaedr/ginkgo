@@ -270,7 +270,7 @@ int main(int argc, char* argv[])
     using partition_t =
         gko::experimental::distributed::Partition<local_idx_t, global_idx_t>;
     auto partition = gko::share(partition_t::build_from_global_size_uniform(
-        exec->get_master(), num_procs, static_cast<global_idx_t>(global_n)));
+        exec, num_procs, static_cast<global_idx_t>(global_n)));
 
     // Gather global nnz
     const int64_t local_nnz = static_cast<int64_t>(mat_data.nonzeros.size());
