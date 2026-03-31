@@ -167,10 +167,10 @@ TEST_F(Amp, SpmvIsEquivalentToRef)
     auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 1});
     auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 1});
 
-    gko::kernels::reference::amp::spmv(ref, amp_ref.get(), b_ref.get(),
-                                       c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv(exec, amp_d.get(), b_d.get(),
-                                                  c_d.get());
+    gko::kernels::reference::amp::spmv_ell(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_ell(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -194,10 +194,10 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRef)
     auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
     auto beta_d = gko::clone(exec, beta_ref);
 
-    gko::kernels::reference::amp::advanced_spmv(ref, alpha_ref.get(),
-                                                amp_ref.get(), b_ref.get(),
-                                                beta_ref.get(), c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv(
+    gko::kernels::reference::amp::advanced_spmv_ell(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_ell(
         exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
@@ -218,10 +218,10 @@ TEST_F(Amp, SpmvWithMultipleRHSIsEquivalentToRef)
     auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 4});
     auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 4});
 
-    gko::kernels::reference::amp::spmv(ref, amp_ref.get(), b_ref.get(),
-                                       c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv(exec, amp_d.get(), b_d.get(),
-                                                  c_d.get());
+    gko::kernels::reference::amp::spmv_ell(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_ell(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -245,10 +245,10 @@ TEST_F(Amp, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
     auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
     auto beta_d = gko::clone(exec, beta_ref);
 
-    gko::kernels::reference::amp::advanced_spmv(ref, alpha_ref.get(),
-                                                amp_ref.get(), b_ref.get(),
-                                                beta_ref.get(), c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv(
+    gko::kernels::reference::amp::advanced_spmv_ell(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_ell(
         exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
@@ -330,10 +330,10 @@ TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0IsEmpty)
     auto c_ref = Vec::create(ref, gko::dim<2>{n, 1});
     auto c_d = Vec::create(exec, gko::dim<2>{n, 1});
 
-    gko::kernels::reference::amp::spmv(ref, amp_ref.get(), b_ref.get(),
-                                       c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv(exec, amp_d.get(), b_d.get(),
-                                                  c_d.get());
+    gko::kernels::reference::amp::spmv_ell(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_ell(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -368,10 +368,10 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
     auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
     auto beta_d = gko::clone(exec, beta_ref);
 
-    gko::kernels::reference::amp::advanced_spmv(ref, alpha_ref.get(),
-                                                amp_ref.get(), b_ref.get(),
-                                                beta_ref.get(), c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv(
+    gko::kernels::reference::amp::advanced_spmv_ell(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_ell(
         exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);

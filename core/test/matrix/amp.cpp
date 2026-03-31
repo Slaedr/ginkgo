@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <ginkgo/core/matrix/amp.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 
@@ -631,4 +632,33 @@ TYPED_TEST(Amp, ReadAfterCloneUsesPreservedParameters)
     auto dense = Dense::create(this->exec);
     amp_clone->convert_to(dense.get());
     EXPECT_EQ(dense->get_size(), gko::dim<2>(3, 3));
+}
+
+
+TYPED_TEST(Amp, FactoryGenerateWorksWithCsrInput)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Dense = typename TestFixture::Dense;
+    using Csr = gko::matrix::Csr<value_type, index_type>;
+
+    auto dinput = Dense::create(this->exec, gko::dim<2>{3, 3});
+    dinput->fill(gko::one<value_type>());
+    auto csr_input = gko::share(Csr::create(this->exec));
+    dinput->convert_to(csr_input.get());
+    auto factory = Mtx::build().on(this->exec);
+
+    std::unique_ptr<Mtx> mtx;
+    ASSERT_NO_THROW(mtx = factory->generate(csr_input));
+
+    EXPECT_EQ(mtx->get_size(), csr_input->get_size());
+    gko::constexpr_for<0, Mtx::num_precisions, 1>([&](auto k) {
+        using types_list = typename gko::amp::narrow_types<value_type>::type;
+        using vtype = typename std::tuple_element<k, types_list>::type;
+        auto mcsr = dynamic_cast<const gko::matrix::Csr<vtype, index_type>*>(
+            mtx->get_bin_matrix(k));
+        EXPECT_NE(mcsr, nullptr);
+        EXPECT_EQ(mcsr->get_size(), csr_input->get_size());
+    });
 }

@@ -27,10 +27,10 @@ namespace amp {
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void spmv(std::shared_ptr<const OmpExecutor> exec,
-          const matrix::AMP<MatrixValueType, IndexType>* a,
-          const matrix::Dense<InputValueType>* b,
-          matrix::Dense<OutputValueType>* c)
+void spmv_ell(std::shared_ptr<const OmpExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* a,
+              const matrix::Dense<InputValueType>* b,
+              matrix::Dense<OutputValueType>* c)
 {
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
@@ -102,17 +102,31 @@ void spmv(std::shared_ptr<const OmpExecutor> exec,
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_SPMV_KERNEL);
+    GKO_DECLARE_AMP_SPMV_ELL_KERNEL);
 
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void advanced_spmv(std::shared_ptr<const OmpExecutor> exec,
-                   const matrix::Dense<MatrixValueType>* alpha,
-                   const matrix::AMP<MatrixValueType, IndexType>* a,
-                   const matrix::Dense<InputValueType>* b,
-                   const matrix::Dense<OutputValueType>* beta,
-                   matrix::Dense<OutputValueType>* c)
+void spmv_csr(std::shared_ptr<const OmpExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* a,
+              const matrix::Dense<InputValueType>* b,
+              matrix::Dense<OutputValueType>* c)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_SPMV_CSR_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void advanced_spmv_ell(std::shared_ptr<const OmpExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
 {
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
@@ -187,7 +201,23 @@ void advanced_spmv(std::shared_ptr<const OmpExecutor> exec,
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_ADVANCED_SPMV_KERNEL);
+    GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void advanced_spmv_csr(std::shared_ptr<const OmpExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_ADVANCED_SPMV_CSR_KERNEL);
 
 
 template <typename ValueType, typename IndexType>
@@ -246,6 +276,33 @@ void generate_ell_rownorms_storage(
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
+
+
+template <typename ValueType, typename IndexType>
+void generate_csr_rownorms_storage(
+    std::shared_ptr<const OmpExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>* a, const float tolerance,
+    gko::amp::precision_array<size_type, ValueType>& total_nnz_per_bin,
+    array<remove_complex<ValueType>>& rownorms)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL);
+
+
+template <typename ValueType, typename IndexType>
+void generate_csr_scatter_bins(
+    std::shared_ptr<const OmpExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>* a, const float tolerance,
+    gko::amp::precision_array<LinOp*, ValueType>& amat)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_GENERATE_CSR_SCATTER_BINS_KERNEL);
 
 
 }  // namespace amp

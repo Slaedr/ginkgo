@@ -5,10 +5,12 @@
 #include "core/matrix/amp_kernels.hpp"
 
 #include <cassert>
+#include <vector>
 
 #include <ginkgo/core/base/amp_types.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
@@ -31,10 +33,10 @@ namespace amp {
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void spmv(std::shared_ptr<const ReferenceExecutor> exec,
-          const matrix::AMP<MatrixValueType, IndexType>* const a,
-          const matrix::Dense<InputValueType>* const b,
-          matrix::Dense<OutputValueType>* const c)
+void spmv_ell(std::shared_ptr<const ReferenceExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* const a,
+              const matrix::Dense<InputValueType>* const b,
+              matrix::Dense<OutputValueType>* const c)
 {
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
@@ -109,17 +111,17 @@ void spmv(std::shared_ptr<const ReferenceExecutor> exec,
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_SPMV_KERNEL);
+    GKO_DECLARE_AMP_SPMV_ELL_KERNEL);
 
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
-                   const matrix::Dense<MatrixValueType>* alpha,
-                   const matrix::AMP<MatrixValueType, IndexType>* a,
-                   const matrix::Dense<InputValueType>* b,
-                   const matrix::Dense<OutputValueType>* beta,
-                   matrix::Dense<OutputValueType>* c)
+void advanced_spmv_ell(std::shared_ptr<const ReferenceExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
 {
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
@@ -198,7 +200,164 @@ void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_ADVANCED_SPMV_KERNEL);
+    GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void spmv_csr(std::shared_ptr<const ReferenceExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* const a,
+              const matrix::Dense<InputValueType>* const b,
+              matrix::Dense<OutputValueType>* const c)
+{
+    constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
+    static_assert(q > 0, "Need at least 1 bin!");
+    auto csr0 = dynamic_cast<const matrix::Csr<MatrixValueType, IndexType>*>(
+        a->get_bin_matrix(0));
+    if (!csr0) {
+        GKO_NOT_SUPPORTED(a->get_bin_matrix(0));
+    }
+    auto y = c->get_values();
+    const auto y_stride = c->get_stride();
+    auto x = b->get_const_values();
+    const auto x_stride = b->get_stride();
+    const auto nrhs = b->get_size()[1];
+    const auto nrows0 = static_cast<int>(a->get_size()[0]);
+    // We need mult type because complex numbers of different precisions don't
+    // get automatically promoted.
+    using mult_type0 = gko::highest_precision<MatrixValueType, InputValueType>;
+    using highest_type0 = gko::highest_precision<mult_type0, OutputValueType>;
+
+    auto avals0 = csr0->get_const_values();
+    auto acols0 = csr0->get_const_col_idxs();
+    auto arow_ptrs0 = csr0->get_const_row_ptrs();
+    for (int i = 0; i < nrows0; i++) {
+        for (int irhs = 0; irhs < nrhs; irhs++) {
+            highest_type0 sum = 0;
+            for (auto j = arow_ptrs0[i]; j < arow_ptrs0[i + 1]; j++) {
+                sum += static_cast<highest_type0>(
+                    static_cast<mult_type0>(avals0[j]) *
+                    static_cast<mult_type0>(x[acols0[j] * x_stride + irhs]));
+            }
+            y[i * y_stride + irhs] = static_cast<OutputValueType>(sum);
+        }
+    }
+    gko::constexpr_for<1, q, 1>([&](auto k) {
+        using value_type = typename std::tuple_element<
+            k, typename gko::amp::narrow_types<MatrixValueType>::type>::type;
+        auto csrk = dynamic_cast<const matrix::Csr<value_type, IndexType>*>(
+            a->get_bin_matrix(k));
+        if (!csrk) {
+            GKO_NOT_SUPPORTED(a->get_bin_matrix(k));
+        }
+        using mult_type = gko::highest_precision<value_type, InputValueType>;
+        using highest_type = gko::highest_precision<mult_type, OutputValueType>;
+        const auto nrows = static_cast<int>(a->get_size()[0]);
+        assert(nrows == nrows0);
+        auto avals = csrk->get_const_values();
+        auto acols = csrk->get_const_col_idxs();
+        auto arow_ptrs = csrk->get_const_row_ptrs();
+        if (csrk->get_num_stored_elements() > 0) {
+            for (int i = 0; i < nrows; i++) {
+                for (int irhs = 0; irhs < nrhs; irhs++) {
+                    highest_type sum = 0;
+                    for (auto j = arow_ptrs[i]; j < arow_ptrs[i + 1]; j++) {
+                        sum += static_cast<highest_type>(
+                            static_cast<mult_type>(avals[j]) *
+                            static_cast<mult_type>(
+                                x[acols[j] * x_stride + irhs]));
+                    }
+                    y[i * y_stride + irhs] += static_cast<OutputValueType>(sum);
+                }
+            }
+        }
+    });
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_SPMV_CSR_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void advanced_spmv_csr(std::shared_ptr<const ReferenceExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
+{
+    constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
+    static_assert(q > 0, "Need at least 1 bin!");
+    auto csr0 = dynamic_cast<const matrix::Csr<MatrixValueType, IndexType>*>(
+        a->get_bin_matrix(0));
+    if (!csr0) {
+        GKO_NOT_SUPPORTED(a->get_bin_matrix(0));
+    }
+    auto y = c->get_values();
+    auto x = b->get_const_values();
+    const auto y_stride = c->get_stride();
+    const auto x_stride = b->get_stride();
+    const auto nrhs = b->get_size()[1];
+    const auto alph = alpha->at(0, 0);
+    const auto bet = beta->at(0, 0);
+    const auto nrows0 = static_cast<int>(a->get_size()[0]);
+    // We need mult type because complex numbers of different precisions don't
+    // get automatically promoted.
+    using mult_type0 = gko::highest_precision<MatrixValueType, InputValueType>;
+    using highest_type0 = gko::highest_precision<mult_type0, OutputValueType>;
+
+    auto avals0 = csr0->get_const_values();
+    auto acols0 = csr0->get_const_col_idxs();
+    auto arow_ptrs0 = csr0->get_const_row_ptrs();
+    for (int i = 0; i < nrows0; i++) {
+        for (int irhs = 0; irhs < nrhs; irhs++) {
+            y[i * y_stride + irhs] = bet * y[i * y_stride + irhs];
+            highest_type0 sum = 0;
+            for (auto j = arow_ptrs0[i]; j < arow_ptrs0[i + 1]; j++) {
+                sum += static_cast<highest_type0>(
+                    static_cast<mult_type0>(avals0[j]) *
+                    static_cast<mult_type0>(x[acols0[j] * x_stride + irhs]));
+            }
+            y[i * y_stride + irhs] += static_cast<OutputValueType>(
+                static_cast<highest_type0>(alph) * sum);
+        }
+    }
+    gko::constexpr_for<1, q, 1>([&](auto k) {
+        using value_type = typename std::tuple_element<
+            k, typename gko::amp::narrow_types<MatrixValueType>::type>::type;
+        auto csrk = dynamic_cast<const matrix::Csr<value_type, IndexType>*>(
+            a->get_bin_matrix(k));
+        if (!csrk) {
+            GKO_NOT_SUPPORTED(a->get_bin_matrix(k));
+        }
+        using mult_type = gko::highest_precision<value_type, InputValueType>;
+        using highest_type = gko::highest_precision<mult_type, OutputValueType>;
+        const auto nrows = static_cast<int>(a->get_size()[0]);
+        assert(nrows == nrows0);
+        auto avals = csrk->get_const_values();
+        auto acols = csrk->get_const_col_idxs();
+        auto arow_ptrs = csrk->get_const_row_ptrs();
+        if (csrk->get_num_stored_elements() > 0) {
+            for (int i = 0; i < nrows; i++) {
+                for (int irhs = 0; irhs < nrhs; irhs++) {
+                    highest_type sum = 0;
+                    for (auto j = arow_ptrs[i]; j < arow_ptrs[i + 1]; j++) {
+                        sum += static_cast<highest_type>(
+                            static_cast<mult_type>(avals[j]) *
+                            static_cast<mult_type>(
+                                x[acols[j] * x_stride + irhs]));
+                    }
+                    y[i * y_stride + irhs] += static_cast<OutputValueType>(
+                        static_cast<highest_type>(alph) * sum);
+                }
+            }
+        }
+    });
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_ADVANCED_SPMV_CSR_KERNEL);
 
 
 template <typename ValueType, typename IndexType>
@@ -338,6 +497,143 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
 
 
 template <typename ValueType, typename IndexType>
+void generate_csr_rownorms_storage(
+    std::shared_ptr<const ReferenceExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>* a, const float tolerance,
+    gko::amp::precision_array<size_type, ValueType>& total_nnz_per_bin,
+    array<remove_complex<ValueType>>& rownorms)
+{
+    using real_type = remove_complex<ValueType>;
+    constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
+    const std::array<real_type, q> min_repr =
+        get_bins_min_representable<real_type>();
+
+    const auto nrows = a->get_size()[0];
+    const ValueType* const ovals = a->get_const_values();
+    const IndexType* const orow_ptrs = a->get_const_row_ptrs();
+    for (int k = 0; k < q; k++) {
+        total_nnz_per_bin[k] = 0;
+    }
+    for (int irow = 0; irow < nrows; irow++) {
+        // Compute row's 1-norm
+        auto rnorm = static_cast<real_type>(0);
+        for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
+            rnorm += std::abs(ovals[j]);
+        }
+        rownorms.get_data()[irow] = rnorm;
+
+        // Compute lower limits of each precision bin
+        const std::array<float, q> min_bin =
+            get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
+
+        // Count NNZ per bin across all rows
+        for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
+            const int ibin = get_adjusted_bin<real_type>(min_bin, min_repr,
+                                                         std::abs(ovals[j]));
+            if (ibin >= 0) {
+                total_nnz_per_bin[ibin]++;
+            }
+        }
+    }
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL);
+
+
+template <typename ValueType, typename IndexType>
+void generate_csr_scatter_bins(
+    std::shared_ptr<const ReferenceExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>* const a, const float tolerance,
+    gko::amp::precision_array<LinOp*, ValueType>& amat)
+{
+    using real_type = remove_complex<ValueType>;
+    constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
+    const std::array<real_type, q> min_repr =
+        get_bins_min_representable<real_type>();
+
+    const auto nrows = a->get_size()[0];
+    const ValueType* const ovals = a->get_const_values();
+    const IndexType* const ocolidxs = a->get_const_col_idxs();
+    const IndexType* const orow_ptrs = a->get_const_row_ptrs();
+
+    using CsrTuple = gko::instantiation_tuple_t<
+        gko::generator_partial<gko::matrix::Csr, IndexType>,
+        typename gko::amp::narrow_types<ValueType>::type>;
+    using ScalarPtrTuple = gko::instantiation_tuple_t<
+        gko::generator<gko::ptr_type>,
+        typename gko::amp::narrow_types<ValueType>::type>;
+
+    ScalarPtrTuple xvalues;
+    gko::amp::precision_array<IndexType*, ValueType> xcol_idxs;
+    gko::amp::precision_array<IndexType*, ValueType> xrow_ptrs;
+
+    // Get pointers into each bin's arrays and zero-initialize row_ptrs
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        using CsrType = typename std::tuple_element<k, CsrTuple>::type;
+        auto cmatk = dynamic_cast<CsrType*>(amat[k]);
+        xrow_ptrs[k] = cmatk->get_row_ptrs();
+        xcol_idxs[k] = cmatk->get_col_idxs();
+        std::get<k>(xvalues) = cmatk->get_values();
+        for (size_type irow = 0; irow <= nrows; irow++) {
+            xrow_ptrs[k][irow] = 0;
+        }
+    });
+
+    // Pass 1: count NNZ per row per bin, stored in row_ptrs[irow+1]
+    for (int irow = 0; irow < nrows; irow++) {
+        auto rnorm = static_cast<real_type>(0);
+        for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
+            rnorm += std::abs(ovals[j]);
+        }
+        const std::array<float, q> min_bin =
+            get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
+        for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
+            const int ibin = get_adjusted_bin<real_type>(min_bin, min_repr,
+                                                         std::abs(ovals[j]));
+            if (ibin >= 0) {
+                xrow_ptrs[ibin][irow + 1]++;
+            }
+        }
+    }
+
+    // Convert per-row counts to row pointers via prefix sum
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        for (size_type irow = 1; irow <= nrows; irow++) {
+            xrow_ptrs[k][irow] += xrow_ptrs[k][irow - 1];
+        }
+    });
+
+    // Pass 2: scatter values into bins using a per-row cursor
+    // cursor[ibin] is initialized to a copy of the row pointers of that bin.
+    std::array<std::vector<IndexType>, q> cursors;
+    gko::constexpr_for<0, q, 1>(
+        [&](auto k) { cursors[k].assign(xrow_ptrs[k], xrow_ptrs[k] + nrows); });
+
+    for (int irow = 0; irow < nrows; irow++) {
+        auto rnorm = static_cast<real_type>(0);
+        for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
+            rnorm += std::abs(ovals[j]);
+        }
+        const std::array<float, q> min_bin =
+            get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
+        for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
+            const int ibin = get_adjusted_bin<real_type>(min_bin, min_repr,
+                                                         std::abs(ovals[j]));
+            if (ibin >= 0) {
+                const auto pos = cursors[ibin][irow]++;
+                xcol_idxs[ibin][pos] = ocolidxs[j];
+                assign_value_to_array_tuple<0>(xvalues, ovals[j], ibin, pos);
+            }
+        }
+    }
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_GENERATE_CSR_SCATTER_BINS_KERNEL);
+
+
+template <typename ValueType, typename IndexType>
 void fill_in_dense(std::shared_ptr<const ReferenceExecutor> exec,
                    const matrix::AMP<ValueType, IndexType>* source,
                    matrix::Dense<ValueType>* result)
@@ -353,39 +649,22 @@ void fill_in_dense(std::shared_ptr<const ReferenceExecutor> exec,
         }
     }
 
-    // Process bin 0 (full precision)
-    auto ell0 = dynamic_cast<const matrix::Ell<ValueType, IndexType>*>(
-        source->get_bin_matrix(0));
-    if (!ell0) {
-        GKO_NOT_SUPPORTED(source->get_bin_matrix(0));
-    }
-    const auto stride0 = ell0->get_stride();
-    const auto max_nnz0 = ell0->get_num_stored_elements_per_row();
-    auto vals0 = ell0->get_const_values();
-    auto cols0 = ell0->get_const_col_idxs();
-    for (gko::size_type i = 0; i < nrows; i++) {
-        for (IndexType j = 0; j < max_nnz0; j++) {
-            const auto col = cols0[i + j * stride0];
-            if (col >= 0) {
-                result->at(i, col) += vals0[i + j * stride0];
-            }
-        }
-    }
-
-    // Process remaining bins (lower precision)
-    gko::constexpr_for<1, q, 1>([&](auto k) {
+    // Accumulate each precision bin into the result
+    gko::constexpr_for<0, q, 1>([&](auto k) {
         using bin_value_type = typename std::tuple_element<
             k, typename gko::amp::narrow_types<ValueType>::type>::type;
-        auto ellk = dynamic_cast<const matrix::Ell<bin_value_type, IndexType>*>(
+        auto ell = dynamic_cast<const matrix::Ell<bin_value_type, IndexType>*>(
             source->get_bin_matrix(k));
-        if (!ellk) {
+        auto csr = dynamic_cast<const matrix::Csr<bin_value_type, IndexType>*>(
+            source->get_bin_matrix(k));
+        if (!ell && !csr) {
             GKO_NOT_SUPPORTED(source->get_bin_matrix(k));
         }
-        const auto stride = ellk->get_stride();
-        const auto max_nnz = ellk->get_num_stored_elements_per_row();
-        auto vals = ellk->get_const_values();
-        auto cols = ellk->get_const_col_idxs();
-        if (max_nnz > 0) {
+        if (ell) {
+            const auto stride = ell->get_stride();
+            const auto max_nnz = ell->get_num_stored_elements_per_row();
+            auto vals = ell->get_const_values();
+            auto cols = ell->get_const_col_idxs();
             for (gko::size_type i = 0; i < nrows; i++) {
                 for (IndexType j = 0; j < max_nnz; j++) {
                     const auto col = cols[i + j * stride];
@@ -393,6 +672,15 @@ void fill_in_dense(std::shared_ptr<const ReferenceExecutor> exec,
                         result->at(i, col) +=
                             static_cast<ValueType>(vals[i + j * stride]);
                     }
+                }
+            }
+        } else {
+            auto vals = csr->get_const_values();
+            auto cols = csr->get_const_col_idxs();
+            auto row_ptrs = csr->get_const_row_ptrs();
+            for (gko::size_type i = 0; i < nrows; i++) {
+                for (auto j = row_ptrs[i]; j < row_ptrs[i + 1]; j++) {
+                    result->at(i, cols[j]) += static_cast<ValueType>(vals[j]);
                 }
             }
         }
@@ -411,47 +699,42 @@ void extract_diagonal(std::shared_ptr<const ReferenceExecutor> exec,
     constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
     const auto diag_size = diag->get_size()[0];
     auto diag_values = diag->get_values();
-
-    // Process bin 0 (full precision)
-    auto ell0 = dynamic_cast<const matrix::Ell<ValueType, IndexType>*>(
-        orig->get_bin_matrix(0));
-    if (!ell0) {
-        GKO_NOT_SUPPORTED(orig->get_bin_matrix(0));
-    }
-    const auto stride0 = ell0->get_stride();
-    const auto max_nnz0 = ell0->get_num_stored_elements_per_row();
-    auto vals0 = ell0->get_const_values();
-    auto cols0 = ell0->get_const_col_idxs();
-    for (gko::size_type row = 0; row < diag_size; row++) {
-        diag_values[row] = 0;
-        for (IndexType j = 0; j < max_nnz0; j++) {
-            const auto col = cols0[row + j * stride0];
-            if (col == static_cast<IndexType>(row)) {
-                diag_values[row] = vals0[row + j * stride0];
-            }
-        }
+    for (int i = 0; i < diag_size; i++) {
+        diag_values[i] = zero<ValueType>();
     }
 
-    // Process remaining bins (lower precision)
-    gko::constexpr_for<1, q, 1>([&](auto k) {
+    gko::constexpr_for<0, q, 1>([&](auto k) {
         using bin_value_type = typename std::tuple_element<
             k, typename gko::amp::narrow_types<ValueType>::type>::type;
-        auto ellk = dynamic_cast<const matrix::Ell<bin_value_type, IndexType>*>(
+        auto ell = dynamic_cast<const matrix::Ell<bin_value_type, IndexType>*>(
             orig->get_bin_matrix(k));
-        if (!ellk) {
+        auto csr = dynamic_cast<const matrix::Csr<bin_value_type, IndexType>*>(
+            orig->get_bin_matrix(k));
+        if (!ell && !csr) {
             GKO_NOT_SUPPORTED(orig->get_bin_matrix(k));
         }
-        const auto stride = ellk->get_stride();
-        const auto max_nnz = ellk->get_num_stored_elements_per_row();
-        auto vals = ellk->get_const_values();
-        auto cols = ellk->get_const_col_idxs();
-        if (max_nnz > 0) {
+        if (ell) {
+            const auto stride = ell->get_stride();
+            const auto max_nnz = ell->get_num_stored_elements_per_row();
+            auto vals = ell->get_const_values();
+            auto cols = ell->get_const_col_idxs();
             for (gko::size_type row = 0; row < diag_size; row++) {
                 for (IndexType j = 0; j < max_nnz; j++) {
                     const auto col = cols[row + j * stride];
                     if (col == static_cast<IndexType>(row)) {
-                        diag_values[row] +=
+                        diag_values[row] =
                             static_cast<ValueType>(vals[row + j * stride]);
+                    }
+                }
+            }
+        } else {
+            auto vals = csr->get_const_values();
+            auto cols = csr->get_const_col_idxs();
+            auto row_ptrs = csr->get_const_row_ptrs();
+            for (gko::size_type row = 0; row < diag_size; row++) {
+                for (auto j = row_ptrs[row]; j < row_ptrs[row + 1]; j++) {
+                    if (cols[j] == static_cast<IndexType>(row)) {
+                        diag_values[row] = static_cast<ValueType>(vals[j]);
                     }
                 }
             }

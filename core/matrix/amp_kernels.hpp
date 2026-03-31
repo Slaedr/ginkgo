@@ -7,6 +7,7 @@
 
 
 #include <ginkgo/core/matrix/amp.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
@@ -19,21 +20,37 @@ namespace gko {
 namespace kernels {
 
 
-#define GKO_DECLARE_AMP_SPMV_KERNEL(InputValueType, MatrixValueType, \
-                                    OutputValueType, IndexType)      \
-    void spmv(std::shared_ptr<const DefaultExecutor> exec,           \
-              const matrix::AMP<MatrixValueType, IndexType>* a,      \
-              const matrix::Dense<InputValueType>* b,                \
-              matrix::Dense<OutputValueType>* c)
+#define GKO_DECLARE_AMP_SPMV_ELL_KERNEL(InputValueType, MatrixValueType, \
+                                        OutputValueType, IndexType)      \
+    void spmv_ell(std::shared_ptr<const DefaultExecutor> exec,           \
+                  const matrix::AMP<MatrixValueType, IndexType>* a,      \
+                  const matrix::Dense<InputValueType>* b,                \
+                  matrix::Dense<OutputValueType>* c)
 
-#define GKO_DECLARE_AMP_ADVANCED_SPMV_KERNEL(InputValueType, MatrixValueType, \
-                                             OutputValueType, IndexType)      \
-    void advanced_spmv(std::shared_ptr<const DefaultExecutor> exec,           \
-                       const matrix::Dense<MatrixValueType>* alpha,           \
-                       const matrix::AMP<MatrixValueType, IndexType>* a,      \
-                       const matrix::Dense<InputValueType>* b,                \
-                       const matrix::Dense<OutputValueType>* beta,            \
-                       matrix::Dense<OutputValueType>* c)
+#define GKO_DECLARE_AMP_SPMV_CSR_KERNEL(InputValueType, MatrixValueType, \
+                                        OutputValueType, IndexType)      \
+    void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,           \
+                  const matrix::AMP<MatrixValueType, IndexType>* a,      \
+                  const matrix::Dense<InputValueType>* b,                \
+                  matrix::Dense<OutputValueType>* c)
+
+#define GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL(                            \
+    InputValueType, MatrixValueType, OutputValueType, IndexType)             \
+    void advanced_spmv_ell(std::shared_ptr<const DefaultExecutor> exec,      \
+                           const matrix::Dense<MatrixValueType>* alpha,      \
+                           const matrix::AMP<MatrixValueType, IndexType>* a, \
+                           const matrix::Dense<InputValueType>* b,           \
+                           const matrix::Dense<OutputValueType>* beta,       \
+                           matrix::Dense<OutputValueType>* c)
+
+#define GKO_DECLARE_AMP_ADVANCED_SPMV_CSR_KERNEL(                            \
+    InputValueType, MatrixValueType, OutputValueType, IndexType)             \
+    void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,      \
+                           const matrix::Dense<MatrixValueType>* alpha,      \
+                           const matrix::AMP<MatrixValueType, IndexType>* a, \
+                           const matrix::Dense<InputValueType>* b,           \
+                           const matrix::Dense<OutputValueType>* beta,       \
+                           matrix::Dense<OutputValueType>* c)
 
 #define GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL(ValueType, IndexType) \
     void generate_ell_rownorms_storage(                                       \
@@ -48,6 +65,19 @@ namespace kernels {
         const matrix::Ell<ValueType, IndexType>* a, const float tolerance,     \
         gko::amp::precision_array<LinOp*, ValueType>& amat)
 
+#define GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL(ValueType, IndexType) \
+    void generate_csr_rownorms_storage(                                       \
+        std::shared_ptr<const DefaultExecutor> exec,                          \
+        const matrix::Csr<ValueType, IndexType>* a, const float tolerance,    \
+        gko::amp::precision_array<size_type, ValueType>& total_nnz_per_bin,   \
+        array<gko::remove_complex<ValueType>>& rownorms)
+
+#define GKO_DECLARE_AMP_GENERATE_CSR_SCATTER_BINS_KERNEL(ValueType, IndexType) \
+    void generate_csr_scatter_bins(                                            \
+        std::shared_ptr<const DefaultExecutor> exec,                           \
+        const matrix::Csr<ValueType, IndexType>* a, const float tolerance,     \
+        gko::amp::precision_array<LinOp*, ValueType>& amat)
+
 #define GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType)      \
     void fill_in_dense(std::shared_ptr<const DefaultExecutor> exec,     \
                        const matrix::AMP<ValueType, IndexType>* source, \
@@ -58,22 +88,34 @@ namespace kernels {
                           const matrix::AMP<ValueType, IndexType>* orig, \
                           matrix::Diagonal<ValueType>* diag)
 
-#define GKO_DECLARE_ALL_AS_TEMPLATES                                        \
-    template <typename InputValueType, typename MatrixValueType,            \
-              typename OutputValueType, typename IndexType>                 \
-    GKO_DECLARE_AMP_SPMV_KERNEL(InputValueType, MatrixValueType,            \
-                                OutputValueType, IndexType);                \
-    template <typename InputValueType, typename MatrixValueType,            \
-              typename OutputValueType, typename IndexType>                 \
-    GKO_DECLARE_AMP_ADVANCED_SPMV_KERNEL(InputValueType, MatrixValueType,   \
-                                         OutputValueType, IndexType);       \
-    template <typename ValueType, typename IndexType>                       \
-    GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL(ValueType, IndexType);  \
-    template <typename ValueType, typename IndexType>                       \
-    GKO_DECLARE_AMP_GENERATE_ELL_SCATTER_BINS_KERNEL(ValueType, IndexType); \
-    template <typename ValueType, typename IndexType>                       \
-    GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType);             \
-    template <typename ValueType, typename IndexType>                       \
+#define GKO_DECLARE_ALL_AS_TEMPLATES                                          \
+    template <typename InputValueType, typename MatrixValueType,              \
+              typename OutputValueType, typename IndexType>                   \
+    GKO_DECLARE_AMP_SPMV_ELL_KERNEL(InputValueType, MatrixValueType,          \
+                                    OutputValueType, IndexType);              \
+    template <typename InputValueType, typename MatrixValueType,              \
+              typename OutputValueType, typename IndexType>                   \
+    GKO_DECLARE_AMP_SPMV_CSR_KERNEL(InputValueType, MatrixValueType,          \
+                                    OutputValueType, IndexType);              \
+    template <typename InputValueType, typename MatrixValueType,              \
+              typename OutputValueType, typename IndexType>                   \
+    GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL(InputValueType, MatrixValueType, \
+                                             OutputValueType, IndexType);     \
+    template <typename InputValueType, typename MatrixValueType,              \
+              typename OutputValueType, typename IndexType>                   \
+    GKO_DECLARE_AMP_ADVANCED_SPMV_CSR_KERNEL(InputValueType, MatrixValueType, \
+                                             OutputValueType, IndexType);     \
+    template <typename ValueType, typename IndexType>                         \
+    GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL(ValueType, IndexType);    \
+    template <typename ValueType, typename IndexType>                         \
+    GKO_DECLARE_AMP_GENERATE_ELL_SCATTER_BINS_KERNEL(ValueType, IndexType);   \
+    template <typename ValueType, typename IndexType>                         \
+    GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL(ValueType, IndexType);    \
+    template <typename ValueType, typename IndexType>                         \
+    GKO_DECLARE_AMP_GENERATE_CSR_SCATTER_BINS_KERNEL(ValueType, IndexType);   \
+    template <typename ValueType, typename IndexType>                         \
+    GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType);               \
+    template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_EXTRACT_DIAGONAL_KERNEL(ValueType, IndexType)
 
 

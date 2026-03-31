@@ -175,10 +175,10 @@ __global__ __launch_bounds__(default_block_size) void ell_amp_adv_spmv(
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void spmv(std::shared_ptr<const DefaultExecutor> exec,
-          const matrix::AMP<MatrixValueType, IndexType>* const a,
-          const matrix::Dense<InputValueType>* const b,
-          matrix::Dense<OutputValueType>* const c)
+void spmv_ell(std::shared_ptr<const DefaultExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* const a,
+              const matrix::Dense<InputValueType>* const b,
+              matrix::Dense<OutputValueType>* const c)
 {
     using DMValueType =
         gko::kernels::GKO_DEVICE_NAMESPACE::device_type<MatrixValueType>;
@@ -224,17 +224,17 @@ void spmv(std::shared_ptr<const DefaultExecutor> exec,
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_SPMV_KERNEL);
+    GKO_DECLARE_AMP_SPMV_ELL_KERNEL);
 
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void advanced_spmv(std::shared_ptr<const DefaultExecutor> exec,
-                   const matrix::Dense<MatrixValueType>* alpha,
-                   const matrix::AMP<MatrixValueType, IndexType>* a,
-                   const matrix::Dense<InputValueType>* b,
-                   const matrix::Dense<OutputValueType>* beta,
-                   matrix::Dense<OutputValueType>* c)
+void advanced_spmv_ell(std::shared_ptr<const DefaultExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
 {
     using DMValueType =
         gko::kernels::GKO_DEVICE_NAMESPACE::device_type<MatrixValueType>;
@@ -282,7 +282,37 @@ void advanced_spmv(std::shared_ptr<const DefaultExecutor> exec,
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_ADVANCED_SPMV_KERNEL);
+    GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* a,
+              const matrix::Dense<InputValueType>* b,
+              matrix::Dense<OutputValueType>* c)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_SPMV_CSR_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_ADVANCED_SPMV_CSR_KERNEL);
 
 
 template <int q, typename ValueType, typename IndexType>
@@ -476,6 +506,20 @@ void generate_ell_rownorms_storage(
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
+
+
+template <typename ValueType, typename IndexType>
+void generate_csr_rownorms_storage(
+    std::shared_ptr<const DefaultExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>* a, const float tolerance,
+    gko::amp::precision_array<size_type, ValueType>& total_nnz_per_bin,
+    array<gko::remove_complex<ValueType>>& rownorms)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL);
 
 
 }  // namespace amp

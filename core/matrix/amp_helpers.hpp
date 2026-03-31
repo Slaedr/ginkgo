@@ -6,6 +6,7 @@
 #define GKO_CORE_MATRIX_AMP_HELPERS_H
 
 #include <ginkgo/core/matrix/amp.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 
 #include "core/base/utils.hpp"
@@ -79,6 +80,39 @@ inline auto allocate_bins_tuple(
         std::get<idx - starting_idx>(bins) =
             std::move(matrix::Ell<value_type, IndexType>::create(
                 exec, dims, bin_max_nnz_row[idx - starting_idx]));
+    });
+    return bins;
+}
+
+
+/**
+ * Allocate a CSR matrix for each precision bin supported, starting at the
+ * precision of the parameter ValueType.
+ *
+ * @tparam ValueType  Scalar type of the highest precision bin.
+ * @tparam IndexType  Index type for the concrete matrix.
+ *
+ * @param dims  (Common) dimensions of all bins.
+ * @param bin_total_nnz  Total number of nonzeros for each bin.
+ * @return  Fixed-size array of LinOps, one for each allocated bin.
+ */
+template <typename ValueType, typename IndexType>
+inline precision_array<std::unique_ptr<LinOp>, ValueType> allocate_csr_bins(
+    std::shared_ptr<const Executor> exec, const dim<2>& dims,
+    const precision_array<size_type, ValueType> bin_total_nnz)
+{
+    using last_precision =
+        std::tuple_element<num_amp_precisions - 1, supported_precisions>::type;
+    constexpr int highest_idx = precision_index<last_precision>::index;
+    constexpr int starting_idx =
+        precision_index<gko::remove_complex<ValueType>>::index;
+    precision_array<std::unique_ptr<LinOp>, ValueType> bins;
+    gko::constexpr_for<starting_idx, highest_idx + 1, 1>([&](auto k) {
+        using value_type = typename std::tuple_element<
+            k, typename gko::amp::supported_types<ValueType>::type>::type;
+        bins[k - starting_idx] =
+            std::move(matrix::Csr<value_type, IndexType>::create(
+                exec, dims, bin_total_nnz[k - starting_idx]));
     });
     return bins;
 }
