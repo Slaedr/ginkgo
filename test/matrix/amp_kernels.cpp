@@ -380,6 +380,73 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
 }
 
 
+TEST_F(Amp, ReadfromDeviceProducesSameResultAsFactoryGenerate)
+{
+    using Ell = Mtx;
+    using Dense = Vec;
+
+    gko::matrix_data<value_type, index_type> h_data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+    auto data =
+        gko::device_matrix_data<value_type, index_type>::create_from_host(
+            exec, h_data);
+
+    // Method 1: read directly (via empty factory-generated AMP)
+    auto ell_empty = gko::share(Ell::create(this->exec));
+    auto mtx_read = AmpMtx::build().on(this->exec)->generate(ell_empty);
+    mtx_read->read(data);
+
+    // Method 2: factory generate from ELL
+    auto ell = gko::share(Ell::create(this->exec));
+    ell->read(data);
+    auto mtx_gen = AmpMtx::build().on(this->exec)->generate(ell);
+
+    // Both should produce the same dense result
+    auto dense_read = Dense::create(this->exec);
+    auto dense_gen = Dense::create(this->exec);
+    mtx_read->convert_to(dense_read.get());
+    mtx_gen->convert_to(dense_gen.get());
+
+    GKO_ASSERT_MTX_NEAR(dense_read, dense_gen, 0.0);
+}
+
+
+TEST_F(Amp, MoveReadFromDeviceProducesSameResultAsFactoryGenerate)
+{
+    using Ell = Mtx;
+    using Dense = Vec;
+
+    gko::matrix_data<value_type, index_type> h_data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+    auto data =
+        gko::device_matrix_data<value_type, index_type>::create_from_host(
+            exec, h_data);
+
+    // Method 1: read directly (via empty factory-generated AMP)
+    auto ell_empty = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx_read = AmpMtx::build().on(this->exec)->generate(ell_empty);
+    mtx_read->read(std::move(data));
+    EXPECT_EQ(data.get_num_stored_elements(), 0);
+    auto zero_sz = gko::dim<2>{0, 0};
+    EXPECT_EQ(data.get_size(), zero_sz);
+
+    // Method 2: factory generate from ELL
+    auto ell = gko::share(Ell::create(this->exec));
+    ell->read(h_data);
+    auto mtx_gen = AmpMtx::build().on(this->exec)->generate(ell);
+
+    // Both should produce the same dense result
+    auto dense_read = Dense::create(this->exec);
+    auto dense_gen = Dense::create(this->exec);
+    mtx_read->convert_to(dense_read.get());
+    mtx_gen->convert_to(dense_gen.get());
+
+    GKO_ASSERT_MTX_NEAR(dense_read, dense_gen, 0.0);
+}
+
+
 class AmpCsr : public CommonTestFixture {
 protected:
     using CsrMtx = gko::matrix::Csr<value_type, index_type>;

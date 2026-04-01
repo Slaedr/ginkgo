@@ -304,6 +304,26 @@ void AMP<ValueType, IndexType>::read(
 
 
 template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::read(device_mat_data&& data)
+{
+    this->read(data);
+    data.empty_out();
+}
+
+
+template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::read(
+    const device_matrix_data<ValueType, IndexType>& data)
+{
+    auto exec = this->get_executor();
+    auto ell = Ell<ValueType, IndexType>::create(exec);
+    ell->read(data);
+    this->set_size(ell->get_size());
+    mat_bins_ = generate_amp(ell.get());
+}
+
+
+template <typename ValueType, typename IndexType>
 std::array<gko::array<IndexType>, AMP<ValueType, IndexType>::num_precisions>
 AMP<ValueType, IndexType>::create_row_sizes() const
 {
