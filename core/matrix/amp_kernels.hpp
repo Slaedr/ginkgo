@@ -66,16 +66,16 @@ namespace kernels {
         gko::amp::precision_array<LinOp*, ValueType>& amat)
 
 #define GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL(ValueType, IndexType) \
-    void generate_csr_rownorms_storage(                                       \
+    void generate_cwise_csr_calculate_row_sizes(                              \
         std::shared_ptr<const DefaultExecutor> exec,                          \
         const matrix::Csr<ValueType, IndexType>* a, const float tolerance,    \
-        gko::amp::precision_array<size_type, ValueType>& total_nnz_per_bin,   \
-        array<gko::remove_complex<ValueType>>& rownorms)
+        gko::amp::precision_array<IndexType*, ValueType>& bin_row_sizes)
 
-#define GKO_DECLARE_AMP_GENERATE_CSR_SCATTER_BINS_KERNEL(ValueType, IndexType) \
-    void generate_csr_scatter_bins(                                            \
-        std::shared_ptr<const DefaultExecutor> exec,                           \
-        const matrix::Csr<ValueType, IndexType>* a, const float tolerance,     \
+#define GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL(ValueType,  \
+                                                               IndexType)  \
+    void generate_cwise_csr_scatter_bins(                                  \
+        std::shared_ptr<const DefaultExecutor> exec,                       \
+        const matrix::Csr<ValueType, IndexType>* a, const float tolerance, \
         gko::amp::precision_array<LinOp*, ValueType>& amat)
 
 #define GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType)      \
@@ -112,7 +112,8 @@ namespace kernels {
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL(ValueType, IndexType);    \
     template <typename ValueType, typename IndexType>                         \
-    GKO_DECLARE_AMP_GENERATE_CSR_SCATTER_BINS_KERNEL(ValueType, IndexType);   \
+    GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL(ValueType,         \
+                                                           IndexType);        \
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType);               \
     template <typename ValueType, typename IndexType>                         \

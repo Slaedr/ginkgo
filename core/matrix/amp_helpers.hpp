@@ -93,28 +93,59 @@ inline auto allocate_bins_tuple(
  * @tparam IndexType  Index type for the concrete matrix.
  *
  * @param dims  (Common) dimensions of all bins.
- * @param bin_total_nnz  Total number of nonzeros for each bin.
+ * @param bin_row_ptrs  Pre-computed row pointer arrays for each bin.
+ *                      To avoid a deep copy, pass an rvalue reference using
+ *                      `std::move(bin_row_ptrs_arg)`.
  * @return  Fixed-size array of LinOps, one for each allocated bin.
  */
 template <typename ValueType, typename IndexType>
 inline precision_array<std::unique_ptr<LinOp>, ValueType> allocate_csr_bins(
     std::shared_ptr<const Executor> exec, const dim<2>& dims,
-    const precision_array<size_type, ValueType> bin_total_nnz)
+    precision_array<gko::array<IndexType>, ValueType> bin_row_ptrs)
 {
-    using last_precision =
-        std::tuple_element<num_amp_precisions - 1, supported_precisions>::type;
-    constexpr int highest_idx = precision_index<last_precision>::index;
-    constexpr int starting_idx =
-        precision_index<gko::remove_complex<ValueType>>::index;
+    constexpr int q = gko::amp::narrow_types<ValueType>::num_types;
     precision_array<std::unique_ptr<LinOp>, ValueType> bins;
-    gko::constexpr_for<starting_idx, highest_idx + 1, 1>([&](auto k) {
+    gko::constexpr_for<0, q, 1>([&](auto k) {
         using value_type = typename std::tuple_element<
-            k, typename gko::amp::supported_types<ValueType>::type>::type;
-        bins[k - starting_idx] =
-            std::move(matrix::Csr<value_type, IndexType>::create(
-                exec, dims, bin_total_nnz[k - starting_idx]));
+            k, typename gko::amp::narrow_types<ValueType>::type>::type;
+        // copy nnz to host and allocate arrays
+        auto ref = exec->get_master();
+        IndexType nnz{};
+        ref->copy_from(exec, 1, bin_row_ptrs[k].get_data() + dims[0], &nnz);
+        array<IndexType> col_idxs(exec, nnz);
+        array<value_type> values(exec, nnz);
+        // auto row_ptrs = bin_row_ptrs[k];
+        bins[k] = std::move(matrix::Csr<value_type, IndexType>::create(
+            exec, dims, std::move(values), std::move(col_idxs),
+            std::move(bin_row_ptrs[k])));
     });
     return bins;
+}
+
+/**
+ * Helper function to get array of pointers from array of arrays.
+ */
+template <typename T, typename ValueType>
+inline precision_array<T*, ValueType> get_pointer_array(
+    precision_array<gko::array<T>, ValueType>& a)
+{
+    constexpr int q = gko::amp::narrow_types<ValueType>::num_types;
+    precision_array<T*, ValueType> b;
+    gko::constexpr_for<0, q, 1>([&](auto k) { b[k] = a[k].get_data(); });
+    return b;
+}
+
+/**
+ * Helper function to get array of pointers to const from const array of arrays.
+ */
+template <typename T, typename ValueType>
+inline precision_array<const T*, ValueType> get_const_pointer_array(
+    const precision_array<gko::array<T>, ValueType>& a)
+{
+    constexpr int q = gko::amp::narrow_types<ValueType>::num_types;
+    precision_array<T*, ValueType> b;
+    gko::constexpr_for<0, q, 1>([&](auto k) { b[k] = a[k]->get_const_data(); });
+    return b;
 }
 
 

@@ -149,6 +149,7 @@ protected:
     explicit AMP(const Factory* factory, std::shared_ptr<const LinOp> lin_op)
         : EnableLinOp<AMP>(factory->get_executor(), lin_op->get_size()),
           parameters_{factory->get_parameters()},
+          row_sizes_(create_row_sizes()),
           mat_bins_(generate_amp(lin_op.get()))
     {}
 
@@ -157,16 +158,22 @@ protected:
     void apply_impl(const LinOp* alpha, const LinOp* b, const LinOp* beta,
                     LinOp* x) const override;
 
-    /* Array of bins of the different precisions.
-     */
-    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
-
     /**
      * Generate binned adaptive precision matrix from given (fixed precision)
      * matrix.
      */
     std::array<std::unique_ptr<const LinOp>, num_precisions> generate_amp(
-        const LinOp* matrix) const;
+        const LinOp* matrix);
+
+private:
+    std::array<gko::array<IndexType>, num_precisions> row_sizes_;
+
+    std::array<gko::array<IndexType>, num_precisions> create_row_sizes() const;
+
+protected:
+    /* Array of bins of the different precisions.
+     */
+    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
 };
 
 

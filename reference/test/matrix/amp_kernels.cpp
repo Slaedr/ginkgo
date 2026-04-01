@@ -5,6 +5,7 @@
 #include "core/matrix/amp_kernels.hpp"
 
 #include <memory>
+#include <numeric>
 
 #include <gtest/gtest.h>
 
@@ -625,7 +626,7 @@ TYPED_TEST(AMPDouble, ApplyHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create test vector (matrix is 5x4)
     auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
     // Compute y_amp = AMP * x
@@ -667,7 +668,7 @@ TYPED_TEST(AMPDouble, AdvancedApplyHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create alpha and beta scalars
     auto alpha = gko::initialize<Vec>({2.0}, this->exec);
     auto beta = gko::initialize<Vec>({-1.0}, this->exec);
@@ -707,7 +708,7 @@ TYPED_TEST(AMPDouble, ApplyWithMultipleRHSHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
     // clang-format off
     auto x = gko::initialize<Vec>(
@@ -757,7 +758,7 @@ TYPED_TEST(AMPDouble, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create alpha and beta scalars
     auto alpha = gko::initialize<Vec>({2.0}, this->exec);
     auto beta = gko::initialize<Vec>({-1.0}, this->exec);
@@ -819,7 +820,7 @@ TYPED_TEST(AMPDouble, FillInDenseReconstructsOriginalMatrix)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create result dense matrix with same size
     auto result = Dns::create(this->exec, this->ell1->get_size());
 
@@ -841,7 +842,7 @@ TYPED_TEST(AMPDouble, ExtractDiagonalSumsOverBins)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // The matrix is 5x4, so diagonal size is min(5,4) = 4
     auto diag = Diag::create(this->exec, 4);
 
@@ -958,14 +959,14 @@ protected:
             {{1.0, 3.0, 2.0},
              {0.0, 5.0, 0.0}}, exec);
         // clang-format on
-        ell1 = Ell::create(exec);
+        ell1 = gko::share(Ell::create(exec));
         mtx1->convert_to(ell1.get());
     }
 
     std::shared_ptr<const gko::Executor> exec;
     std::unique_ptr<Dns> mtx1;
     std::unique_ptr<Dns> mtx2;
-    std::unique_ptr<Ell> ell1;
+    std::shared_ptr<Ell> ell1;
     const float tol = 1e-6;
 };
 
@@ -1178,7 +1179,7 @@ TYPED_TEST(AMPFloat, ApplyHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create test vector (matrix is 5x4)
     auto x = gko::initialize<Vec>({1.0, 2.0, 1.0, 2.0}, this->exec);
     // Compute y_amp = AMP * x
@@ -1216,7 +1217,7 @@ TYPED_TEST(AMPFloat, AdvancedApplyHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create alpha and beta scalars
     auto alpha = gko::initialize<Vec>({2.0}, this->exec);
     auto beta = gko::initialize<Vec>({-1.0}, this->exec);
@@ -1256,7 +1257,7 @@ TYPED_TEST(AMPFloat, ApplyWithMultipleRHSHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
     // clang-format off
     auto x = gko::initialize<Vec>(
@@ -1306,7 +1307,7 @@ TYPED_TEST(AMPFloat, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create alpha and beta scalars
     auto alpha = gko::initialize<Vec>({2.0}, this->exec);
     auto beta = gko::initialize<Vec>({-1.0}, this->exec);
@@ -1368,7 +1369,7 @@ TYPED_TEST(AMPFloat, FillInDenseReconstructsOriginalMatrix)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // Create result dense matrix with same size
     auto result = Dns::create(this->exec, this->ell1->get_size());
 
@@ -1390,7 +1391,7 @@ TYPED_TEST(AMPFloat, ExtractDiagonalSumsOverBins)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->ell1->clone()));
+                       ->generate(this->ell1);
     // The matrix is 5x4, so diagonal size is min(5,4) = 4
     auto diag = Diag::create(this->exec, 4);
 
@@ -1452,53 +1453,49 @@ TYPED_TEST_SUITE(AMPDoubleCsr, double_csr_types, TypenameNameGenerator);
 TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowNorms)
 {
     using T = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
     using real_T = typename TestFixture::real_T;
-    gko::amp::precision_array<gko::size_type, T> total_nnz;
-    gko::array<real_T> rownorms(this->exec, this->csr1->get_size()[0]);
+    gko::amp::precision_array<gko::array<index_type>, T> row_sizes;
+    for (int i = 0; i < gko::amp::narrow_types<double>::num_types; i++) {
+        row_sizes[i].set_executor(this->exec);
+        row_sizes[i].resize_and_reset(this->csr1->get_size()[0] + 1);
+    }
+    auto row_sz_ptrs = gko::amp::get_pointer_array<index_type, T>(row_sizes);
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
 
-    gko::kernels::reference::amp::generate_csr_rownorms_storage(
-        rexec, this->csr1.get(), this->tol, total_nnz, rownorms);
+    gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
+        rexec, this->csr1.get(), this->tol, row_sz_ptrs);
 
-    auto rnv = rownorms.get_const_data();
-    EXPECT_EQ(rnv[0], static_cast<real_T>(1.1) + static_cast<real_T>(3e-9) +
-                          static_cast<real_T>(4.5e-4));
-    EXPECT_EQ(rnv[1], static_cast<real_T>(2.0) + static_cast<real_T>(1.2e-11));
-    EXPECT_EQ(rnv[2], static_cast<real_T>(0.8));
-    EXPECT_EQ(rnv[3],
-              static_cast<real_T>(1.2e-11) + static_cast<real_T>(1.6e-4));
-    EXPECT_EQ(rnv[4], static_cast<real_T>(2.0) + static_cast<real_T>(2e-5));
-}
-
-
-TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectBinTotalNNZs)
-{
-    using T = typename TestFixture::value_type;
-    using real_T = typename TestFixture::real_T;
-    gko::amp::precision_array<gko::size_type, T> total_nnz;
-    gko::array<real_T> rownorms(this->exec, this->csr1->get_size()[0]);
-    auto rexec =
-        std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
-
-    gko::kernels::reference::amp::generate_csr_rownorms_storage(
-        rexec, this->csr1.get(), this->tol, total_nnz, rownorms);
-
-    // Bin 0 (double): one entry per row – the dominant value
-    EXPECT_EQ(total_nnz[0], gko::size_type{5});
+    auto rnv = row_sz_ptrs;
+    for (int i = 0; i < 5; i++) {
+        EXPECT_EQ(rnv[0][i], 1);
+    }
 #if GKO_AMP_HALF_IS_FP16
-    // Bin 1 (float): rows 0 (2 entries), 3 and 4 (1 entry each)
-    EXPECT_EQ(total_nnz[1], gko::size_type{4});
-    // Bin 2 (half): nothing in this range
-    EXPECT_EQ(total_nnz[2], gko::size_type{0});
+    EXPECT_EQ(rnv[1][0], 2);
+    EXPECT_EQ(rnv[1][1], 0);
+    EXPECT_EQ(rnv[1][2], 0);
+    EXPECT_EQ(rnv[1][3], 1);
+    EXPECT_EQ(rnv[1][4], 1);
+    for (int i = 0; i < 5; i++) {
+        EXPECT_EQ(rnv[2][i], 0);
+    }
 #elif GKO_AMP_HALF_IS_BFLOAT16
-    // Bin 1 (float): rows 0, 3, 4 each have 1 entry
-    EXPECT_EQ(total_nnz[1], gko::size_type{3});
-    // Bin 2 (bfloat16): row 0 has 1 entry (3e-9)
-    EXPECT_EQ(total_nnz[2], gko::size_type{1});
+    EXPECT_EQ(rnv[1][0], 1);
+    EXPECT_EQ(rnv[1][1], 0);
+    EXPECT_EQ(rnv[1][2], 0);
+    EXPECT_EQ(rnv[1][3], 1);
+    EXPECT_EQ(rnv[1][4], 1);
+    EXPECT_EQ(rnv[2][0], 1);
+    for (int i = 1; i < 5; i++) {
+        EXPECT_EQ(rnv[2][i], 0);
+    }
 #else
-    // Only double and float (no half)
-    EXPECT_EQ(total_nnz[1], gko::size_type{4});
+    EXPECT_EQ(rnv[1][0], 2);
+    EXPECT_EQ(rnv[1][1], 0);
+    EXPECT_EQ(rnv[1][2], 0);
+    EXPECT_EQ(rnv[1][3], 1);
+    EXPECT_EQ(rnv[1][4], 1);
 #endif
 }
 
@@ -1506,24 +1503,57 @@ TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectBinTotalNNZs)
 TYPED_TEST(AMPDoubleCsr, GenerateCsrScattersBinsCorrectly)
 {
     using T = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
     using real_T = typename TestFixture::real_T;
+    constexpr int q = gko::amp::narrow_types<T>::num_types;
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
+    gko::amp::precision_array<gko::array<index_type>, T> row_sizes;
+    for (int i = 0; i < q; i++) {
+        row_sizes[i].set_executor(this->exec);
+        row_sizes[i].resize_and_reset(this->csr1->get_size()[0] + 1);
+    }
+    auto row_ptrs = gko::amp::get_pointer_array<index_type, T>(row_sizes);
+    for (int i = 0; i < 5; i++) {
+        row_ptrs[0][i] = 1;
+    }
 #if GKO_AMP_HALF_IS_FP16
-    auto total_nnzs = gko::amp::precision_array<gko::size_type, T>{5, 4, 0};
+    row_ptrs[1][0] = 2;
+    row_ptrs[1][1] = 0;
+    row_ptrs[1][2] = 0;
+    row_ptrs[1][3] = 1;
+    row_ptrs[1][4] = 1;
+    for (int i = 0; i < 5; i++) {
+        row_ptrs[2][i] = 0;
+    }
 #elif GKO_AMP_HALF_IS_BFLOAT16
-    auto total_nnzs = gko::amp::precision_array<gko::size_type, T>{5, 3, 1};
+    row_ptrs[1][0] = 1;
+    row_ptrs[1][1] = 0;
+    row_ptrs[1][2] = 0;
+    row_ptrs[1][3] = 1;
+    row_ptrs[1][4] = 1;
+    row_ptrs[2][0] = 1;
+    for (int i = 1; i < 5; i++) {
+        row_ptrs[2][i] = 0;
+    }
 #else
-    auto total_nnzs = gko::amp::precision_array<gko::size_type, T>{5, 4};
+    row_ptrs[1][0] = 2;
+    row_ptrs[1][1] = 0;
+    row_ptrs[1][2] = 0;
+    row_ptrs[1][3] = 1;
+    row_ptrs[1][4] = 1;
 #endif
+    for (int k = 0; k < q; k++) {
+        std::exclusive_scan(row_ptrs[k], row_ptrs[k] + 6, row_ptrs[k], 0);
+    }
     auto abins = gko::amp::allocate_csr_bins<T, int>(
-        this->exec, this->csr1->get_size(), total_nnzs);
+        this->exec, this->csr1->get_size(), row_sizes);
     constexpr auto num_bins = std::tuple_size<decltype(abins)>::value;
     gko::amp::precision_array<gko::LinOp*, T> amat;
     gko::constexpr_for<0, num_bins, 1>(
         [&](auto k) { amat[k] = abins[k].get(); });
 
-    gko::kernels::reference::amp::generate_csr_scatter_bins(
+    gko::kernels::reference::amp::generate_cwise_csr_scatter_bins(
         rexec, this->csr1.get(), this->tol, amat);
 
     using types_list = typename gko::amp::narrow_types<T>::type;
@@ -1633,7 +1663,7 @@ TYPED_TEST(AMPDoubleCsr, ApplyHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->csr1->clone()));
+                       ->generate(this->csr1);
     auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
     auto y_amp =
         Vec::create(this->exec, gko::dim<2>{this->csr1->get_size()[0], 1});
@@ -1667,7 +1697,7 @@ TYPED_TEST(AMPDoubleCsr, AdvancedApplyHasCorrectRelativeError)
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
                        .on(this->exec)
-                       ->generate(gko::share(this->csr1->clone()));
+                       ->generate(this->csr1);
     auto alpha = gko::initialize<Vec>({2.0}, this->exec);
     auto beta = gko::initialize<Vec>({-1.0}, this->exec);
     auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);

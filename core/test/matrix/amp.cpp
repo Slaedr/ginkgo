@@ -658,7 +658,7 @@ TYPED_TEST(Amp, FactoryGenerateWorksWithCsrInput)
         using vtype = typename std::tuple_element<k, types_list>::type;
         auto mcsr = dynamic_cast<const gko::matrix::Csr<vtype, index_type>*>(
             mtx->get_bin_matrix(k));
-        EXPECT_NE(mcsr, nullptr);
+        ASSERT_NE(mcsr, nullptr);
         EXPECT_EQ(mcsr->get_size(), csr_input->get_size());
     });
 }

@@ -497,11 +497,10 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
 
 
 template <typename ValueType, typename IndexType>
-void generate_csr_rownorms_storage(
+void generate_cwise_csr_calculate_row_sizes(
     std::shared_ptr<const ReferenceExecutor> exec,
     const matrix::Csr<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<size_type, ValueType>& total_nnz_per_bin,
-    array<remove_complex<ValueType>>& rownorms)
+    gko::amp::precision_array<IndexType*, ValueType>& bin_row_sizes)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -511,16 +510,15 @@ void generate_csr_rownorms_storage(
     const auto nrows = a->get_size()[0];
     const ValueType* const ovals = a->get_const_values();
     const IndexType* const orow_ptrs = a->get_const_row_ptrs();
-    for (int k = 0; k < q; k++) {
-        total_nnz_per_bin[k] = 0;
-    }
     for (int irow = 0; irow < nrows; irow++) {
+        for (int k = 0; k < q; k++) {
+            bin_row_sizes[k][irow] = 0;
+        }
         // Compute row's 1-norm
         auto rnorm = static_cast<real_type>(0);
         for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
             rnorm += std::abs(ovals[j]);
         }
-        rownorms.get_data()[irow] = rnorm;
 
         // Compute lower limits of each precision bin
         const std::array<float, q> min_bin =
@@ -531,7 +529,7 @@ void generate_csr_rownorms_storage(
             const int ibin = get_adjusted_bin<real_type>(min_bin, min_repr,
                                                          std::abs(ovals[j]));
             if (ibin >= 0) {
-                total_nnz_per_bin[ibin]++;
+                bin_row_sizes[ibin][irow]++;
             }
         }
     }
@@ -542,7 +540,7 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
 
 
 template <typename ValueType, typename IndexType>
-void generate_csr_scatter_bins(
+void generate_cwise_csr_scatter_bins(
     std::shared_ptr<const ReferenceExecutor> exec,
     const matrix::Csr<ValueType, IndexType>* const a, const float tolerance,
     gko::amp::precision_array<LinOp*, ValueType>& amat)
@@ -630,7 +628,7 @@ void generate_csr_scatter_bins(
 }
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_GENERATE_CSR_SCATTER_BINS_KERNEL);
+    GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL);
 
 
 template <typename ValueType, typename IndexType>
