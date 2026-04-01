@@ -85,6 +85,19 @@ GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_ADVANCED_SPMV_CSR_KERNEL);
 
 
+template <typename ValueType, typename IndexType>
+void generate_cwise_ell_max_nnz_per_row(
+    std::shared_ptr<const DpcppExecutor> exec,
+    const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
+    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
+
+
 }  // namespace amp
 }  // namespace dpcpp
 }  // namespace kernels

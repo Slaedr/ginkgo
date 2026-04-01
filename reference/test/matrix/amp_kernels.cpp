@@ -421,29 +421,6 @@ using double_types = ::testing::Types<double, std::complex<double>>;
 TYPED_TEST_SUITE(AMPDouble, double_types, TypenameNameGenerator);
 
 
-TYPED_TEST(AMPDouble, GenerateComputesCorrectRowNorms)
-{
-    using T = typename TestFixture::value_type;
-    using real_T = gko::remove_complex<typename TestFixture::value_type>;
-    static_assert(std::is_same<real_T, double>::value, "double only!");
-    gko::amp::precision_array<int, T> max_nnz;
-    gko::array<real_T> rownorms(this->exec, this->ell1->get_size()[0]);
-    auto rexec =
-        std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
-
-    gko::kernels::reference::amp::generate_ell_rownorms_storage(
-        rexec, this->ell1.get(), this->tol, max_nnz, rownorms);
-
-    auto rnv = rownorms.get_const_data();
-    EXPECT_EQ(rnv[0], static_cast<real_T>(1.1) + static_cast<real_T>(3e-9) +
-                          static_cast<real_T>(4.5e-4));
-    EXPECT_EQ(rnv[1], static_cast<real_T>(2.0) + static_cast<real_T>(1.2e-11));
-    EXPECT_EQ(rnv[2], static_cast<real_T>(0.8));
-    EXPECT_EQ(rnv[3],
-              static_cast<real_T>(1.2e-11) + static_cast<real_T>(1.6e-4));
-    EXPECT_EQ(rnv[4], static_cast<real_T>(2.0) + static_cast<real_T>(2e-5));
-}
-
 TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
 {
     using T = typename TestFixture::value_type;
@@ -459,12 +436,11 @@ TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
         "should be 2 available precisions");
 #endif
     gko::amp::precision_array<int, T> max_nnz;
-    gko::array<real_T> rownorms(this->exec, this->ell1->get_size()[0]);
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
 
-    gko::kernels::reference::amp::generate_ell_rownorms_storage(
-        rexec, this->ell1.get(), this->tol, max_nnz, rownorms);
+    gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
+        rexec, this->ell1.get(), this->tol, max_nnz);
 
 #if GKO_AMP_HALF_IS_FP16
     EXPECT_EQ(max_nnz[0], 1);
@@ -974,28 +950,6 @@ using float_types = ::testing::Types<float, std::complex<float>>;
 TYPED_TEST_SUITE(AMPFloat, float_types, TypenameNameGenerator);
 
 
-TYPED_TEST(AMPFloat, GenerateComputesCorrectRowNorms)
-{
-    using T = typename TestFixture::value_type;
-    using real_T = typename TestFixture::real_T;
-    gko::amp::precision_array<int, T> max_nnz;
-    gko::array<real_T> rownorms(this->exec, this->ell1->get_size()[0]);
-    auto rexec =
-        std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
-
-    gko::kernels::reference::amp::generate_ell_rownorms_storage(
-        rexec, this->ell1.get(), this->tol, max_nnz, rownorms);
-
-    auto rnv = rownorms.get_const_data();
-    EXPECT_EQ(rnv[0], static_cast<real_T>(1.1) + static_cast<real_T>(3e-9) +
-                          static_cast<real_T>(4.5e-4));
-    EXPECT_EQ(rnv[1], static_cast<real_T>(2.0) + static_cast<real_T>(1.2e-11));
-    EXPECT_EQ(rnv[2], static_cast<real_T>(0.8));
-    EXPECT_EQ(rnv[3],
-              static_cast<real_T>(1.2e-11) + static_cast<real_T>(1.6e-4));
-    EXPECT_EQ(rnv[4], static_cast<real_T>(2.0) + static_cast<real_T>(2e-5));
-}
-
 TYPED_TEST(AMPFloat, GenerateComputesCorrectBinNNZs)
 {
     using T = typename TestFixture::value_type;
@@ -1010,12 +964,11 @@ TYPED_TEST(AMPFloat, GenerateComputesCorrectBinNNZs)
         "should be 1 available precision");
 #endif
     gko::amp::precision_array<int, T> max_nnz;
-    gko::array<real_T> rownorms(this->exec, this->ell1->get_size()[0]);
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
 
-    gko::kernels::reference::amp::generate_ell_rownorms_storage(
-        rexec, this->ell1.get(), this->tol, max_nnz, rownorms);
+    gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
+        rexec, this->ell1.get(), this->tol, max_nnz);
 
 #if GINKGO_HAVE_AMP_HALF
     EXPECT_EQ(max_nnz[0], 2);
@@ -1450,7 +1403,7 @@ using double_csr_types = ::testing::Types<double, std::complex<double>>;
 TYPED_TEST_SUITE(AMPDoubleCsr, double_csr_types, TypenameNameGenerator);
 
 
-TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowNorms)
+TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizes)
 {
     using T = typename TestFixture::value_type;
     using index_type = typename TestFixture::index_type;

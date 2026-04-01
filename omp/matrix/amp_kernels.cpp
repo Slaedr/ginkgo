@@ -356,11 +356,10 @@ GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
 
 
 template <typename ValueType, typename IndexType>
-void generate_ell_rownorms_storage(
+void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const OmpExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row,
-    array<remove_complex<ValueType>>& rownorms)
+    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -388,7 +387,6 @@ void generate_ell_rownorms_storage(
                 rnorm += std::abs(ovals[j * ostride + irow]);
             }
         }
-        rownorms.get_data()[irow] = rnorm;
 
         // Compute lower limits of each precision bin
         const std::array<float, q> min_bin =

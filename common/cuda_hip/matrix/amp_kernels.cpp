@@ -320,7 +320,6 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     const float tolerance, const size_type nrows, const size_type ostride,
     const size_type omax_nnz, const ValueType* const __restrict__ ovals,
     const IndexType* const __restrict__ ocolids,
-    remove_complex<ValueType>* const __restrict__ rownorms,
     int* const __restrict__ max_bin_nnzs_blocks)
 {
     using real_type = remove_complex<ValueType>;
@@ -346,7 +345,6 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
                 rnorm += abs(ovals[j * ostride + irow]);
             }
         }
-        rownorms[irow] = rnorm;
 
         // Compute lower limits of each precision bin
         const std::array<float, q> min_bin =
@@ -466,11 +464,10 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
 }
 
 template <typename ValueType, typename IndexType>
-void generate_ell_rownorms_storage(
+void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row,
-    array<gko::remove_complex<ValueType>>& rownorms)
+    gko::amp::precision_array<int, ValueType>& max_nnz_per_row);
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -489,11 +486,10 @@ void generate_ell_rownorms_storage(
     thrust::fill(thrust::device, max_nnz_arr.get_data(),
                  max_nnz_arr.get_data() + q * num_blocks, 0);
     const auto max_nnz_ptr = max_nnz_arr.get_data();
-    const auto rownorms_ptr = rownorms.get_data();
 
     compute_max_nnzs<q><<<num_blocks, block_size, 0, exec->get_stream()>>>(
         tolerance, nrows, ostride, omax_nnz, as_device_type(ovals), ocolids,
-        as_device_type(rownorms_ptr), max_nnz_ptr);
+        max_nnz_ptr);
     finish_reduce<q><<<1, block_size, 0, exec->get_stream()>>>(
         max_nnz_ptr, num_blocks, num_blocks);
     exec->synchronize();

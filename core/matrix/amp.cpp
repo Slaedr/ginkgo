@@ -42,8 +42,8 @@ GKO_REGISTER_OPERATION(advanced_spmv_ell, amp::advanced_spmv_ell);
 GKO_REGISTER_OPERATION(advanced_spmv_csr, amp::advanced_spmv_csr);
 GKO_REGISTER_OPERATION(convert_idxs_to_ptrs, components::convert_idxs_to_ptrs);
 GKO_REGISTER_OPERATION(fill_in_dense, amp::fill_in_dense);
-GKO_REGISTER_OPERATION(generate_ell_rownorms_storage,
-                       amp::generate_ell_rownorms_storage);
+GKO_REGISTER_OPERATION(generate_cwise_ell_max_nnz_per_row,
+                       amp::generate_cwise_ell_max_nnz_per_row);
 GKO_REGISTER_OPERATION(generate_ell_scatter_bins,
                        amp::generate_ell_scatter_bins);
 GKO_REGISTER_OPERATION(generate_cwise_csr_calculate_row_sizes,
@@ -190,9 +190,7 @@ auto generate_amp_impl(const matrix::Ell<ValueType, IndexType>* const mtx,
                        std::shared_ptr<const Executor> exec, const float tol)
 {
     gko::amp::precision_array<int, ValueType> max_nnz;
-    gko::array<remove_complex<ValueType>> rownorms(exec, mtx->get_size()[0]);
-    exec->run(
-        amp::make_generate_ell_rownorms_storage(mtx, tol, max_nnz, rownorms));
+    exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(mtx, tol, max_nnz));
 
     auto abins = gko::amp::allocate_bins<ValueType, IndexType>(
         exec, mtx->get_size(), max_nnz);

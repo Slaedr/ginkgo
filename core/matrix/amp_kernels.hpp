@@ -53,11 +53,10 @@ namespace kernels {
                            matrix::Dense<OutputValueType>* c)
 
 #define GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL(ValueType, IndexType) \
-    void generate_ell_rownorms_storage(                                       \
+    void generate_cwise_ell_max_nnz_per_row(                                  \
         std::shared_ptr<const DefaultExecutor> exec,                          \
         const matrix::Ell<ValueType, IndexType>* a, const float tolerance,    \
-        gko::amp::precision_array<int, ValueType>& max_nnz_per_row,           \
-        array<gko::remove_complex<ValueType>>& rownorms)
+        gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
 
 #define GKO_DECLARE_AMP_GENERATE_ELL_SCATTER_BINS_KERNEL(ValueType, IndexType) \
     void generate_ell_scatter_bins(                                            \
