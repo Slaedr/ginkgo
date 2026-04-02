@@ -126,8 +126,33 @@ inline MulticolorOrdering compute_multicolor_ordering(
     return MulticolorOrdering{new_to_old, old_to_new, color_ptrs};
 }
 
+template <typename global_idx_t>
+std::enable_if_t<std::is_integral_v<global_idx_t>, int>
+get_local_flat_from_global(const std::array<int, 3>& local_grid_dims,
+                           const global_idx_t global_flat)
+{
+    const int local_size =
+        local_grid_dims[0] * local_grid_dims[1] * local_grid_dims[2];
+    return global_flat % local_size;
+}
+
+template <typename global_idx_t>
+std::array<int, 3> get_proc_coords_from_global_point_flat(
+    const std::array<int, 3> proc_dims,
+    const std::array<int, 3>& local_grid_dims,
+    const global_idx_t global_flat_id)
+{
+    const int local_size =
+        local_grid_dims[0] * local_grid_dims[1] * local_grid_dims[2];
+    const int rank_flat = global_flat_id / local_size;
+    return get_natural_3d_indices_from_flat(proc_dims, rank_flat);
+}
+
 /**
- * Compute global index of a point from its local index and other details.
+ * Compute global index of a point from its local index.
+ *
+ * It is assumed that ranks are factored into 3 dimensions using the usual
+ * natural ordering.
  *
  * @param owner_rank  Rank of the subdomain owning the given point.
  * @param comm_size_dir  Subdomain rank of the owning subdomain in each
@@ -142,12 +167,13 @@ get_global_from_local(const std::array<int, 3>& owner_rank,
                       const std::array<int, 3>& local_grid_dims,
                       const int local_flat_idx)
 {
-    const auto global_grid_dims =
-        mult<global_idx_t>(local_grid_dims, comm_size_dir);
-    const auto global_idx_base =
-        mult<global_idx_t>(local_grid_dims, owner_rank);
-    return get_natural_flat_index_from_3d(global_grid_dims, global_idx_base) +
-           local_flat_idx;
+    const int flat_rank =
+        get_natural_flat_index_from_3d(comm_size_dir, owner_rank);
+    const int local_size =
+        local_grid_dims[0] * local_grid_dims[1] * local_grid_dims[2];
+    const global_idx_t global_base = static_cast<global_idx_t>(local_size) *
+                                     static_cast<global_idx_t>(flat_rank);
+    return global_base + local_flat_idx;
 }
 
 template <typename T>
@@ -192,6 +218,11 @@ inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
     OffdiagFn& gen, const MulticolorOrdering& ordering)
 {
     const std::array<int, 3> proc_dims = cubic_radical_search(comm.size());
+    if (comm.rank() == 0) {
+        std::cout << "  Matrix generation: Process grid is factored into "
+                  << proc_dims[0] << "x" << proc_dims[1] << "x" << proc_dims[2]
+                  << std::endl;
+    }
     const std::array<int, 3> my_ranks =
         get_natural_3d_indices_from_flat(proc_dims, comm.rank());
     const int ln = local_grid_dims[0] * local_grid_dims[1] * local_grid_dims[2];
@@ -201,8 +232,9 @@ inline gko::matrix_data<scalar_t, global_idx_t> generate_stencil_data(
     const auto global_n =
         global_grid_dims[0] * global_grid_dims[1] * global_grid_dims[2];
 
-    gko::matrix_data<scalar_t, global_idx_t> data(gko::dim<2>{
-        static_cast<gko::size_type>(ln), static_cast<gko::size_type>(ln)});
+    gko::matrix_data<scalar_t, global_idx_t> data(
+        gko::dim<2>{static_cast<gko::size_type>(global_n),
+                    static_cast<gko::size_type>(global_n)});
     data.nonzeros.reserve(27 * ln);
 
 

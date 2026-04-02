@@ -83,7 +83,6 @@ int main(int argc, char* argv[])
 
     // Prepare global-sized matrix_data for read_distributed
     auto mat_data = data.mat_data;
-    mat_data.size = {global_n, global_n};
 
     // ---- Create uniform partition ----
     using partition_t =
@@ -316,7 +315,7 @@ int main(int argc, char* argv[])
     if (do_print) {
         results["spmv"] = rows;
 
-        const std::string out = "spmv_results.json";
+        const std::string out = cfg.output_file_prefix + "spmv_results.json";
         std::ofstream of(out);
         of << std::setw(2) << results << "\n";
         if (!amp_details.empty()) {

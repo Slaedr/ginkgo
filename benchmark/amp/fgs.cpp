@@ -256,7 +256,7 @@ int main(int argc, char* argv[])
 
     results["fgs"] = rows;
 
-    std::string out = "fgs_results.json";
+    const std::string out = cfg.output_file_prefix + "fgs_results.json";
     std::ofstream of(out);
     of << std::setw(2) << results << "\n";
     std::cout << amp_details << std::endl;

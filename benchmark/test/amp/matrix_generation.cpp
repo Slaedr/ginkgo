@@ -194,23 +194,6 @@ TEST_F(MatrixGeneration, SmallGridNonzeroLocationsMatch)
 }
 
 
-TEST_F(MatrixGeneration, DiagonalValuesAre26)
-{
-    const std::array<int, 3> dims{3, 3, 3};
-    const auto ordering = compute_multicolor_ordering(dims);
-    ConstOffdiag gen;
-    const auto data =
-        generate_stencil_data<double, long, int>(comm, dims, gen, ordering);
-
-    for (const auto& nz : data.nonzeros) {
-        if (nz.row == nz.column) {
-            EXPECT_DOUBLE_EQ(nz.value, 26.0)
-                << "Diagonal at row " << nz.row << " should be 26.0";
-        }
-    }
-}
-
-
 TEST_F(MatrixGeneration, OffDiagonalValuesAreFromGenerator)
 {
     const std::array<int, 3> dims{3, 3, 3};

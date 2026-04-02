@@ -68,12 +68,13 @@ std::shared_ptr<const DistVec> generate_rhs(
     std::shared_ptr<const gko::Executor> exec, comm_t comm,
     const gko::size_type global_n, const gko::size_type local_n, const int rank)
 {
-    const auto offset = static_cast<gko::size_type>(rank) * local_n;
+    // const auto offset = static_cast<gko::size_type>(rank) * local_n;
     auto local_b = Vec::create(exec->get_master(), gko::dim<2>{local_n, 1});
     auto vals = local_b->get_values();
     for (gko::size_type i = 0; i < local_n; ++i) {
-        const auto gx = static_cast<double>(offset + i);
-        vals[i] = 2.0 * std::sin(4.0 * 3.14159265358979 * gx / global_n);
+        // const auto gx = static_cast<double>(offset + i);
+        // vals[i] = 2.0 * std::sin(4.0 * 3.14159265358979 * gx / global_n);
+        vals[i] = 1.0;
     }
     auto local_dev = gko::clone(exec, local_b);
     return gko::share(DistVec::create(exec, comm, gko::dim<2>{global_n, 1},
@@ -101,13 +102,8 @@ std::shared_ptr<const DistVec> compute_reference_solution(
     const double ref_tol = 1e-14;
 
     auto local_factory = gko::share(
-        FGS::build()
-            .with_color_ptrs(prob.color_ptrs)
-            .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
-            .on(exec));
-    // auto local_factory = gko::share(
-    //     gko::preconditioner::GaussSeidel<double, local_idx_t>::build()
-    //     .on(exec));
+        gko::preconditioner::GaussSeidel<double, local_idx_t>::build().on(
+            exec));
 
     auto solver =
         Gmres::build()
@@ -140,6 +136,12 @@ std::shared_ptr<const DistVec> compute_reference_solution(
         comm.synchronize();
         throw std::runtime_error("Reference solve did not converge to " +
                                  std::to_string(ref_tol) + "!");
+    } else {
+        const auto its = logger->get_num_iterations();
+        if (comm.rank() == 0) {
+            std::cout << " Reference solve converged in " << its
+                      << "iterations." << std::endl;
+        }
     }
     return x;
 }
@@ -261,7 +263,6 @@ int main(int argc, char* argv[])
     const gko::size_type global_n = local_n * num_procs;
 
     auto mat_data = data.mat_data;
-    mat_data.size = {global_n, global_n};
     if (do_print) {
         std::cout << " done.\n";
     }
@@ -427,7 +428,7 @@ int main(int argc, char* argv[])
     if (do_print) {
         results["gmres"] = rows;
 
-        const std::string out = "gmres_results.json";
+        const std::string out = cfg.output_file_prefix + "gmres_results.json";
         std::ofstream of(out);
         of << std::setw(2) << results << "\n";
         if (!amp_details.empty()) {

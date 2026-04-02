@@ -54,6 +54,7 @@ struct Config {
     int gmres_max_iters = 1000;
     int gmres_krylov_dim = 50;
     mat_offdiag_t offdiag_type = mat_offdiag_t::hpcg;
+    std::string output_file_prefix = "";
 };
 
 inline Config load_config(const std::string& path)
@@ -73,6 +74,9 @@ inline Config load_config(const std::string& path)
     if (j.contains("executor")) cfg.executor = j["executor"];
     if (j.contains("warmup_reps")) cfg.warmup_reps = j["warmup_reps"];
     if (j.contains("bench_reps")) cfg.bench_reps = j["bench_reps"];
+    if (j.contains("solver_reps")) {
+        cfg.solver_reps = j["solver_reps"];
+    }
     if (j.contains("amp_tolerance"))
         cfg.amp_tolerance = j["amp_tolerance"].get<float>();
     if (j.contains("gmres_tol")) cfg.gmres_tol = j["gmres_tol"];
@@ -96,6 +100,9 @@ inline Config load_config(const std::string& path)
                 matrix_values_type);
         }
     }
+    if (j.contains("output_file_prefix")) {
+        cfg.output_file_prefix = j["output_file_prefix"];
+    }
     return cfg;
 }
 
@@ -111,7 +118,7 @@ struct OffdiagFn {
         : cfg(config),
           rng(seed),
           mantissa_dist(0.1, 1.0),
-          exp_dist(0.0, 1.0),
+          exp_dist(0.0, 2.0),
           exp_bias{cfg.offdiag_type == mat_offdiag_t::random_general ? 0.2
                                                                      : 0.0}
     {}
