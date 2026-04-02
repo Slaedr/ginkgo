@@ -153,7 +153,6 @@ auto generate_amp_impl(
     gko::amp::precision_array<IndexType*, ValueType> bin_row_sizes;
     const size_type nrows = mtx->get_size()[0];
     gko::constexpr_for<0, q, 1>([&](auto k) {
-        // row_sizes[k].set_executor(exec);
         row_sizes[k].resize_and_reset(nrows + 1);
         bin_row_sizes[k] = row_sizes[k].get_data();
     });
@@ -292,6 +291,26 @@ AMP<ValueType, IndexType>::AMP(AMP&& other) : AMP(other.get_executor())
 template <typename ValueType, typename IndexType>
 void AMP<ValueType, IndexType>::read(
     const matrix_data<ValueType, IndexType>& data)
+{
+    auto exec = this->get_executor();
+    auto ell = Ell<ValueType, IndexType>::create(exec);
+    ell->read(data);
+    this->set_size(ell->get_size());
+    mat_bins_ = generate_amp(ell.get());
+}
+
+
+template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::read(device_mat_data&& data)
+{
+    this->read(data);
+    data.empty_out();
+}
+
+
+template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::read(
+    const device_matrix_data<ValueType, IndexType>& data)
 {
     auto exec = this->get_executor();
     auto ell = Ell<ValueType, IndexType>::create(exec);

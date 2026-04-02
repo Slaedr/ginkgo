@@ -52,7 +52,7 @@ void generate_cwise_csr_calculate_row_sizes(
             // Compute row's 1-norm
             auto rnorm = static_cast<d_real_type>(0);
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
-                rnorm += std::abs(ovals[j]);
+                rnorm += abs(ovals[j]);
             }
 
             // Compute lower limits of each precision bin
@@ -62,7 +62,7 @@ void generate_cwise_csr_calculate_row_sizes(
             // Count NNZ per bin across all rows
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
                 const int ibin = get_adjusted_bin<d_real_type>(
-                    min_bin, min_repr, std::abs(ovals[j]));
+                    min_bin, min_repr, abs(ovals[j]));
                 if (ibin >= 0) {
                     bin_row_sizes[ibin][irow]++;
                 }
@@ -125,13 +125,13 @@ void generate_cwise_csr_scatter_bins(
                 [&](auto k) { cursors[k] = xrow_ptrs[k][irow]; });
             auto rnorm = static_cast<d_real_type>(0);
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
-                rnorm += std::abs(ovals[j]);
+                rnorm += abs(ovals[j]);
             }
             const std::array<float, q> min_bin =
                 get_bins_precision_lower_bounds<d_real_type>(rnorm, tolerance);
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
                 const int ibin = get_adjusted_bin<d_real_type>(
-                    min_bin, min_repr, std::abs(ovals[j]));
+                    min_bin, min_repr, abs(ovals[j]));
                 if (ibin >= 0) {
                     const auto pos = cursors[ibin]++;
                     xcol_idxs[ibin][pos] = ocolidxs[j];
