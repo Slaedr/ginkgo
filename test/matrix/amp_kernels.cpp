@@ -4,6 +4,7 @@
 
 #include "core/matrix/amp_kernels.hpp"
 
+#include <numeric>
 #include <random>
 
 #include <gtest/gtest.h>
@@ -12,6 +13,7 @@
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/matrix/amp.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
@@ -89,16 +91,12 @@ TEST_F(Amp, GenerateEllRownormsStorageIsEquivalentToRef)
     auto dmtx = gko::clone(exec, mtx);
     gko::amp::precision_array<int, T> ref_max_nnz;
     gko::amp::precision_array<int, T> dev_max_nnz;
-    gko::array<real_T> ref_rownorms(ref, mtx->get_size()[0]);
-    gko::array<real_T> dev_rownorms(exec, dmtx->get_size()[0]);
 
-    gko::kernels::reference::amp::generate_ell_rownorms_storage(
-        ref, mtx.get(), tol, ref_max_nnz, ref_rownorms);
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_ell_rownorms_storage(
-        exec, dmtx.get(), tol, dev_max_nnz, dev_rownorms);
+    gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
+        ref, mtx.get(), tol, ref_max_nnz);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_cwise_ell_max_nnz_per_row(
+        exec, dmtx.get(), tol, dev_max_nnz);
 
-    GKO_ASSERT_ARRAY_NEAR(dev_rownorms, ref_rownorms,
-                          std::numeric_limits<real_T>::epsilon());
     for (int k = 0; k < q; k++) {
         EXPECT_EQ(dev_max_nnz[k], ref_max_nnz[k]);
     }
@@ -115,9 +113,8 @@ TEST_F(Amp, GenerateEllScatterBinsIsEquivalentToRef)
     auto dmtx = gko::clone(exec, mtx);
     // Compute max_nnz per bin using reference kernel
     gko::amp::precision_array<int, T> max_nnz;
-    gko::array<gko::remove_complex<T>> rownorms(ref, mtx->get_size()[0]);
-    gko::kernels::reference::amp::generate_ell_rownorms_storage(
-        ref, mtx.get(), tol, max_nnz, rownorms);
+    gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
+        ref, mtx.get(), tol, max_nnz);
     // Allocate bins on ref and exec with the same max_nnz
     auto ref_bins =
         gko::amp::allocate_bins<T, IndexType>(ref, mtx->get_size(), max_nnz);
@@ -167,10 +164,10 @@ TEST_F(Amp, SpmvIsEquivalentToRef)
     auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 1});
     auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 1});
 
-    gko::kernels::reference::amp::spmv(ref, amp_ref.get(), b_ref.get(),
-                                       c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv(exec, amp_d.get(), b_d.get(),
-                                                  c_d.get());
+    gko::kernels::reference::amp::spmv_ell(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_ell(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -194,10 +191,10 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRef)
     auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
     auto beta_d = gko::clone(exec, beta_ref);
 
-    gko::kernels::reference::amp::advanced_spmv(ref, alpha_ref.get(),
-                                                amp_ref.get(), b_ref.get(),
-                                                beta_ref.get(), c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv(
+    gko::kernels::reference::amp::advanced_spmv_ell(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_ell(
         exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
@@ -218,10 +215,10 @@ TEST_F(Amp, SpmvWithMultipleRHSIsEquivalentToRef)
     auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 4});
     auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 4});
 
-    gko::kernels::reference::amp::spmv(ref, amp_ref.get(), b_ref.get(),
-                                       c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv(exec, amp_d.get(), b_d.get(),
-                                                  c_d.get());
+    gko::kernels::reference::amp::spmv_ell(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_ell(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -245,10 +242,10 @@ TEST_F(Amp, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
     auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
     auto beta_d = gko::clone(exec, beta_ref);
 
-    gko::kernels::reference::amp::advanced_spmv(ref, alpha_ref.get(),
-                                                amp_ref.get(), b_ref.get(),
-                                                beta_ref.get(), c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv(
+    gko::kernels::reference::amp::advanced_spmv_ell(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_ell(
         exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
@@ -330,10 +327,10 @@ TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0IsEmpty)
     auto c_ref = Vec::create(ref, gko::dim<2>{n, 1});
     auto c_d = Vec::create(exec, gko::dim<2>{n, 1});
 
-    gko::kernels::reference::amp::spmv(ref, amp_ref.get(), b_ref.get(),
-                                       c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv(exec, amp_d.get(), b_d.get(),
-                                                  c_d.get());
+    gko::kernels::reference::amp::spmv_ell(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_ell(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -368,10 +365,426 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
     auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
     auto beta_d = gko::clone(exec, beta_ref);
 
-    gko::kernels::reference::amp::advanced_spmv(ref, alpha_ref.get(),
-                                                amp_ref.get(), b_ref.get(),
-                                                beta_ref.get(), c_ref.get());
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv(
+    gko::kernels::reference::amp::advanced_spmv_ell(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_ell(
+        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(Amp, ReadfromDeviceProducesSameResultAsFactoryGenerate)
+{
+    using Ell = Mtx;
+    using Dense = Vec;
+
+    gko::matrix_data<value_type, index_type> h_data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+    auto data =
+        gko::device_matrix_data<value_type, index_type>::create_from_host(
+            exec, h_data);
+
+    // Method 1: read directly (via empty factory-generated AMP)
+    auto ell_empty = gko::share(Ell::create(this->exec));
+    auto mtx_read = AmpMtx::build().on(this->exec)->generate(ell_empty);
+    mtx_read->read(data);
+
+    // Method 2: factory generate from ELL
+    auto ell = gko::share(Ell::create(this->exec));
+    ell->read(data);
+    auto mtx_gen = AmpMtx::build().on(this->exec)->generate(ell);
+
+    // Both should produce the same dense result
+    auto dense_read = Dense::create(this->exec);
+    auto dense_gen = Dense::create(this->exec);
+    mtx_read->convert_to(dense_read.get());
+    mtx_gen->convert_to(dense_gen.get());
+
+    GKO_ASSERT_MTX_NEAR(dense_read, dense_gen, 0.0);
+}
+
+
+TEST_F(Amp, MoveReadFromDeviceProducesSameResultAsFactoryGenerate)
+{
+    using Ell = Mtx;
+    using Dense = Vec;
+
+    gko::matrix_data<value_type, index_type> h_data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+    auto data =
+        gko::device_matrix_data<value_type, index_type>::create_from_host(
+            exec, h_data);
+
+    // Method 1: read directly (via empty factory-generated AMP)
+    auto ell_empty = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx_read = AmpMtx::build().on(this->exec)->generate(ell_empty);
+    mtx_read->read(std::move(data));
+    EXPECT_EQ(data.get_num_stored_elements(), 0);
+    auto zero_sz = gko::dim<2>{0, 0};
+    EXPECT_EQ(data.get_size(), zero_sz);
+
+    // Method 2: factory generate from ELL
+    auto ell = gko::share(Ell::create(this->exec));
+    ell->read(h_data);
+    auto mtx_gen = AmpMtx::build().on(this->exec)->generate(ell);
+
+    // Both should produce the same dense result
+    auto dense_read = Dense::create(this->exec);
+    auto dense_gen = Dense::create(this->exec);
+    mtx_read->convert_to(dense_read.get());
+    mtx_gen->convert_to(dense_gen.get());
+
+    GKO_ASSERT_MTX_NEAR(dense_read, dense_gen, 0.0);
+}
+
+
+class AmpCsr : public CommonTestFixture {
+protected:
+    using CsrMtx = gko::matrix::Csr<value_type, index_type>;
+    using Vec = gko::matrix::Dense<value_type>;
+    using AmpMtx = gko::matrix::AMP<value_type, index_type>;
+
+    AmpCsr() : rand_engine(42) {}
+
+    std::unique_ptr<CsrMtx> gen_mtx(int num_rows, int num_cols)
+    {
+        return gko::test::generate_random_matrix<CsrMtx>(
+            num_rows, num_cols, std::uniform_int_distribution<>(1, num_cols),
+            std::normal_distribution<>(-1.0, 1.0), rand_engine, ref);
+    }
+
+    std::unique_ptr<Vec> gen_vec(int num_rows, int num_cols)
+    {
+        return gko::test::generate_random_dense_matrix<value_type>(
+            num_rows, num_cols, std::normal_distribution<>(-1.0, 1.0),
+            rand_engine, ref);
+    }
+
+    std::default_random_engine rand_engine;
+};
+
+template <typename ValueType, typename IndexType>
+inline std::array<gko::array<IndexType>,
+                  gko::amp::narrow_types<ValueType>::num_types>
+create_row_sizes(std::shared_ptr<const gko::Executor> exec, const int len)
+{
+    constexpr int q = gko::amp::narrow_types<ValueType>::num_types;
+    std::array<gko::array<IndexType>, q> arr;
+    for (int i = 0; i < q; i++) {
+        arr[i] = std::move(gko::array<IndexType>(exec, len));
+    }
+    return arr;
+}
+
+
+TEST_F(AmpCsr, GenerateCsrRownormsStorageIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    using real_T = gko::remove_complex<T>;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto mtx = gen_mtx(532, 231);
+    auto dmtx = gko::clone(exec, mtx);
+    auto ref_bins_rowptrs =
+        create_row_sizes<T, IndexType>(ref, mtx->get_size()[0]);
+    auto dev_bins_rowptrs =
+        create_row_sizes<T, IndexType>(exec, dmtx->get_size()[0]);
+    auto ref_rowptrs =
+        gko::amp::get_pointer_array<IndexType, T>(ref_bins_rowptrs);
+    auto dev_rowptrs =
+        gko::amp::get_pointer_array<IndexType, T>(dev_bins_rowptrs);
+
+    gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
+        ref, mtx.get(), tol, ref_rowptrs);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::
+        generate_cwise_csr_calculate_row_sizes(exec, dmtx.get(), tol,
+                                               dev_rowptrs);
+
+    for (int k = 0; k < q; k++) {
+        GKO_ASSERT_ARRAY_NEAR(dev_bins_rowptrs[k], ref_bins_rowptrs[k], 0);
+    }
+}
+
+
+TEST_F(AmpCsr, GenerateCsrScatterBinsIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto mtx = gen_mtx(532, 231);
+    auto dmtx = gko::clone(exec, mtx);
+    const auto nrows = mtx->get_size()[0];
+    // Compute total_nnz per bin using reference kernel
+    auto ref_bins_rowptrs = create_row_sizes<T, IndexType>(ref, nrows + 1);
+    auto dev_bins_rowptrs = create_row_sizes<T, IndexType>(exec, nrows + 1);
+    auto ref_rowptrs =
+        gko::amp::get_pointer_array<IndexType, T>(ref_bins_rowptrs);
+    gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
+        ref, mtx.get(), tol, ref_rowptrs);
+    for (int k = 0; k < q; k++) {
+        std::exclusive_scan(ref_rowptrs[k], ref_rowptrs[k] + nrows + 1,
+                            ref_rowptrs[k], 0);
+    }
+    dev_bins_rowptrs = ref_bins_rowptrs;
+    // Allocate bins on ref and exec with the same total_nnz
+    auto ref_bins = gko::amp::allocate_csr_bins<T, IndexType>(
+        ref, mtx->get_size(), ref_bins_rowptrs);
+    auto exec_bins = gko::amp::allocate_csr_bins<T, IndexType>(
+        exec, dmtx->get_size(), dev_bins_rowptrs);
+    constexpr auto num_bins = std::tuple_size<decltype(ref_bins)>::value;
+    static_assert(num_bins == q, "Wrong number of bins!");
+    gko::amp::precision_array<gko::LinOp*, T> ref_amat;
+    gko::amp::precision_array<gko::LinOp*, T> exec_amat;
+    for (int k = 0; k < num_bins; k++) {
+        ref_amat[k] = ref_bins[k].get();
+        exec_amat[k] = exec_bins[k].get();
+    }
+
+    // Run kernel on ref and exec
+    gko::kernels::reference::amp::generate_cwise_csr_scatter_bins(
+        ref, mtx.get(), tol, ref_amat);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_cwise_csr_scatter_bins(
+        exec, dmtx.get(), tol, exec_amat);
+
+    // Compare each bin
+    using types_list = typename gko::amp::narrow_types<T>::type;
+    gko::constexpr_for<0, num_bins, 1>([&](auto k) {
+        using vt = typename std::tuple_element<k, types_list>::type;
+        auto ref_csr =
+            dynamic_cast<gko::matrix::Csr<vt, IndexType>*>(ref_amat[k]);
+        auto exec_csr =
+            dynamic_cast<gko::matrix::Csr<vt, IndexType>*>(exec_amat[k]);
+        ASSERT_TRUE(ref_csr);
+        ASSERT_TRUE(exec_csr);
+        GKO_ASSERT_MTX_NEAR(ref_csr, exec_csr, 0);
+    });
+}
+
+
+TEST_F(AmpCsr, SpmvIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 1});
+    auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 1});
+
+    gko::kernels::reference::amp::spmv_csr(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_csr(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = gen_vec(amp_ref->get_size()[0], 1);
+    auto c_d = gko::clone(exec, c_ref);
+    auto alpha_ref = gko::initialize<Vec>({2.0}, ref);
+    auto alpha_d = gko::clone(exec, alpha_ref);
+    auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
+    auto beta_d = gko::clone(exec, beta_ref);
+
+    gko::kernels::reference::amp::advanced_spmv_csr(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_csr(
+        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(AmpCsr, SpmvWithMultipleRHSIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 4);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 4});
+    auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 4});
+
+    gko::kernels::reference::amp::spmv_csr(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_csr(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(AmpCsr, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 4);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = gen_vec(amp_ref->get_size()[0], 4);
+    auto c_d = gko::clone(exec, c_ref);
+    auto alpha_ref = gko::initialize<Vec>({2.0}, ref);
+    auto alpha_d = gko::clone(exec, alpha_ref);
+    auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
+    auto beta_d = gko::clone(exec, beta_ref);
+
+    gko::kernels::reference::amp::advanced_spmv_csr(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_csr(
+        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(AmpCsr, FillInDenseIsEquivalentToRef)
+{
+    SKIP_IF_SINGLE_MODE;
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_exec = gko::clone(exec, amp_ref);
+    auto result_ref = Vec::create(ref, amp_ref->get_size());
+    auto result_exec = Vec::create(exec, amp_exec->get_size());
+
+    gko::kernels::reference::amp::fill_in_dense(ref, amp_ref.get(),
+                                                result_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::fill_in_dense(exec, amp_exec.get(),
+                                                           result_exec.get());
+
+    GKO_ASSERT_MTX_NEAR(result_ref, result_exec, 0);
+}
+
+
+TEST_F(AmpCsr, ExtractDiagonalIsEquivalentToRef)
+{
+    SKIP_IF_SINGLE_MODE;
+    using T = value_type;
+    using IndexType = index_type;
+    using Diag = gko::matrix::Diagonal<T>;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_exec = gko::clone(exec, amp_ref);
+    const auto diag_size =
+        std::min(amp_ref->get_size()[0], amp_ref->get_size()[1]);
+    auto diag_ref = Diag::create(ref, diag_size);
+    auto diag_exec = Diag::create(exec, diag_size);
+
+    gko::kernels::reference::amp::extract_diagonal(ref, amp_ref.get(),
+                                                   diag_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::extract_diagonal(
+        exec, amp_exec.get(), diag_exec.get());
+
+    GKO_ASSERT_MTX_NEAR(diag_ref, diag_exec, 0);
+}
+
+
+TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0IsEmpty)
+{
+    using T = value_type;
+    // Build a constant 1D tridiagonal stencil [-1, 2, -1] as CSR
+    const int n = 64;
+    auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
+    dns_ref->fill(0.0);
+    for (int i = 0; i < n; i++) {
+        dns_ref->at(i, i) = 2.0;
+        if (i > 0) dns_ref->at(i, i - 1) = -1.0;
+        if (i < n - 1) dns_ref->at(i, i + 1) = -1.0;
+    }
+    auto csr_ref = CsrMtx::create(ref);
+    dns_ref->convert_to(csr_ref.get());
+    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
+        gko::share(csr_ref->clone()));
+    // Verify bin 0 is actually empty (no nonzeros assigned to highest
+    // precision)
+    auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
+    ASSERT_NE(bin0, nullptr);
+    ASSERT_EQ(bin0->get_num_stored_elements(), 0);
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(n, 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = Vec::create(ref, gko::dim<2>{n, 1});
+    auto c_d = Vec::create(exec, gko::dim<2>{n, 1});
+
+    gko::kernels::reference::amp::spmv_csr(ref, amp_ref.get(), b_ref.get(),
+                                           c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_csr(exec, amp_d.get(),
+                                                      b_d.get(), c_d.get());
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
+{
+    using T = value_type;
+    const int n = 64;
+    auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
+    dns_ref->fill(0.0);
+    for (int i = 0; i < n; i++) {
+        dns_ref->at(i, i) = 2.0;
+        if (i > 0) dns_ref->at(i, i - 1) = -1.0;
+        if (i < n - 1) dns_ref->at(i, i + 1) = -1.0;
+    }
+    auto csr_ref = CsrMtx::create(ref);
+    dns_ref->convert_to(csr_ref.get());
+    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
+        gko::share(csr_ref->clone()));
+    // Verify bin 0 is actually empty
+    auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
+    ASSERT_NE(bin0, nullptr);
+    ASSERT_EQ(bin0->get_num_stored_elements(), 0);
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(n, 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = gen_vec(n, 1);
+    auto c_d = gko::clone(exec, c_ref);
+    auto alpha_ref = gko::initialize<Vec>({2.0}, ref);
+    auto alpha_d = gko::clone(exec, alpha_ref);
+    auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
+    auto beta_d = gko::clone(exec, beta_ref);
+
+    gko::kernels::reference::amp::advanced_spmv_csr(
+        ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
+        c_ref.get());
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_csr(
         exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);

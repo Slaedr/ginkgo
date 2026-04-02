@@ -27,40 +27,69 @@ namespace amp {
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void spmv(std::shared_ptr<const DpcppExecutor> exec,
-          const matrix::AMP<MatrixValueType, IndexType>* a,
-          const matrix::Dense<InputValueType>* b,
-          matrix::Dense<OutputValueType>* c)
+void spmv_ell(std::shared_ptr<const DpcppExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* a,
+              const matrix::Dense<InputValueType>* b,
+              matrix::Dense<OutputValueType>* c)
 {
     GKO_NOT_IMPLEMENTED;
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_SPMV_KERNEL);
+    GKO_DECLARE_AMP_SPMV_ELL_KERNEL);
 
 
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void advanced_spmv(std::shared_ptr<const DpcppExecutor> exec,
-                   const matrix::Dense<MatrixValueType>* alpha,
-                   const matrix::AMP<MatrixValueType, IndexType>* a,
-                   const matrix::Dense<InputValueType>* b,
-                   const matrix::Dense<OutputValueType>* beta,
-                   matrix::Dense<OutputValueType>* c)
+void advanced_spmv_ell(std::shared_ptr<const DpcppExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
 {
     GKO_NOT_IMPLEMENTED;
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_ADVANCED_SPMV_KERNEL);
+    GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void spmv_csr(std::shared_ptr<const DpcppExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* a,
+              const matrix::Dense<InputValueType>* b,
+              matrix::Dense<OutputValueType>* c)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_SPMV_CSR_KERNEL);
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void advanced_spmv_csr(std::shared_ptr<const DpcppExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_ADVANCED_SPMV_CSR_KERNEL);
 
 
 template <typename ValueType, typename IndexType>
-void generate_ell_rownorms_storage(
+void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DpcppExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz,
-    array<remove_complex<ValueType>>& rownorms)
+    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
 {
     GKO_NOT_IMPLEMENTED;
 }

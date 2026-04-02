@@ -9,6 +9,7 @@
 #include <limits>
 
 #include <ginkgo/core/base/amp_types.hpp>
+#include <ginkgo/core/base/device_matrix_data.hpp>
 #include <ginkgo/core/base/lin_op.hpp>
 #include <ginkgo/core/base/matrix_data.hpp>
 #include <ginkgo/core/base/polymorphic_object.hpp>
@@ -62,6 +63,7 @@ public:
     using value_type = ValueType;
     using index_type = IndexType;
     using real_type = remove_complex<ValueType>;
+    using device_mat_data = device_matrix_data<ValueType, IndexType>;
 
     // Maximum number of supported precisions.
     static constexpr int num_precisions =
@@ -75,6 +77,10 @@ public:
     std::unique_ptr<Diagonal<ValueType>> extract_diagonal() const override;
 
     void read(const matrix_data<ValueType, IndexType>& data) override;
+
+    void read(device_mat_data&& data) override;
+
+    void read(const device_mat_data& data) override;
 
     /**
      * Returns a pointer to the i-th bin matrix.
@@ -149,6 +155,7 @@ protected:
     explicit AMP(const Factory* factory, std::shared_ptr<const LinOp> lin_op)
         : EnableLinOp<AMP>(factory->get_executor(), lin_op->get_size()),
           parameters_{factory->get_parameters()},
+          row_sizes_(create_row_sizes()),
           mat_bins_(generate_amp(lin_op.get()))
     {}
 
@@ -157,16 +164,22 @@ protected:
     void apply_impl(const LinOp* alpha, const LinOp* b, const LinOp* beta,
                     LinOp* x) const override;
 
-    /* Array of bins of the different precisions.
-     */
-    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
-
     /**
      * Generate binned adaptive precision matrix from given (fixed precision)
      * matrix.
      */
     std::array<std::unique_ptr<const LinOp>, num_precisions> generate_amp(
-        const LinOp* matrix) const;
+        const LinOp* matrix);
+
+private:
+    std::array<gko::array<IndexType>, num_precisions> row_sizes_;
+
+    std::array<gko::array<IndexType>, num_precisions> create_row_sizes() const;
+
+protected:
+    /* Array of bins of the different precisions.
+     */
+    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
 };
 
 
