@@ -153,7 +153,6 @@ auto generate_amp_impl(
     gko::amp::precision_array<IndexType*, ValueType> bin_row_sizes;
     const size_type nrows = mtx->get_size()[0];
     gko::constexpr_for<0, q, 1>([&](auto k) {
-        // row_sizes[k].set_executor(exec);
         row_sizes[k].resize_and_reset(nrows + 1);
         bin_row_sizes[k] = row_sizes[k].get_data();
     });
