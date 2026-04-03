@@ -133,7 +133,7 @@ int main(int argc, char* argv[])
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", baseline_ms / ms},
-                        {"rel_error_vs_ell_double", err}});
+                        {"rel_error_vs_double", err}});
     };
 
     const std::string fmt_upper =
@@ -178,7 +178,7 @@ int main(int argc, char* argv[])
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", 1.0},
-                        {"rel_error_vs_ell_double", 0.0}});
+                        {"rel_error_vs_double", 0.0}});
     }
 
     // ---- Base<float> ----
@@ -301,7 +301,7 @@ int main(int argc, char* argv[])
         const auto local_mat =
             dynamic_cast<const Amp*>(mat->get_local_matrix().get());
         if (local_mat && do_print) {
-            amp_details = compute_amp_details(local_mat, 0.0 / 0.0, rows);
+            amp_details = compute_amp_details(cfg, local_mat, 0.0 / 0.0, rows);
         }
     }
 

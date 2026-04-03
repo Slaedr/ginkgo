@@ -317,8 +317,8 @@ std::shared_ptr<gko::matrix::Dense<double>> to_double_vec(
 // ============================================================
 
 inline std::string compute_amp_details(
-    const gko::matrix::AMP<double, int>* const mtx, const double amp_setup_ms,
-    json& rows)
+    const Config& cfg, const gko::matrix::AMP<double, int>* const mtx,
+    const double amp_setup_ms, json& rows)
 {
     std::stringstream sstream;
     using Ell = gko::matrix::Ell<double, int>;
@@ -330,15 +330,16 @@ inline std::string compute_amp_details(
     for (int k = 0; k < q; k++) {
         const auto* bin = mtx->get_bin_matrix(k);
         GKO_ASSERT(bin);
-        const auto* ellmat = dynamic_cast<const Ell*>(bin);
-        const auto* csrmat = dynamic_cast<const Csr*>(bin);
-        if (ellmat) {
+        if (cfg.amp_base_format == "ell") {
+            // Apparently, this works:
+            const auto* ellmat = static_cast<const Ell*>(bin);
             const auto max_nnz_per_row =
                 ellmat->get_num_stored_elements_per_row();
             sstream << "     Bin " << k
                     << ": max_nnz_per_row = " << max_nnz_per_row << "\n";
             amps.push_back({{"bin", k}, {"max_nnz_per_row", max_nnz_per_row}});
-        } else if (csrmat) {
+        } else if (cfg.amp_base_format == "csr") {
+            const auto* csrmat = static_cast<const Csr*>(bin);
             const auto nnz = csrmat->get_num_stored_elements();
             sstream << "     Bin " << k << ": nnz = " << nnz << "\n";
             amps.push_back({{"bin", k}, {"nnz", nnz}});

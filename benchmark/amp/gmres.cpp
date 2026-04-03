@@ -416,7 +416,7 @@ int main(int argc, char* argv[])
         const auto local_mat =
             dynamic_cast<const Amp*>(amp_mat->get_local_matrix().get());
         if (local_mat && do_print) {
-            amp_details = compute_amp_details(local_mat, 0.0, rows);
+            amp_details = compute_amp_details(cfg, local_mat, 0.0, rows);
         }
     }
 
