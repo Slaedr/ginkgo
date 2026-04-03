@@ -156,43 +156,6 @@ inline std::shared_ptr<gko::Executor> make_executor(const std::string& name)
     throw std::runtime_error("Unknown executor: " + name);
 }
 
-const std::map<std::string,
-               std::function<std::shared_ptr<gko::Executor>(MPI_Comm)>>
-    executor_factory_mpi{
-        {"reference",
-         [](MPI_Comm) { return gko::ReferenceExecutor::create(); }},
-        {"omp", [](MPI_Comm) { return gko::OmpExecutor::create(); }},
-        {"cuda",
-         [](MPI_Comm comm) {
-             auto device_id = gko::experimental::mpi::map_rank_to_device_id(
-                 comm, gko::CudaExecutor::get_num_devices());
-             return gko::CudaExecutor::create(
-                 device_id, gko::ReferenceExecutor::create(),
-                 std::make_shared<gko::CudaAllocator>());
-         }},
-        {"hip",
-         [](MPI_Comm comm) {
-             auto device_id = gko::experimental::mpi::map_rank_to_device_id(
-                 comm, gko::HipExecutor::get_num_devices());
-             return gko::HipExecutor::create(
-                 device_id, gko::ReferenceExecutor::create(),
-                 std::make_shared<gko::HipAllocator>());
-         }},
-        {"dpcpp", [](MPI_Comm comm) {
-             int device_id = 0;
-             if (gko::DpcppExecutor::get_num_devices("gpu")) {
-                 device_id = gko::experimental::mpi::map_rank_to_device_id(
-                     comm, gko::DpcppExecutor::get_num_devices("gpu"));
-             } else if (gko::DpcppExecutor::get_num_devices("cpu")) {
-                 device_id = gko::experimental::mpi::map_rank_to_device_id(
-                     comm, gko::DpcppExecutor::get_num_devices("cpu"));
-             } else {
-                 GKO_NOT_IMPLEMENTED;
-             }
-             return gko::DpcppExecutor::create(
-                 device_id, gko::ReferenceExecutor::create());
-         }}};
-
 // ============================================================
 // Timing
 // ============================================================

@@ -62,7 +62,6 @@ int main(int argc, char* argv[])
     }
 
     auto exec = make_executor(cfg.executor);
-    // auto exec = executor_factory_mpi.at(cfg.executor);
 
     // ---- Generate local stencil data (rows have global indices) ----
     if (do_print) {
