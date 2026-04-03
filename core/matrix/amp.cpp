@@ -292,11 +292,24 @@ template <typename ValueType, typename IndexType>
 void AMP<ValueType, IndexType>::read(
     const matrix_data<ValueType, IndexType>& data)
 {
+    using Ell = matrix::Ell<ValueType, IndexType>;
+    using Csr = matrix::Csr<ValueType, IndexType>;
     auto exec = this->get_executor();
-    auto ell = Ell<ValueType, IndexType>::create(exec);
-    ell->read(data);
-    this->set_size(ell->get_size());
-    mat_bins_ = generate_amp(ell.get());
+    // Determine underlying format from bin type.
+    // Note that the bins would have been set by the factory build,
+    //   which is the only way to create an AMP matrix from the outside.
+    std::unique_ptr<LinOp> base_mtx;
+    auto base_ell = dynamic_cast<const Ell*>(mat_bins_[0].get());
+    auto base_csr = dynamic_cast<const Csr*>(mat_bins_[0].get());
+    if (base_ell) {
+        base_mtx = std::move(Ell::create(exec));
+    } else if (base_csr) {
+        base_mtx = std::move(Csr::create(exec));
+    }
+    as<ReadableFromMatrixData<ValueType, IndexType>>(base_mtx.get())
+        ->read(data);
+    this->set_size(base_mtx->get_size());
+    mat_bins_ = generate_amp(base_mtx.get());
 }
 
 
@@ -312,11 +325,23 @@ template <typename ValueType, typename IndexType>
 void AMP<ValueType, IndexType>::read(
     const device_matrix_data<ValueType, IndexType>& data)
 {
+    using Ell = matrix::Ell<ValueType, IndexType>;
+    using Csr = matrix::Csr<ValueType, IndexType>;
     auto exec = this->get_executor();
-    auto ell = Ell<ValueType, IndexType>::create(exec);
-    ell->read(data);
-    this->set_size(ell->get_size());
-    mat_bins_ = generate_amp(ell.get());
+    // Determine underlying format from bin type.
+    // Note that the bins would have been set by the constructor.
+    std::unique_ptr<LinOp> base_mtx;
+    auto base_ell = dynamic_cast<const Ell*>(mat_bins_[0].get());
+    auto base_csr = dynamic_cast<const Csr*>(mat_bins_[0].get());
+    if (base_ell) {
+        base_mtx = std::move(Ell::create(exec));
+    } else if (base_csr) {
+        base_mtx = std::move(Csr::create(exec));
+    }
+    as<ReadableFromMatrixData<ValueType, IndexType>>(base_mtx.get())
+        ->read(data);
+    this->set_size(base_mtx->get_size());
+    mat_bins_ = generate_amp(base_mtx.get());
 }
 
 
