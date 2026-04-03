@@ -22,6 +22,7 @@
  *   bench_reps        : 20
  *   amp_tolerance     : 0.01
  *   matrix_values_type: "laplace" | "diagonal_dominant" | "general" ("laplace")
+ *   amp_base_format       : "ell" | "csr" ("ell")
  */
 
 #include <cmath>
@@ -111,7 +112,8 @@ int main(int argc, char* argv[])
                          {"global_nnz", global_nnz},
                          {"num_procs", num_procs},
                          {"executor", cfg.executor},
-                         {"amp_tolerance", cfg.amp_tolerance}};
+                         {"amp_tolerance", cfg.amp_tolerance},
+                         {"amp_base_format", cfg.amp_base_format}};
     json rows = json::array();
 
     double baseline_ms = 1.0;
@@ -134,15 +136,18 @@ int main(int argc, char* argv[])
                         {"rel_error_vs_ell_double", err}});
     };
 
-    // ---- ELL<double> (reference) ----
+    const std::string fmt_upper =
+        (cfg.amp_base_format == "csr") ? "CSR" : "ELL";
+
+    // ---- Base<double> (reference) ----
     {
         // Time setup (matrix creation + read_distributed)
         exec->synchronize();
         comm.synchronize();
         const auto t0 = std::chrono::high_resolution_clock::now();
 
-        auto mat = dist_mtx_t<double>::create(
-            exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
+        auto mat = create_dist_matrix<double, local_idx_t, global_idx_t>(
+            exec, comm, cfg);
         mat->read_distributed(mat_data, partition);
 
         exec->synchronize();
@@ -163,12 +168,12 @@ int main(int argc, char* argv[])
         baseline_ms = ms;
         ref_out = gko::clone(exec, x);
 
+        const std::string label = fmt_upper + "<double>";
         const double gflops = flops / (ms * 1e6);
         if (do_print) {
-            print_perf_row("ELL<double>", setup_ms, ms, gflops, baseline_ms,
-                           0.0);
+            print_perf_row(label, setup_ms, ms, gflops, baseline_ms, 0.0);
         }
-        rows.push_back({{"format", "ELL<double>"},
+        rows.push_back({{"format", label},
                         {"setup_ms", setup_ms},
                         {"time_ms", ms},
                         {"gflops", gflops},
@@ -176,7 +181,7 @@ int main(int argc, char* argv[])
                         {"rel_error_vs_ell_double", 0.0}});
     }
 
-    // ---- ELL<float> ----
+    // ---- Base<float> ----
     {
         // Time setup (matrix creation + read_distributed)
         exec->synchronize();
@@ -191,8 +196,8 @@ int main(int argc, char* argv[])
             fdata.nonzeros.emplace_back(nz.row, nz.column,
                                         static_cast<float>(nz.value));
         }
-        auto mat = dist_mtx_t<float>::create(
-            exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
+        auto mat = create_dist_matrix<float, local_idx_t, global_idx_t>(
+            exec, comm, cfg);
         mat->read_distributed(fdata, partition);
 
         exec->synchronize();
@@ -213,11 +218,11 @@ int main(int argc, char* argv[])
                                   [&] { mat->apply(b, x); });
 
         auto x_d = to_dist_double(exec, comm, x.get());
-        record("ELL<float>", setup_ms, ms, x_d);
+        record(fmt_upper + "<float>", setup_ms, ms, x_d);
     }
 
 #ifdef GINKGO_HAVE_AMP_HALF
-    // ---- ELL<half> ----
+    // ---- Base<half> ----
     {
         using Half = gko::amp::half;
 
@@ -234,8 +239,8 @@ int main(int argc, char* argv[])
                                         static_cast<Half>(nz.value));
         }
 
-        auto mat = dist_mtx_t<Half>::create(
-            exec, comm, gko::with_matrix_type<gko::matrix::Ell>());
+        auto mat = create_dist_matrix<Half, local_idx_t, global_idx_t>(
+            exec, comm, cfg);
         mat->read_distributed(hdata, partition);
 
         exec->synchronize();
@@ -255,34 +260,23 @@ int main(int argc, char* argv[])
                                   [&] { mat->apply(b, x); });
 
         auto x_d = to_dist_double(exec, comm, x.get());
-        record("ELL<half>", setup_ms, ms, x_d);
+        record(fmt_upper + "<half>", setup_ms, ms, x_d);
     }
 #endif
 
     std::string amp_details;
     // ---- AMP<double> ----
     {
-        using Ell = gko::matrix::Ell<double, local_idx_t>;
         using Amp = gko::matrix::AMP<double, local_idx_t>;
-        using Csr = gko::matrix::Csr<double, local_idx_t>;
 
         // Time setup (matrix creation + read_distributed)
         exec->synchronize();
         comm.synchronize();
         const auto t0 = std::chrono::high_resolution_clock::now();
 
-        // Create AMP template from an empty ELL
-        auto ell_empty = gko::share(Ell::create(exec, gko::dim<2>{0, 0}));
-        auto amp_template =
-            Amp::build()
-                .with_tolerance(cfg.amp_tolerance)
-                .with_strategy(Amp::tolerance_type::componentwise)
-                .on(exec)
-                ->generate(ell_empty);
-        auto csr_template = Csr::create(exec);
-
-        auto mat = gko::share(dist_mtx_t<double>::create(
-            exec, comm, amp_template.get(), csr_template.get()));
+        auto mat = gko::share(
+            create_amp_dist_matrix<double, local_idx_t, global_idx_t>(
+                exec, comm, cfg));
         mat->read_distributed(mat_data, partition);
 
         exec->synchronize();

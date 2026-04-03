@@ -3,6 +3,7 @@
   "ny": 64,
   "nz": 64,
   "executor": "omp",
+  "amp_base_format": "ell",
   "warmup_reps": 2,
   "bench_reps": 10,
   "amp_tolerance": 0.01,

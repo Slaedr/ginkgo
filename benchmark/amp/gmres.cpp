@@ -21,6 +21,7 @@
  *   gmres_tol         : 1e-8
  *   gmres_max_iters   : 1000
  *   gmres_krylov_dim  : 50
+ *   amp_base_format       : "ell" | "csr" ("ell")
  */
 
 #include <chrono>
@@ -92,11 +93,11 @@ std::shared_ptr<const DistVec> compute_reference_solution(
         partition,
     const ProblemData<double, global_idx_t, local_idx_t>& prob,
     std::shared_ptr<const DistVec> rhs, const gko::size_type global_n,
-    const gko::size_type local_n)
+    const gko::size_type local_n, const Config& cfg)
 {
-    // ---- Build ELL<double> distributed matrix ----
+    // ---- Build distributed matrix using configured base format ----
     auto system_mat = gko::share(
-        DistMtx::create(exec, comm, gko::with_matrix_type<gko::matrix::Ell>()));
+        create_dist_matrix<double, local_idx_t, global_idx_t>(exec, comm, cfg));
     system_mat->read_distributed(prob.mat_data, partition);
 
     const double ref_tol = 1e-14;
@@ -300,7 +301,7 @@ int main(int argc, char* argv[])
     }
 
     const auto x_ref = compute_reference_solution(comm, exec, partition, data,
-                                                  b, global_n, local_n);
+                                                  b, global_n, local_n, cfg);
     if (do_print) {
         std::cout << "Generated reference solution.\n";
     }
@@ -329,6 +330,7 @@ int main(int argc, char* argv[])
                          {"num_procs", num_procs},
                          {"executor", cfg.executor},
                          {"amp_tolerance", cfg.amp_tolerance},
+                         {"amp_base_format", cfg.amp_base_format},
                          {"gmres_tol", cfg.gmres_tol},
                          {"gmres_max_iters", cfg.gmres_max_iters},
                          {"gmres_krylov_dim", cfg.gmres_krylov_dim}};
@@ -360,50 +362,44 @@ int main(int argc, char* argv[])
 
     GmresStats ref_s{};
 
-    // ---- ELL<double> system ----
+    const std::string fmt_upper =
+        (cfg.amp_base_format == "csr") ? "CSR" : "ELL";
+
+    // ---- Base<double> system ----
     {
         exec->synchronize();
         comm.synchronize();
         const auto t0 = std::chrono::high_resolution_clock::now();
-        auto ell_mat = gko::share(DistMtx::create(
-            exec, comm, gko::with_matrix_type<gko::matrix::Ell>()));
-        ell_mat->read_distributed(mat_data, partition);
+        auto base_mat =
+            gko::share(create_dist_matrix<double, local_idx_t, global_idx_t>(
+                exec, comm, cfg));
+        base_mat->read_distributed(mat_data, partition);
         exec->synchronize();
         comm.synchronize();
         const auto t1 = std::chrono::high_resolution_clock::now();
         const double setup_ms =
             std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-        auto s = run_gmres(comm, exec, data.color_ptrs, ell_mat, b, x_ref,
+        auto s = run_gmres(comm, exec, data.color_ptrs, base_mat, b, x_ref,
                            global_n, local_n, cfg);
         s.setup_ms += setup_ms;
-        print_row("ELL<double>", s, s);
+        print_row(fmt_upper + "<double>", s, s);
         ref_s = s;
     }
 
     // ---- AMP<double> system ----
     std::string amp_details;
     {
-        using Ell = gko::matrix::Ell<double, local_idx_t>;
         using Amp = gko::matrix::AMP<double, local_idx_t>;
-        using Csr = gko::matrix::Csr<double, local_idx_t>;
 
         // Time AMP matrix generation
         exec->synchronize();
         comm.synchronize();
         const auto t0 = std::chrono::high_resolution_clock::now();
 
-        auto ell_empty = gko::share(Ell::create(exec, gko::dim<2>{0, 0}));
-        auto amp_template =
-            Amp::build()
-                .with_tolerance(cfg.amp_tolerance)
-                .with_strategy(Amp::tolerance_type::componentwise)
-                .on(exec)
-                ->generate(ell_empty);
-        auto csr_template = Csr::create(exec);
-
-        auto amp_mat = gko::share(DistMtx::create(
-            exec, comm, amp_template.get(), csr_template.get()));
+        auto amp_mat = gko::share(
+            create_amp_dist_matrix<double, local_idx_t, global_idx_t>(
+                exec, comm, cfg));
         amp_mat->read_distributed(mat_data, partition);
 
         exec->synchronize();

@@ -55,6 +55,7 @@ struct Config {
     int gmres_krylov_dim = 50;
     mat_offdiag_t offdiag_type = mat_offdiag_t::hpcg;
     std::string output_file_prefix = "";
+    std::string amp_base_format = "ell";
 };
 
 inline Config load_config(const std::string& path)
@@ -102,6 +103,15 @@ inline Config load_config(const std::string& path)
     }
     if (j.contains("output_file_prefix")) {
         cfg.output_file_prefix = j["output_file_prefix"];
+    }
+    if (j.contains("amp_base_format")) {
+        const std::string fmt = j["amp_base_format"];
+        if (fmt == "ell" || fmt == "csr") {
+            cfg.amp_base_format = fmt;
+        } else {
+            throw std::runtime_error("Invalid amp_base_format '" + fmt +
+                                     "': supported values are 'ell' and 'csr'");
+        }
     }
     return cfg;
 }
@@ -312,17 +322,27 @@ inline std::string compute_amp_details(
 {
     std::stringstream sstream;
     using Ell = gko::matrix::Ell<double, int>;
+    using Csr = gko::matrix::Csr<double, int>;
     constexpr int q = gko::matrix::AMP<double, int>::num_precisions;
     sstream << "\nAMP details";
     sstream << "\n  AMP matrix precision buckets:\n";
     json amps = json::array();
     for (int k = 0; k < q; k++) {
-        auto ellmat = static_cast<const Ell*>(mtx->get_bin_matrix(k));
-        GKO_ASSERT(ellmat);
-        const auto max_nnz_per_row = ellmat->get_num_stored_elements_per_row();
-        sstream << "     Bin " << k << ": max_nnz_per_row = " << max_nnz_per_row
-                << "\n";
-        amps.push_back({{"bin", k}, {"max_nnz_per_row", max_nnz_per_row}});
+        const auto* bin = mtx->get_bin_matrix(k);
+        GKO_ASSERT(bin);
+        const auto* ellmat = dynamic_cast<const Ell*>(bin);
+        const auto* csrmat = dynamic_cast<const Csr*>(bin);
+        if (ellmat) {
+            const auto max_nnz_per_row =
+                ellmat->get_num_stored_elements_per_row();
+            sstream << "     Bin " << k
+                    << ": max_nnz_per_row = " << max_nnz_per_row << "\n";
+            amps.push_back({{"bin", k}, {"max_nnz_per_row", max_nnz_per_row}});
+        } else if (csrmat) {
+            const auto nnz = csrmat->get_num_stored_elements();
+            sstream << "     Bin " << k << ": nnz = " << nnz << "\n";
+            amps.push_back({{"bin", k}, {"nnz", nnz}});
+        }
     }
     amps.push_back({"amp_setup_ms", amp_setup_ms});
     sstream << "  AMP setup time (ms) = " << std::setprecision(3)
@@ -331,12 +351,84 @@ inline std::string compute_amp_details(
     return sstream.str();
 }
 
+// ============================================================
+// Matrix creation helpers (format-agnostic)
+// ============================================================
+
+/**
+ * Create a local sparse matrix of the configured base format.
+ */
+template <typename ValueType, typename IndexType>
+std::unique_ptr<gko::LinOp> create_local_matrix(
+    std::shared_ptr<const gko::Executor> exec, const Config& cfg)
+{
+    if (cfg.amp_base_format == "csr") {
+        return gko::matrix::Csr<ValueType, IndexType>::create(exec);
+    }
+    return gko::matrix::Ell<ValueType, IndexType>::create(exec);
+}
+
+/**
+ * Create a distributed matrix using the configured base format for the
+ * local and non-local parts.
+ */
+template <typename ValueType, typename LocalIndexType, typename GlobalIndexType>
+std::unique_ptr<gko::experimental::distributed::Matrix<
+    ValueType, LocalIndexType, GlobalIndexType>>
+create_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
+                   const Config& cfg)
+{
+    using DistMtx =
+        gko::experimental::distributed::Matrix<ValueType, LocalIndexType,
+                                               GlobalIndexType>;
+    if (cfg.amp_base_format == "csr") {
+        return DistMtx::create(exec, comm,
+                               gko::with_matrix_type<gko::matrix::Csr>());
+    }
+    return DistMtx::create(exec, comm,
+                           gko::with_matrix_type<gko::matrix::Ell>());
+}
+
+/**
+ * Create an AMP distributed matrix.  The diagonal (local) block is an AMP
+ * matrix whose bins use the configured base format, and the off-diagonal
+ * (non-local) block uses CSR.
+ */
+template <typename ValueType, typename LocalIndexType, typename GlobalIndexType>
+std::unique_ptr<gko::experimental::distributed::Matrix<
+    ValueType, LocalIndexType, GlobalIndexType>>
+create_amp_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
+                       const Config& cfg)
+{
+    using DistMtx =
+        gko::experimental::distributed::Matrix<ValueType, LocalIndexType,
+                                               GlobalIndexType>;
+    using Amp = gko::matrix::AMP<ValueType, LocalIndexType>;
+    using Csr = gko::matrix::Csr<ValueType, LocalIndexType>;
+
+    std::shared_ptr<const gko::LinOp> base_empty;
+    if (cfg.amp_base_format == "csr") {
+        base_empty = gko::share(Csr::create(exec, gko::dim<2>{0, 0}));
+    } else {
+        using Ell = gko::matrix::Ell<ValueType, LocalIndexType>;
+        base_empty = gko::share(Ell::create(exec, gko::dim<2>{0, 0}));
+    }
+    auto amp_template = Amp::build()
+                            .with_tolerance(cfg.amp_tolerance)
+                            .with_strategy(Amp::tolerance_type::componentwise)
+                            .on(exec)
+                            ->generate(base_empty);
+    auto csr_template = Csr::create(exec);
+    return DistMtx::create(exec, comm, amp_template.get(), csr_template.get());
+}
+
 inline void print_config(const Config& cfg)
 {
     std::cout << "  Grid: " << cfg.nx << "x" << cfg.ny << "x" << cfg.nz
               << "  executor: " << cfg.executor << "\n"
               << "  Matrix values: " << static_cast<int>(cfg.offdiag_type)
               << "\n"
+              << "  Base format: " << cfg.amp_base_format << "\n"
               << "  AMP tolerance: " << cfg.amp_tolerance << "\n"
               << "  Warmup / bench reps: " << cfg.warmup_reps << " / "
               << cfg.bench_reps << "\n";
