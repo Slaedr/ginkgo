@@ -522,12 +522,13 @@ TYPED_TEST(Amp, CanExtractDiagonal)
 }
 
 
-TYPED_TEST(Amp, ReadFromMatrixDataProducesCorrectSize)
+TYPED_TEST(Amp, ReadFromMatrixDataProducesCorrectSizeAndBinTypesEll)
 {
     using value_type = typename TestFixture::value_type;
     using index_type = typename TestFixture::index_type;
     using Mtx = typename TestFixture::Mtx;
     using Ell = typename TestFixture::Ell;
+    constexpr int q = gko::amp::narrow_types<value_type>::num_types;
 
     gko::matrix_data<value_type, index_type> data{
         {3, 3},
@@ -538,19 +539,46 @@ TYPED_TEST(Amp, ReadFromMatrixDataProducesCorrectSize)
     auto mtx = Mtx::build().on(this->exec)->generate(ell_empty);
     mtx->read(data);
 
-    ASSERT_EQ(mtx->get_size(), gko::dim<2>(3, 3));
-    // At least one bin should be non-null
-    bool has_bin = false;
-    for (int i = 0; i < Mtx::num_precisions; ++i) {
-        if (mtx->get_bin_matrix(i) != nullptr) {
-            has_bin = true;
-        }
-    }
-    EXPECT_TRUE(has_bin);
+    EXPECT_EQ(mtx->get_size(), gko::dim<2>(3, 3));
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        using T = typename std::tuple_element<
+            k, typename gko::amp::narrow_types<value_type>::type>::type;
+        auto mptr = dynamic_cast<const gko::matrix::Ell<T, index_type>*>(
+            mtx->get_bin_matrix(k));
+        EXPECT_TRUE(mptr) << " Ell bin " << k;
+    });
 }
 
 
-TYPED_TEST(Amp, ReadProducesSameResultAsFactoryGenerate)
+TYPED_TEST(Amp, ReadFromMatrixDataProducesCorrectSizeAndBinTypesCsr)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Csr = gko::matrix::Csr<value_type, index_type>;
+    constexpr int q = gko::amp::narrow_types<value_type>::num_types;
+
+    gko::matrix_data<value_type, index_type> data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+
+    // Create empty AMP via factory with empty CSR input
+    auto base_empty = gko::share(Csr::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx = Mtx::build().on(this->exec)->generate(base_empty);
+    mtx->read(data);
+
+    EXPECT_EQ(mtx->get_size(), gko::dim<2>(3, 3));
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        using T = typename std::tuple_element<
+            k, typename gko::amp::narrow_types<value_type>::type>::type;
+        auto mptr = dynamic_cast<const gko::matrix::Csr<T, index_type>*>(
+            mtx->get_bin_matrix(k));
+        EXPECT_TRUE(mptr) << " Csr bin " << k;
+    });
+}
+
+
+TYPED_TEST(Amp, ReadFromEllProducesSameResultAsFactoryGenerate)
 {
     using value_type = typename TestFixture::value_type;
     using index_type = typename TestFixture::index_type;
@@ -571,6 +599,39 @@ TYPED_TEST(Amp, ReadProducesSameResultAsFactoryGenerate)
     auto ell = gko::share(Ell::create(this->exec));
     ell->read(data);
     auto mtx_gen = Mtx::build().on(this->exec)->generate(ell);
+
+    // Both should produce the same dense result
+    auto dense_read = Dense::create(this->exec);
+    auto dense_gen = Dense::create(this->exec);
+    mtx_read->convert_to(dense_read.get());
+    mtx_gen->convert_to(dense_gen.get());
+
+    GKO_ASSERT_MTX_NEAR(dense_read, dense_gen, 0.0);
+}
+
+
+TYPED_TEST(Amp, ReadFromCsrProducesSameResultAsFactoryGenerate)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using BaseMtx = gko::matrix::Csr<value_type, index_type>;
+    using Dense = typename TestFixture::Dense;
+
+    gko::matrix_data<value_type, index_type> data{
+        {3, 3},
+        {{0, 0, 2.0}, {0, 1, -1.0}, {1, 0, -1.0}, {1, 1, 2.0}, {2, 2, 3.0}}};
+
+    // Method 1: read directly (via empty factory-generated AMP)
+    auto base_empty =
+        gko::share(BaseMtx::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx_read = Mtx::build().on(this->exec)->generate(base_empty);
+    mtx_read->read(data);
+
+    // Method 2: factory generate from CSR
+    auto base = gko::share(BaseMtx::create(this->exec));
+    base->read(data);
+    auto mtx_gen = Mtx::build().on(this->exec)->generate(base);
 
     // Both should produce the same dense result
     auto dense_read = Dense::create(this->exec);

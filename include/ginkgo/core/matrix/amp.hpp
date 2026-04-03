@@ -76,6 +76,12 @@ public:
 
     std::unique_ptr<Diagonal<ValueType>> extract_diagonal() const override;
 
+    /**
+     * Reads in a matrix from nonzero data on the host.
+     *
+     * The underlying bin type is determined by the type of bin set during
+     * the factory build of this AMP matrix.
+     */
     void read(const matrix_data<ValueType, IndexType>& data) override;
 
     void read(device_mat_data&& data) override;
