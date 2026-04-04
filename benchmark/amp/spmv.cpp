@@ -308,7 +308,9 @@ int main(int argc, char* argv[])
     if (do_print) {
         results["spmv"] = rows;
 
-        const std::string out = cfg.output_file_prefix + "spmv_results.json";
+        const std::string out = cfg.output_file_prefix + "spmv_" +
+                                cfg.amp_base_format + "_" + cfg.executor +
+                                "_results.json";
         std::ofstream of(out);
         of << std::setw(2) << results << "\n";
         if (!amp_details.empty()) {

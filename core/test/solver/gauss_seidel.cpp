@@ -6,6 +6,7 @@
 
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/matrix/amp.hpp>
+#include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 #include <ginkgo/core/solver/gauss_seidel.hpp>
@@ -372,6 +373,88 @@ TYPED_TEST(FwdGaussSeidelAMP, FactoryCreatesCorrectSolver)
 
 
 TYPED_TEST(FwdGaussSeidelAMP, IterationConvergesTowardKnownExactSolution)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using Vec = gko::matrix::Dense<value_type>;
+
+    // Same system as the ELL test: A x = b, x* = {4/7, -1, 6/7, 0}.
+    auto b = gko::initialize<Vec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto exact = gko::initialize<Vec>({value_type{4.0 / 7.0}, value_type{-1.0},
+                                       value_type{6.0 / 7.0}, value_type{0.0}},
+                                      this->exec);
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .on(this->exec)
+            ->generate(this->mtx);
+    solver->apply(b, x);
+
+    GKO_ASSERT_MTX_NEAR(x, exact, 1e-3);
+}
+
+
+// ============================================================
+// FwdGaussSeidel with AMP-CSR system matrix
+// ============================================================
+
+template <typename ValueIndexType>
+class FwdGaussSeidelAMPCSR : public ::testing::Test {
+protected:
+    using value_type =
+        typename std::tuple_element<0, decltype(ValueIndexType())>::type;
+    using index_type =
+        typename std::tuple_element<1, decltype(ValueIndexType())>::type;
+    using CsrMtx = gko::matrix::Csr<value_type, index_type>;
+    using AMPMtx = gko::matrix::AMP<value_type, index_type>;
+    using Solver = gko::solver::FwdGaussSeidel<value_type, index_type>;
+
+    FwdGaussSeidelAMPCSR()
+        : exec(gko::ReferenceExecutor::create()),
+          mtx(AMPMtx::build().with_tolerance(1e-6f).on(exec)->generate(
+              gko::share(gko::initialize<CsrMtx>(
+                  // clang-format off
+                      {{2.0, 0.0, 1.0, 0.0},
+                       {0.0, 3.0, 0.0, 1.0},
+                       {1.0, 0.0, 4.0, 0.0},
+                       {0.0, 1.0, 0.0, 5.0}},
+                  // clang-format on
+                  exec)))),
+          gs_factory(Solver::build()
+                         .with_criteria(
+                             gko::stop::Iteration::build().with_max_iters(1u))
+                         .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+                         .on(exec)),
+          solver(gs_factory->generate(mtx))
+    {}
+
+    std::shared_ptr<const gko::ReferenceExecutor> exec;
+    std::shared_ptr<AMPMtx> mtx;
+    std::unique_ptr<typename Solver::Factory> gs_factory;
+    std::unique_ptr<gko::LinOp> solver;
+};
+
+TYPED_TEST_SUITE(FwdGaussSeidelAMPCSR, gko::test::ValueIndexTypesBase,
+                 PairTypenameNameGenerator);
+
+
+TYPED_TEST(FwdGaussSeidelAMPCSR, FactoryCreatesCorrectSolver)
+{
+    using Solver = typename TestFixture::Solver;
+    using AMPMtx = typename TestFixture::AMPMtx;
+
+    ASSERT_EQ(this->solver->get_size(), gko::dim<2>(4, 4));
+    auto gs = static_cast<Solver*>(this->solver.get());
+    ASSERT_NE(gs->get_system_matrix(), nullptr);
+    ASSERT_EQ(gs->get_system_matrix(), this->mtx);
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMPCSR, IterationConvergesTowardKnownExactSolution)
 {
     using value_type = typename TestFixture::value_type;
     using index_type = typename TestFixture::index_type;

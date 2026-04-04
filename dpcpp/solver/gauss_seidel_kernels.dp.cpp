@@ -71,6 +71,23 @@ GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_MULTICOLOR_FWD_GS_CSR_KERNEL);
 
 
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void multicolor_fgs_amp_csr(
+    std::shared_ptr<const DpcppExecutor> exec,
+    const std::vector<IndexType>& color_ptrs,
+    const matrix::AMP<MatrixValueType, IndexType>* const a,
+    const matrix::Dense<InputValueType>* const b,
+    matrix::Dense<OutputValueType>* const x, const bool first_iter,
+    array<stopping_status>* const stop_status)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_MULTICOLOR_FWD_GS_AMP_CSR_KERNEL);
+
+
 }  // namespace gssdl
 }  // namespace dpcpp
 }  // namespace kernels

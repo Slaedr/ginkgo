@@ -173,19 +173,17 @@ __global__ __launch_bounds__(default_block_size) void mc_fgs_amp(
         auto avals = std::get<k>(bin_values);
         auto acols = bin_col_idxs[k];
         const auto max_nnz = bin_max_nnz_rows[k];
-        if (max_nnz > 0) {
-            for (uint32 j = 0; j < max_nnz; ++j) {
-                const auto col = acols[j * stride + row];
-                if (col == invalid) {
-                    continue;
-                }
-                const auto val = avals[j * stride + row];
-                if (col == row) {
-                    diag = static_cast<MValueType>(val);
-                } else {
-                    sum -= static_cast<highest_type>(val) *
-                           static_cast<highest_type>(x[col * x_stride + irhs]);
-                }
+        for (uint32 j = 0; j < max_nnz; ++j) {
+            const auto col = acols[j * stride + row];
+            if (col == invalid) {
+                continue;
+            }
+            const auto val = avals[j * stride + row];
+            if (col == row) {
+                diag = static_cast<MValueType>(val);
+            } else {
+                sum -= static_cast<highest_type>(val) *
+                       static_cast<highest_type>(x[col * x_stride + irhs]);
             }
         }
     });
@@ -363,6 +361,128 @@ void multicolor_fgs_csr(std::shared_ptr<const DefaultExecutor> exec,
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_MULTICOLOR_FWD_GS_CSR_KERNEL);
+
+
+template <typename IValueType, typename MValueType, typename OValueType,
+          typename IndexType>
+__global__ __launch_bounds__(default_block_size) void mc_fgs_amp_csr(
+    const amp::precision_array<const IndexType*, MValueType> bin_row_ptrs,
+    const amp::precision_array<const IndexType*, MValueType> bin_col_idxs,
+    const ScalarDCPtrTuple<MValueType> bin_values, const IndexType begin_row,
+    const IndexType end_row, const size_type b_stride,
+    const IValueType* const __restrict__ b, const size_type x_stride,
+    OValueType* const __restrict__ x,
+    stopping_status* const __restrict__ stopstatus, const bool first_iter)
+{
+    constexpr int q = amp::narrow_types<MValueType>::num_types;
+    using highest_type =
+        gko::highest_precision<IValueType, MValueType, OValueType>;
+    const auto warp =
+        group::tiled_partition<warp_size>(group::this_thread_block());
+    const auto lane = warp.thread_rank();
+    const auto warp_id = thread::get_subwarp_id_flat<warp_size, IndexType>();
+    const auto row = begin_row + warp_id;
+    if (row >= end_row) {
+        return;
+    }
+    const auto irhs = blockIdx.y;
+    if (first_iter && warp_id == 0 && lane == 0) {
+        stopstatus[irhs].reset();
+    }
+
+    auto partial_sum = zero<highest_type>();
+    auto diag = zero<MValueType>();
+
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        const auto row_start = bin_row_ptrs[k][row];
+        const auto row_end_nnz = bin_row_ptrs[k][row + 1];
+        auto avals = std::get<k>(bin_values);
+        auto acols = bin_col_idxs[k];
+        for (auto j = row_start + lane; j < row_end_nnz; j += warp_size) {
+            const auto col = acols[j];
+            const auto val = avals[j];
+            if (col == row) {
+                diag = static_cast<MValueType>(val);
+            } else {
+                partial_sum -=
+                    static_cast<highest_type>(val) *
+                    static_cast<highest_type>(x[col * x_stride + irhs]);
+            }
+        }
+    });
+
+    auto sum = reduce(warp, partial_sum,
+                      [](highest_type a, highest_type b) { return a + b; });
+    auto warp_diag =
+        reduce(warp, diag, [](MValueType a, MValueType b) { return a + b; });
+
+    if (lane == 0) {
+        sum += static_cast<highest_type>(b[row * b_stride + irhs]);
+        if (warp_diag != zero<MValueType>()) {
+            x[row * x_stride + irhs] = static_cast<OValueType>(
+                sum / static_cast<highest_type>(warp_diag));
+        }
+    }
+}
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void multicolor_fgs_amp_csr(
+    std::shared_ptr<const DefaultExecutor> exec,
+    const std::vector<IndexType>& color_ptrs,
+    const matrix::AMP<MatrixValueType, IndexType>* const a,
+    const matrix::Dense<InputValueType>* const b,
+    matrix::Dense<OutputValueType>* const x, const bool first_iter,
+    array<stopping_status>* const stop_status)
+{
+    if (color_ptrs.size() < 2) {
+        return;
+    }
+
+    using d_m_val_type = typename gkerd::device_type<MatrixValueType>;
+    using d_i_val_type = typename gkerd::device_type<InputValueType>;
+    using d_o_val_type = typename gkerd::device_type<OutputValueType>;
+    constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
+    const auto num_colors = static_cast<int>(color_ptrs.size() - 1);
+    const auto num_rhs = b->get_size()[1];
+    const auto x_vals = as_device_type(x->get_values());
+    const auto b_vals = as_device_type(b->get_const_values());
+    const auto x_stride = x->get_stride();
+    const auto b_stride = b->get_stride();
+
+    // Get precision buckets' arrays
+    ScalarDCPtrTuple<d_m_val_type> avalues;
+    amp::precision_array<const IndexType*, d_m_val_type> acol_idxs;
+    amp::precision_array<const IndexType*, d_m_val_type> arow_ptrs;
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        using value_type = typename std::tuple_element<
+            k, typename gko::amp::narrow_types<MatrixValueType>::type>::type;
+        using CsrType = matrix::Csr<value_type, IndexType>;
+        auto cmatk = dynamic_cast<const CsrType*>(a->get_bin_matrix(k));
+        if (!cmatk) {
+            GKO_NOT_SUPPORTED(cmatk);
+        }
+        acol_idxs[k] = cmatk->get_const_col_idxs();
+        arow_ptrs[k] = cmatk->get_const_row_ptrs();
+        std::get<k>(avalues) = as_device_type(cmatk->get_const_values());
+    });
+
+    for (int color = 0; color < num_colors; ++color) {
+        const auto row_begin = color_ptrs[color];
+        const auto row_end = color_ptrs[color + 1];
+        const auto nrows = row_end - row_begin;
+        const dim3 nblocks{static_cast<uint32>(ceildiv(nrows, warps_per_block)),
+                           static_cast<uint32>(num_rhs), 1u};
+        mc_fgs_amp_csr<d_i_val_type, d_m_val_type, d_o_val_type, IndexType>
+            <<<nblocks, default_block_size, 0, exec->get_stream()>>>(
+                arow_ptrs, acol_idxs, avalues, row_begin, row_end, b_stride,
+                b_vals, x_stride, x_vals, stop_status->get_data(), first_iter);
+    }
+}
+
+GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_MULTICOLOR_FWD_GS_AMP_CSR_KERNEL);
 
 
 }  // namespace gssdl

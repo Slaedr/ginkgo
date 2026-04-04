@@ -55,6 +55,17 @@ namespace gssdl {
                             array<stopping_status>* stop_status)
 
 
+#define GKO_DECLARE_MULTICOLOR_FWD_GS_AMP_CSR_KERNEL(            \
+    InputValueType, MatrixValueType, OutputValueType, IndexType) \
+    void multicolor_fgs_amp_csr(                                 \
+        std::shared_ptr<const DefaultExecutor> exec,             \
+        const std::vector<IndexType>& color_ptrs,                \
+        const matrix::AMP<MatrixValueType, IndexType>* a,        \
+        const matrix::Dense<InputValueType>* b,                  \
+        matrix::Dense<OutputValueType>* x, bool first_iter,      \
+        array<stopping_status>* stop_status)
+
+
 #define GKO_DECLARE_ALL_AS_TEMPLATES                                          \
     template <typename InputValueType, typename MatrixValueType,              \
               typename OutputValueType, typename IndexType>                   \
@@ -67,7 +78,11 @@ namespace gssdl {
     template <typename InputValueType, typename MatrixValueType,              \
               typename OutputValueType, typename IndexType>                   \
     GKO_DECLARE_MULTICOLOR_FWD_GS_CSR_KERNEL(InputValueType, MatrixValueType, \
-                                             OutputValueType, IndexType)
+                                             OutputValueType, IndexType);     \
+    template <typename InputValueType, typename MatrixValueType,              \
+              typename OutputValueType, typename IndexType>                   \
+    GKO_DECLARE_MULTICOLOR_FWD_GS_AMP_CSR_KERNEL(                             \
+        InputValueType, MatrixValueType, OutputValueType, IndexType)
 
 
 }  // namespace gssdl

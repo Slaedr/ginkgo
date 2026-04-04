@@ -23,7 +23,7 @@ namespace {
 
 
 template <typename ValueIndexType>
-class GaussSeidelKernel : public ::testing::Test {
+class FwdGaussSeidel : public ::testing::Test {
 protected:
     using value_type =
         typename std::tuple_element<0, decltype(ValueIndexType())>::type;
@@ -32,7 +32,7 @@ protected:
     using Mtx = gko::matrix::Ell<value_type, index_type>;
     using Vec = gko::matrix::Dense<value_type>;
 
-    GaussSeidelKernel()
+    FwdGaussSeidel()
         : exec(gko::ReferenceExecutor::create()),
           // 4x4 matrix with 2 colors:
           //   color 0: rows 0, 1  (independent: no off-diagonal links within
@@ -60,7 +60,7 @@ protected:
     std::vector<index_type> color_ptrs;
 };
 
-TYPED_TEST_SUITE(GaussSeidelKernel, gko::test::ValueIndexTypesBase,
+TYPED_TEST_SUITE(FwdGaussSeidel, gko::test::ValueIndexTypesBase,
                  PairTypenameNameGenerator);
 
 
@@ -68,7 +68,7 @@ TYPED_TEST_SUITE(GaussSeidelKernel, gko::test::ValueIndexTypesBase,
 //   Color 0: x[0] = b[0]/2,  x[1] = b[1]/3
 //   Color 1: x[2] = (b[2] - A[2,0]*x[0]) / 4
 //            x[3] = (b[3] - A[3,1]*x[1]) / 5
-TYPED_TEST(GaussSeidelKernel, SingleIterationFromZero)
+TYPED_TEST(FwdGaussSeidel, SingleIterationFromZero)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -87,7 +87,7 @@ TYPED_TEST(GaussSeidelKernel, SingleIterationFromZero)
 }
 
 
-TYPED_TEST(GaussSeidelKernel, UsesCurrentXAsInitialGuess)
+TYPED_TEST(FwdGaussSeidel, UsesCurrentXAsInitialGuess)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -116,7 +116,7 @@ TYPED_TEST(GaussSeidelKernel, UsesCurrentXAsInitialGuess)
 }
 
 
-TYPED_TEST(GaussSeidelKernel, MultipleRHS)
+TYPED_TEST(FwdGaussSeidel, MultipleRHS)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -141,7 +141,7 @@ TYPED_TEST(GaussSeidelKernel, MultipleRHS)
 }
 
 
-TYPED_TEST(GaussSeidelKernel, FirstIterResetsStopStatus)
+TYPED_TEST(FwdGaussSeidel, FirstIterResetsStopStatus)
 {
     using Vec = typename TestFixture::Vec;
 
@@ -166,7 +166,7 @@ TYPED_TEST(GaussSeidelKernel, FirstIterResetsStopStatus)
 }
 
 
-TYPED_TEST(GaussSeidelKernel, SubsequentIterDoesNotResetStopStatus)
+TYPED_TEST(FwdGaussSeidel, SubsequentIterDoesNotResetStopStatus)
 {
     using Vec = typename TestFixture::Vec;
 
@@ -189,7 +189,7 @@ TYPED_TEST(GaussSeidelKernel, SubsequentIterDoesNotResetStopStatus)
 }
 
 
-TYPED_TEST(GaussSeidelKernel, DiagonalOnlyMatrixSolvesExactlyInOneStep)
+TYPED_TEST(FwdGaussSeidel, DiagonalOnlyMatrixSolvesExactlyInOneStep)
 {
     using Mtx = typename TestFixture::Mtx;
     using Vec = typename TestFixture::Vec;
@@ -211,7 +211,7 @@ TYPED_TEST(GaussSeidelKernel, DiagonalOnlyMatrixSolvesExactlyInOneStep)
 }
 
 
-TYPED_TEST(GaussSeidelKernel, EmptyColorPtrsDoesNothing)
+TYPED_TEST(FwdGaussSeidel, EmptyColorPtrsDoesNothing)
 {
     using Vec = typename TestFixture::Vec;
     using index_type = typename TestFixture::index_type;
@@ -242,7 +242,7 @@ TYPED_TEST(GaussSeidelKernel, EmptyColorPtrsDoesNothing)
 // initial guesses the expected values differ.
 
 template <typename ValueIndexType>
-class GaussSeidelKernelAMP : public ::testing::Test {
+class FwdGaussSeidelAMP : public ::testing::Test {
 protected:
     using value_type =
         typename std::tuple_element<0, decltype(ValueIndexType())>::type;
@@ -252,9 +252,9 @@ protected:
     using EllMtx = gko::matrix::Ell<value_type, index_type>;
     using Vec = gko::matrix::Dense<value_type>;
 
-    GaussSeidelKernelAMP()
+    FwdGaussSeidelAMP()
         : exec(gko::ReferenceExecutor::create()),
-          // Same 4x4 matrix used by GaussSeidelKernel, 2 colors:
+          // Same 4x4 matrix used by FwdGaussSeidel, 2 colors:
           //   color 0: rows 0, 1
           //   color 1: rows 2, 3
           //
@@ -285,7 +285,7 @@ protected:
     std::vector<index_type> color_ptrs;
 };
 
-TYPED_TEST_SUITE(GaussSeidelKernelAMP, gko::test::ValueIndexTypesBase,
+TYPED_TEST_SUITE(FwdGaussSeidelAMP, gko::test::ValueIndexTypesBase,
                  PairTypenameNameGenerator);
 
 
@@ -293,7 +293,7 @@ TYPED_TEST_SUITE(GaussSeidelKernelAMP, gko::test::ValueIndexTypesBase,
 // collapses to x = b/diag, matching the ELL result exactly.
 //   Color 0: x[0] = 2/2 = 1,  x[1] = 3/3 = 1
 //   Color 1: x[2] = (3-1*1)/4 = 0.5,  x[3] = (2-1*1)/5 = 0.2
-TYPED_TEST(GaussSeidelKernelAMP, SingleIterationFromZero)
+TYPED_TEST(FwdGaussSeidelAMP, SingleIterationFromZero)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -319,7 +319,7 @@ TYPED_TEST(GaussSeidelKernelAMP, SingleIterationFromZero)
 //   Color 1 (uses updated x[0], x[1]):
 //     x[2] = (3 - 1*3/4)/4  = 9/16
 //     x[3] = (2 - 1*(7/6))/5 = 1/6
-TYPED_TEST(GaussSeidelKernelAMP, UpdatesCurrentX)
+TYPED_TEST(FwdGaussSeidelAMP, UpdatesCurrentX)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -341,7 +341,7 @@ TYPED_TEST(GaussSeidelKernelAMP, UpdatesCurrentX)
 
 // Two RHS columns: second column is 2x the first; starting from x=0
 // so AMP += agrees with ELL.
-TYPED_TEST(GaussSeidelKernelAMP, MultipleRHS)
+TYPED_TEST(FwdGaussSeidelAMP, MultipleRHS)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -364,7 +364,7 @@ TYPED_TEST(GaussSeidelKernelAMP, MultipleRHS)
 }
 
 
-TYPED_TEST(GaussSeidelKernelAMP, FirstIterResetsStopStatus)
+TYPED_TEST(FwdGaussSeidelAMP, FirstIterResetsStopStatus)
 {
     using Vec = typename TestFixture::Vec;
 
@@ -388,7 +388,7 @@ TYPED_TEST(GaussSeidelKernelAMP, FirstIterResetsStopStatus)
 }
 
 
-TYPED_TEST(GaussSeidelKernelAMP, SubsequentIterDoesNotResetStopStatus)
+TYPED_TEST(FwdGaussSeidelAMP, SubsequentIterDoesNotResetStopStatus)
 {
     using Vec = typename TestFixture::Vec;
 
@@ -412,7 +412,7 @@ TYPED_TEST(GaussSeidelKernelAMP, SubsequentIterDoesNotResetStopStatus)
 
 // Diagonal matrix, single color, x starts at zero:
 // x += b/diag collapses to x = b/diag, giving the exact solution.
-TYPED_TEST(GaussSeidelKernelAMP, DiagonalOnlyMatrixSolvesExactlyInOneStep)
+TYPED_TEST(FwdGaussSeidelAMP, DiagonalOnlyMatrixSolvesExactlyInOneStep)
 {
     using AMPMtx = typename TestFixture::AMPMtx;
     using EllMtx = typename TestFixture::EllMtx;
@@ -439,7 +439,7 @@ TYPED_TEST(GaussSeidelKernelAMP, DiagonalOnlyMatrixSolvesExactlyInOneStep)
 }
 
 
-TYPED_TEST(GaussSeidelKernelAMP, EmptyColorPtrsDoesNothing)
+TYPED_TEST(FwdGaussSeidelAMP, EmptyColorPtrsDoesNothing)
 {
     using Vec = typename TestFixture::Vec;
     using index_type = typename TestFixture::index_type;
@@ -487,7 +487,7 @@ TYPED_TEST(GaussSeidelKernelAMP, EmptyColorPtrsDoesNothing)
 // relative tolerance.
 
 template <typename ValueIndexType>
-class GaussSeidelKernelAMPAccuracy : public ::testing::Test {
+class FwdGaussSeidelAMPAccuracy : public ::testing::Test {
 protected:
     using value_type =
         typename std::tuple_element<0, decltype(ValueIndexType())>::type;
@@ -498,7 +498,7 @@ protected:
     using EllMtx = gko::matrix::Ell<value_type, index_type>;
     using Vec = gko::matrix::Dense<value_type>;
 
-    GaussSeidelKernelAMPAccuracy()
+    FwdGaussSeidelAMPAccuracy()
         : exec(gko::ReferenceExecutor::create()),
           // tighter tolerance for double: matches AMPDouble fixture in
           // amp_kernels.cpp; relaxed for float: matches AMPFloat
@@ -526,7 +526,7 @@ protected:
     std::vector<index_type> color_ptrs;
 };
 
-TYPED_TEST_SUITE(GaussSeidelKernelAMPAccuracy, gko::test::ValueIndexTypesBase,
+TYPED_TEST_SUITE(FwdGaussSeidelAMPAccuracy, gko::test::ValueIndexTypesBase,
                  PairTypenameNameGenerator);
 
 
@@ -538,7 +538,7 @@ TYPED_TEST_SUITE(GaussSeidelKernelAMPAccuracy, gko::test::ValueIndexTypesBase,
 // The O(3e-4) off-diagonal terms are stored at lower precision in AMP,
 // so x_amp[2] and x_amp[3] acquire a small error.  The test asserts the
 // component-wise relative error is ≤ amp_tol.
-TYPED_TEST(GaussSeidelKernelAMPAccuracy, SingleRHSMatchesELLWithinTol)
+TYPED_TEST(FwdGaussSeidelAMPAccuracy, SingleRHSMatchesELLWithinTol)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -577,7 +577,7 @@ TYPED_TEST(GaussSeidelKernelAMPAccuracy, SingleRHSMatchesELLWithinTol)
 // The lower-precision AMP approximation of the O(3e-4) off-diagonals
 // introduces small errors in both columns; the test checks each (row,col)
 // component-wise relative error is ≤ amp_tol.
-TYPED_TEST(GaussSeidelKernelAMPAccuracy, MultipleRHSMatchesELLWithinTol)
+TYPED_TEST(FwdGaussSeidelAMPAccuracy, MultipleRHSMatchesELLWithinTol)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -629,7 +629,7 @@ TYPED_TEST(GaussSeidelKernelAMPAccuracy, MultipleRHSMatchesELLWithinTol)
 
 
 template <typename ValueIndexType>
-class GaussSeidelKernelCSR : public ::testing::Test {
+class FwdGaussSeidelCSR : public ::testing::Test {
 protected:
     using value_type =
         typename std::tuple_element<0, decltype(ValueIndexType())>::type;
@@ -638,7 +638,7 @@ protected:
     using Mtx = gko::matrix::Csr<value_type, index_type>;
     using Vec = gko::matrix::Dense<value_type>;
 
-    GaussSeidelKernelCSR()
+    FwdGaussSeidelCSR()
         : exec(gko::ReferenceExecutor::create()),
           // Same 4x4 matrix as ELL tests, 2 colors:
           //   color 0: rows 0, 1
@@ -664,11 +664,11 @@ protected:
     std::vector<index_type> color_ptrs;
 };
 
-TYPED_TEST_SUITE(GaussSeidelKernelCSR, gko::test::ValueIndexTypesBase,
+TYPED_TEST_SUITE(FwdGaussSeidelCSR, gko::test::ValueIndexTypesBase,
                  PairTypenameNameGenerator);
 
 
-TYPED_TEST(GaussSeidelKernelCSR, SingleIterationFromZero)
+TYPED_TEST(FwdGaussSeidelCSR, SingleIterationFromZero)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -687,7 +687,7 @@ TYPED_TEST(GaussSeidelKernelCSR, SingleIterationFromZero)
 }
 
 
-TYPED_TEST(GaussSeidelKernelCSR, UsesCurrentXAsInitialGuess)
+TYPED_TEST(FwdGaussSeidelCSR, UsesCurrentXAsInitialGuess)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -707,7 +707,7 @@ TYPED_TEST(GaussSeidelKernelCSR, UsesCurrentXAsInitialGuess)
 }
 
 
-TYPED_TEST(GaussSeidelKernelCSR, MultipleRHS)
+TYPED_TEST(FwdGaussSeidelCSR, MultipleRHS)
 {
     using Vec = typename TestFixture::Vec;
     using value_type = typename TestFixture::value_type;
@@ -730,7 +730,7 @@ TYPED_TEST(GaussSeidelKernelCSR, MultipleRHS)
 }
 
 
-TYPED_TEST(GaussSeidelKernelCSR, FirstIterResetsStopStatus)
+TYPED_TEST(FwdGaussSeidelCSR, FirstIterResetsStopStatus)
 {
     using Vec = typename TestFixture::Vec;
 
@@ -754,7 +754,7 @@ TYPED_TEST(GaussSeidelKernelCSR, FirstIterResetsStopStatus)
 }
 
 
-TYPED_TEST(GaussSeidelKernelCSR, SubsequentIterDoesNotResetStopStatus)
+TYPED_TEST(FwdGaussSeidelCSR, SubsequentIterDoesNotResetStopStatus)
 {
     using Vec = typename TestFixture::Vec;
 
@@ -776,7 +776,7 @@ TYPED_TEST(GaussSeidelKernelCSR, SubsequentIterDoesNotResetStopStatus)
 }
 
 
-TYPED_TEST(GaussSeidelKernelCSR, DiagonalOnlyMatrixSolvesExactlyInOneStep)
+TYPED_TEST(FwdGaussSeidelCSR, DiagonalOnlyMatrixSolvesExactlyInOneStep)
 {
     using Mtx = typename TestFixture::Mtx;
     using Vec = typename TestFixture::Vec;
@@ -797,7 +797,7 @@ TYPED_TEST(GaussSeidelKernelCSR, DiagonalOnlyMatrixSolvesExactlyInOneStep)
 }
 
 
-TYPED_TEST(GaussSeidelKernelCSR, EmptyColorPtrsDoesNothing)
+TYPED_TEST(FwdGaussSeidelCSR, EmptyColorPtrsDoesNothing)
 {
     using Vec = typename TestFixture::Vec;
     using index_type = typename TestFixture::index_type;
@@ -814,7 +814,7 @@ TYPED_TEST(GaussSeidelKernelCSR, EmptyColorPtrsDoesNothing)
 }
 
 
-TYPED_TEST(GaussSeidelKernelCSR, MatchesELLKernelExactly)
+TYPED_TEST(FwdGaussSeidelCSR, MatchesELLKernelExactly)
 {
     using Vec = typename TestFixture::Vec;
     using Ell = gko::matrix::Ell<typename TestFixture::value_type,
@@ -843,6 +843,145 @@ TYPED_TEST(GaussSeidelKernelCSR, MatchesELLKernelExactly)
         &stop);
 
     GKO_ASSERT_MTX_NEAR(x_csr, x_ell, r<value_type>::value);
+}
+
+
+// ============================================================
+// AMP-CSR Gauss-Seidel kernel tests (AMP with CSR base format)
+// ============================================================
+
+template <typename ValueIndexType>
+class FwdGaussSeidelAMPCSR : public ::testing::Test {
+protected:
+    using value_type =
+        typename std::tuple_element<0, decltype(ValueIndexType())>::type;
+    using index_type =
+        typename std::tuple_element<1, decltype(ValueIndexType())>::type;
+    using real_type = gko::remove_complex<value_type>;
+    using AMPMtx = gko::matrix::AMP<value_type, index_type>;
+    using CsrMtx = gko::matrix::Csr<value_type, index_type>;
+    using Vec = gko::matrix::Dense<value_type>;
+
+    FwdGaussSeidelAMPCSR()
+        : exec(gko::ReferenceExecutor::create()),
+          amp_tol(std::is_same<real_type, double>::value ? 1e-10f : 1e-6f),
+          color_ptrs{0, 2, 4}
+    {
+        auto csr = gko::initialize<CsrMtx>(
+            // clang-format off
+            {{4.0,  0.0,  0.8,  3e-4},
+             {0.0,  5.0,  3e-4, 0.7 },
+             {0.8,  3e-4, 6.0,  0.0 },
+             {3e-4, 0.7,  0.0,  3.0 }},
+            // clang-format on
+            exec);
+        mtx = AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(
+            gko::share(std::move(csr)));
+    }
+
+    std::shared_ptr<const gko::ReferenceExecutor> exec;
+    const float amp_tol;
+    std::unique_ptr<AMPMtx> mtx;
+    std::vector<index_type> color_ptrs;
+};
+
+TYPED_TEST_SUITE(FwdGaussSeidelAMPCSR, gko::test::ValueIndexTypesBase,
+                 PairTypenameNameGenerator);
+
+
+// b chosen so that one GS sweep from x=0 gives x = {1, 1, 1, 1}:
+//   x[0] = 4.0/4 = 1
+//   x[1] = 5.0/5 = 1
+//   x[2] = (6.8003 - 0.8*1 - 3e-4*1) / 6 = 1
+//   x[3] = (3.7003 - 3e-4*1 - 0.7*1 ) / 3 = 1
+// The O(3e-4) off-diagonal terms are stored at lower precision in AMP,
+// so x_amp_csr acquires a small error.  The test asserts the
+// component-wise relative error is <= amp_tol.
+TYPED_TEST(FwdGaussSeidelAMPCSR, SingleRHSMatchesExactWithinTol)
+{
+    using Vec = typename TestFixture::Vec;
+    using value_type = typename TestFixture::value_type;
+    using real_type = typename TestFixture::real_type;
+
+    auto b = gko::initialize<Vec>({4.0, 5.0, 6.8003, 3.7003}, this->exec);
+    auto x = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_amp_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x.get(), true,
+        &stop);
+
+    const auto cmp_tol = static_cast<real_type>(this->amp_tol);
+    const auto* x_vals = x->get_const_values();
+    // Exact solution from one GS sweep starting at x=0
+    const value_type exact[] = {1.0, 1.0, 1.0, 1.0};
+    for (gko::size_type i = 0; i < 4; ++i) {
+        const auto abs_ref = std::abs(exact[i]);
+        const auto rel_err = std::abs(x_vals[i] - exact[i]) / abs_ref;
+        EXPECT_LE(rel_err, cmp_tol)
+            << "Row " << i << ": got=" << x_vals[i] << ", exact=" << exact[i];
+    }
+}
+
+
+// Two RHS columns: col 1 = 2 x col 0.
+// Exact one-sweep result: {{1,2},{1,2},{1,2},{1,2}}.
+TYPED_TEST(FwdGaussSeidelAMPCSR, MultipleRHSMatchesExactWithinTol)
+{
+    using Vec = typename TestFixture::Vec;
+    using value_type = typename TestFixture::value_type;
+    using real_type = typename TestFixture::real_type;
+    using T = value_type;
+
+    auto b = gko::initialize<Vec>(
+        // clang-format off
+        {I<T>{4.0,  8.0 },
+         I<T>{5.0, 10.0 },
+         I<T>{6.8003, 13.6006},
+         I<T>{3.7003,  7.4006}},
+        // clang-format on
+        this->exec);
+    auto x = gko::initialize<Vec>(
+        {I<T>{0.0, 0.0}, I<T>{0.0, 0.0}, I<T>{0.0, 0.0}, I<T>{0.0, 0.0}},
+        this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 2);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_amp_csr(
+        this->exec, this->color_ptrs, this->mtx.get(), b.get(), x.get(), true,
+        &stop);
+
+    const auto cmp_tol = static_cast<real_type>(this->amp_tol);
+    const auto* x_vals = x->get_const_values();
+    const auto stride = x->get_stride();
+    const value_type exact[][2] = {
+        {1.0, 2.0}, {1.0, 2.0}, {1.0, 2.0}, {1.0, 2.0}};
+    for (gko::size_type row = 0; row < 4; ++row) {
+        for (gko::size_type col = 0; col < 2; ++col) {
+            const auto got = x_vals[row * stride + col];
+            const auto exp = exact[row][col];
+            const auto abs_ref = std::abs(exp);
+            const auto rel_err = std::abs(got - exp) / abs_ref;
+            EXPECT_LE(rel_err, cmp_tol) << "Row " << row << " col " << col
+                                        << ": got=" << got << ", exact=" << exp;
+        }
+    }
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMPCSR, EmptyColorPtrsDoesNothing)
+{
+    using Vec = typename TestFixture::Vec;
+    using index_type = typename TestFixture::index_type;
+
+    auto b = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0}, this->exec);
+    auto x = gko::initialize<Vec>({5.0, 6.0, 7.0, 8.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+    std::vector<index_type> empty_ptrs{};
+
+    gko::kernels::reference::gssdl::multicolor_fgs_amp_csr(
+        this->exec, empty_ptrs, this->mtx.get(), b.get(), x.get(), true, &stop);
+
+    GKO_ASSERT_MTX_NEAR(x, l({5.0, 6.0, 7.0, 8.0}), 0.0);
 }
 
 

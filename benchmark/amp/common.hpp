@@ -128,7 +128,7 @@ struct OffdiagFn {
         : cfg(config),
           rng(seed),
           mantissa_dist(0.1, 1.0),
-          exp_dist(0.0, 2.0),
+          exp_dist(0.0, 1.0),
           exp_bias{cfg.offdiag_type == mat_offdiag_t::random_general ? 0.2
                                                                      : 0.0}
     {}
