@@ -45,6 +45,7 @@ void multicolor_fgs_ell(std::shared_ptr<const ReferenceExecutor> exec,
     }
 
     const auto num_colors = color_ptrs.size() - 1;
+    const auto num_rows = a->get_size()[0];
     const auto num_cols_rhs = b->get_size()[1];
     const auto nnz_per_row = a->get_num_stored_elements_per_row();
     const auto stride = a->get_stride();
@@ -71,7 +72,7 @@ void multicolor_fgs_ell(std::shared_ptr<const ReferenceExecutor> exec,
 
                 for (size_type k = 0; k < nnz_per_row; ++k) {
                     const auto col = col_idxs[k * stride + row];
-                    if (col == invalid) {
+                    if (col == invalid || col >= num_rows) {
                         continue;
                     }
                     const auto val = values[k * stride + row];
@@ -119,6 +120,7 @@ void multicolor_fgs_amp(std::shared_ptr<const ReferenceExecutor> exec,
     }
 
     const auto num_colors = color_ptrs.size() - 1;
+    const auto num_rows = a->get_size()[0];
     const auto num_cols_rhs = b->get_size()[1];
     auto* const x_vals = x->get_values();
     const auto* const b_vals = b->get_const_values();
@@ -156,7 +158,7 @@ void multicolor_fgs_amp(std::shared_ptr<const ReferenceExecutor> exec,
                     const auto* const values = ellk->get_const_values();
                     for (size_type k = 0; k < nnz_per_row; ++k) {
                         const auto col = col_idxs[k * stride + row];
-                        if (col == invalid) {
+                        if (col == invalid || col >= num_rows) {
                             continue;
                         }
                         const auto val = values[k * stride + row];

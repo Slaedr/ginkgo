@@ -89,7 +89,8 @@ void spmv_ell(std::shared_ptr<const OmpExecutor> exec,
                 if (max_nnz > 0) {
                     highest_type sum = 0;
                     for (int j = 0; j < max_nnz; j++) {
-                        if (acols[i + j * stride] >= 0) {
+                        const auto col = acols[i + j * stride];
+                        if (col >= 0 && col < nrows) {
                             sum += static_cast<highest_type>(
                                 static_cast<mult_type>(avals[i + j * stride]) *
                                 static_cast<mult_type>(
@@ -252,7 +253,7 @@ void advanced_spmv_ell(std::shared_ptr<const OmpExecutor> exec,
                     highest_type sum = 0;
                     for (int j = 0; j < max_nnz; j++) {
                         const auto col = acols[i + j * stride];
-                        if (col >= 0) {
+                        if (col >= 0 && col < nrows) {
                             sum += static_cast<highest_type>(
                                 static_cast<mult_type>(avals[i + j * stride]) *
                                 static_cast<mult_type>(

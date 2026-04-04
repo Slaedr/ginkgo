@@ -58,14 +58,15 @@ void spmv_small_rhs(std::shared_ptr<const OmpExecutor> exec,
         std::array<acc::size_type, 1>{
             {static_cast<acc::size_type>(b->get_stride())}});
 
+    auto num_rows = a->get_size()[0];
 #pragma omp parallel for
-    for (size_type row = 0; row < a->get_size()[0]; row++) {
+    for (size_type row = 0; row < num_rows; row++) {
         std::array<arithmetic_type, num_rhs> partial_sum;
         partial_sum.fill(zero<arithmetic_type>());
         for (size_type i = 0; i < num_stored_elements_per_row; i++) {
             arithmetic_type val = a_vals(row + i * stride);
             auto col = a->col_at(row, i);
-            if (col != invalid_index<IndexType>()) {
+            if (col != invalid_index<IndexType>() && col < num_rows) {
 #pragma unroll
                 for (size_type j = 0; j < num_rhs; j++) {
                     partial_sum[j] += val * b_vals(col, j);
@@ -112,9 +113,10 @@ void spmv_blocked(std::shared_ptr<const OmpExecutor> exec,
 
     const auto num_rhs = b->get_size()[1];
     const auto rounded_rhs = num_rhs / block_size * block_size;
-
+ 
+    auto num_rows = a->get_size()[0];
 #pragma omp parallel for
-    for (size_type row = 0; row < a->get_size()[0]; row++) {
+    for (size_type row = 0; row < num_rows; row++) {
         std::array<arithmetic_type, block_size> partial_sum;
         for (size_type rhs_base = 0; rhs_base < rounded_rhs;
              rhs_base += block_size) {
@@ -122,7 +124,7 @@ void spmv_blocked(std::shared_ptr<const OmpExecutor> exec,
             for (size_type i = 0; i < num_stored_elements_per_row; i++) {
                 arithmetic_type val = a_vals(row + i * stride);
                 auto col = a->col_at(row, i);
-                if (col != invalid_index<IndexType>()) {
+                if (col != invalid_index<IndexType>() && col < num_rows) {
 #pragma unroll
                     for (size_type j = 0; j < block_size; j++) {
                         partial_sum[j] += val * b_vals(col, j + rhs_base);
@@ -139,7 +141,7 @@ void spmv_blocked(std::shared_ptr<const OmpExecutor> exec,
         for (size_type i = 0; i < num_stored_elements_per_row; i++) {
             arithmetic_type val = a_vals(row + i * stride);
             auto col = a->col_at(row, i);
-            if (col != invalid_index<IndexType>()) {
+            if (col != invalid_index<IndexType>() && col < num_rows) {
                 for (size_type j = rounded_rhs; j < num_rhs; j++) {
                     partial_sum[j - rounded_rhs] += val * b_vals(col, j);
                 }

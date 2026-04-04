@@ -64,7 +64,8 @@ void spmv_ell(std::shared_ptr<const ReferenceExecutor> exec,
         for (int irhs = 0; irhs < nrhs; irhs++) {
             highest_type0 sum = 0;
             for (int j = 0; j < max_nnz0; j++) {
-                if (acols[i + j * stride0] >= 0) {
+                auto col = acols[i + j * stride0];
+                if (col >= 0 && col < nrows0) {
                     sum += static_cast<highest_type0>(
                         static_cast<mult_type0>(avals[i + j * stride0]) *
                         static_cast<mult_type0>(
@@ -95,7 +96,8 @@ void spmv_ell(std::shared_ptr<const ReferenceExecutor> exec,
                 for (int irhs = 0; irhs < nrhs; irhs++) {
                     highest_type sum = 0;
                     for (int j = 0; j < max_nnz; j++) {
-                        if (acols[i + j * stride] >= 0) {
+                        const auto col = acols[i + j * stride];
+                        if (col >= 0 && col < nrows0) {
                             sum += static_cast<highest_type>(
                                 static_cast<mult_type>(avals[i + j * stride]) *
                                 static_cast<mult_type>(

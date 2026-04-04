@@ -35,7 +35,7 @@ constexpr int default_block_size = 1024;
 template <typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void mc_fgs_ell(
-    const IndexType max_nnz_rows, const size_type stride,
+    const IndexType nrows, const IndexType max_nnz_rows, const size_type stride,
     const IndexType* const __restrict__ col_idxs,
     const MatrixValueType* const __restrict__ values, const IndexType begin_row,
     const IndexType end_row, const size_type b_stride,
@@ -61,7 +61,7 @@ __global__ __launch_bounds__(default_block_size) void mc_fgs_ell(
 
     for (IndexType k = 0; k < max_nnz_rows; ++k) {
         const auto col = col_idxs[k * stride + row];
-        if (col == invalid) {
+        if (col == invalid || col >= nrows) {
             continue;
         }
         const auto val = values[k * stride + row];
@@ -98,6 +98,7 @@ void multicolor_fgs_ell(std::shared_ptr<const DefaultExecutor> exec,
     using d_i_val_type = typename gkerd::device_type<InputValueType>;
     using d_o_val_type = typename gkerd::device_type<OutputValueType>;
     const auto num_colors = static_cast<int>(color_ptrs.size() - 1);
+    const auto total_nrows = a->get_size()[0];
     const auto num_rhs = b->get_size()[1];
     const auto nnz_per_row = a->get_num_stored_elements_per_row();
     const auto stride = a->get_stride();
@@ -117,7 +118,7 @@ void multicolor_fgs_ell(std::shared_ptr<const DefaultExecutor> exec,
             static_cast<uint32>(num_rhs), 1u};
         mc_fgs_ell<d_i_val_type, d_m_val_type, d_o_val_type, IndexType>
             <<<nblocks, default_block_size, 0, exec->get_stream()>>>(
-                nnz_per_row, stride, col_idxs, values, row_begin, row_end,
+                total_nrows, nnz_per_row, stride, col_idxs, values, row_begin, row_end,
                 b_stride, b_vals, x_stride, x_vals, stop_status->get_data(),
                 first_iter);
     }
@@ -141,7 +142,8 @@ __global__ __launch_bounds__(default_block_size) void mc_fgs_amp(
     const amp::precision_array<size_type, MValueType> bin_strides,
     const amp::precision_array<uint32, MValueType> bin_max_nnz_rows,
     const amp::precision_array<const IndexType*, MValueType> bin_col_idxs,
-    const ScalarDCPtrTuple<MValueType> bin_values, const IndexType begin_row,
+    const ScalarDCPtrTuple<MValueType> bin_values, 
+    const IndexType nrows, const IndexType begin_row,
     const IndexType end_row, const size_type b_stride,
     const IValueType* const __restrict__ b, const size_type x_stride,
     OValueType* const __restrict__ x,
@@ -175,7 +177,7 @@ __global__ __launch_bounds__(default_block_size) void mc_fgs_amp(
         const auto max_nnz = bin_max_nnz_rows[k];
         for (uint32 j = 0; j < max_nnz; ++j) {
             const auto col = acols[j * stride + row];
-            if (col == invalid) {
+            if (col == invalid || col >= nrows) {
                 continue;
             }
             const auto val = avals[j * stride + row];
@@ -213,6 +215,7 @@ void multicolor_fgs_amp(std::shared_ptr<const DefaultExecutor> exec,
     using d_o_val_type = typename gkerd::device_type<OutputValueType>;
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     const auto num_colors = static_cast<int>(color_ptrs.size() - 1);
+    const auto total_nrows = a->get_size()[0];
     const auto num_rhs = b->get_size()[1];
     const auto x_vals = as_device_type(x->get_values());
     const auto b_vals = as_device_type(b->get_const_values());
@@ -247,7 +250,7 @@ void multicolor_fgs_amp(std::shared_ptr<const DefaultExecutor> exec,
                            static_cast<uint32>(num_rhs), 1u};
         mc_fgs_amp<d_i_val_type, d_m_val_type, d_o_val_type, IndexType>
             <<<nblocks, amp_block_size, 0, exec->get_stream()>>>(
-                bin_strides, bin_max_nnzs, acol_idxs, avalues, row_begin,
+                bin_strides, bin_max_nnzs, acol_idxs, avalues, total_nrows, row_begin,
                 row_end, b_stride, b_vals, x_stride, x_vals,
                 stop_status->get_data(), first_iter);
     }

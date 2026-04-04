@@ -38,6 +38,7 @@ void spmv(std::shared_ptr<const ReferenceExecutor> exec,
     using b_accessor =
         gko::acc::reduced_row_major<2, arithmetic_type, const InputValueType>;
 
+    const auto num_rows = a->get_size()[0];
     const auto num_stored_elements_per_row =
         a->get_num_stored_elements_per_row();
     const auto stride = a->get_stride();
@@ -54,12 +55,12 @@ void spmv(std::shared_ptr<const ReferenceExecutor> exec,
             {static_cast<acc::size_type>(b->get_stride())}});
 
     for (size_type j = 0; j < c->get_size()[1]; j++) {
-        for (size_type row = 0; row < a->get_size()[0]; row++) {
+        for (size_type row = 0; row < num_rows; row++) {
             arithmetic_type result{};
             for (size_type i = 0; i < num_stored_elements_per_row; i++) {
                 arithmetic_type val = a_vals(row + i * stride);
                 auto col = a->col_at(row, i);
-                if (col != invalid_index<IndexType>()) {
+                if (col != invalid_index<IndexType>() && col < num_rows) {
                     result += val * b_vals(col, j);
                 }
             }
@@ -88,6 +89,7 @@ void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
     using b_accessor =
         gko::acc::reduced_row_major<2, arithmetic_type, const InputValueType>;
 
+    const auto num_rows = a->get_size()[0];
     const auto num_stored_elements_per_row =
         a->get_num_stored_elements_per_row();
     const auto stride = a->get_stride();
@@ -106,7 +108,7 @@ void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
     const auto beta_val = arithmetic_type{beta->at(0, 0)};
 
     for (size_type j = 0; j < c->get_size()[1]; j++) {
-        for (size_type row = 0; row < a->get_size()[0]; row++) {
+        for (size_type row = 0; row < num_rows; row++) {
             arithmetic_type result =
                 is_zero(beta_val)
                     ? zero<arithmetic_type>()
@@ -114,7 +116,7 @@ void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
             for (size_type i = 0; i < num_stored_elements_per_row; i++) {
                 arithmetic_type val = a_vals(row + i * stride);
                 auto col = a->col_at(row, i);
-                if (col != invalid_index<IndexType>()) {
+                if (col != invalid_index<IndexType>() && col < num_rows) {
                     result += alpha_val * val * b_vals(col, j);
                 }
             }

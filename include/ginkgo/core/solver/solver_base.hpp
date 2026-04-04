@@ -645,7 +645,7 @@ protected:
         auto exec = self()->get_executor();
         if (new_system_matrix) {
             GKO_ASSERT_EQUAL_DIMENSIONS(self(), new_system_matrix);
-            GKO_ASSERT_IS_SQUARE_MATRIX(new_system_matrix);
+            //GKO_ASSERT_IS_SQUARE_MATRIX(new_system_matrix);
             if (new_system_matrix->get_executor() != exec) {
                 new_system_matrix = gko::clone(exec, new_system_matrix);
             }

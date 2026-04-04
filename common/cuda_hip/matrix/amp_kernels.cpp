@@ -78,7 +78,8 @@ __global__ __launch_bounds__(default_block_size) void ell_amp_basic_spmv(
         const auto max_nnz = bin_max_nnz_row[k];
         if (max_nnz > 0) {
             for (int j = 0; j < max_nnz; j++) {
-                if (acols[irow + j * stride] >= 0) {
+                const auto col = acols[irow + j * stride];
+                if (col >= 0 && col < nrows) {
                     sum += static_cast<highest_type>(
                         static_cast<mult_type>(avals[irow + j * stride]) *
                         static_cast<mult_type>(
@@ -126,7 +127,8 @@ __global__ __launch_bounds__(default_block_size) void ell_amp_adv_spmv(
         const auto max_nnz = bin_max_nnz_row[k];
         if (max_nnz > 0) {
             for (int j = 0; j < max_nnz; j++) {
-                if (acols[irow + j * stride] >= 0) {
+                const auto col = acols[irow + j * stride];
+                if (col >= 0 && col < nrows) {
                     sum += static_cast<highest_type>(
                         static_cast<mult_type>(avals[irow + j * stride]) *
                         static_cast<mult_type>(
