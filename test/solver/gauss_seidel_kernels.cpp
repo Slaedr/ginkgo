@@ -129,7 +129,7 @@ std::unique_ptr<gko::matrix::Dense<ValueType>> generate_random_dense(
 }
 
 
-class GaussSeidelKernelsEll : public CommonTestFixture {
+class FwdGaussSeidelEll : public CommonTestFixture {
 protected:
     using Mtx = gko::matrix::Ell<value_type, index_type>;
     using Vec = gko::matrix::Dense<value_type>;
@@ -139,7 +139,7 @@ protected:
     static constexpr index_type n_rows = 35;
     static constexpr index_type n_colors = 4;
 
-    GaussSeidelKernelsEll()
+    FwdGaussSeidelEll()
     {
         auto [gen_mtx, gen_color_ptrs] =
             generate_colored_matrix<value_type, index_type>(ref, n_rows,
@@ -155,7 +155,7 @@ protected:
 };
 
 
-TEST_F(GaussSeidelKernelsEll, SingleIterationFromZeroIsEquivalentToRef)
+TEST_F(FwdGaussSeidelEll, SingleIterationFromZeroIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 11);
     auto x =
@@ -175,7 +175,7 @@ TEST_F(GaussSeidelKernelsEll, SingleIterationFromZeroIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsEll, UsesCurrentXAsInitialGuessIsEquivalentToRef)
+TEST_F(FwdGaussSeidelEll, UsesCurrentXAsInitialGuessIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 22);
     // Non-zero starting guess
@@ -194,7 +194,7 @@ TEST_F(GaussSeidelKernelsEll, UsesCurrentXAsInitialGuessIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsEll, MultipleRHSIsEquivalentToRef)
+TEST_F(FwdGaussSeidelEll, MultipleRHSIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 2, 33);
     auto x =
@@ -214,7 +214,7 @@ TEST_F(GaussSeidelKernelsEll, MultipleRHSIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsEll, FirstIterResetsStopStatusIsEquivalentToRef)
+TEST_F(FwdGaussSeidelEll, FirstIterResetsStopStatusIsEquivalentToRef)
 {
     const gko::uint32 n_cols = 2;
     auto b = generate_random_dense<value_type>(ref, n_rows, n_cols, 44);
@@ -246,8 +246,7 @@ TEST_F(GaussSeidelKernelsEll, FirstIterResetsStopStatusIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsEll,
-       SubsequentIterDoesNotResetStopStatusIsEquivalentToRef)
+TEST_F(FwdGaussSeidelEll, SubsequentIterDoesNotResetStopStatusIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 55);
     auto x =
@@ -275,7 +274,7 @@ TEST_F(GaussSeidelKernelsEll,
 }
 
 
-TEST_F(GaussSeidelKernelsEll,
+TEST_F(FwdGaussSeidelEll,
        DiagonalOnlyMatrixSolvesExactlyInOneStepIsEquivalentToRef)
 {
     auto diag = gko::initialize<Mtx>(
@@ -298,7 +297,7 @@ TEST_F(GaussSeidelKernelsEll,
 }
 
 
-TEST_F(GaussSeidelKernelsEll, FiveIterationSolverIsEquivalentToRef)
+TEST_F(FwdGaussSeidelEll, FiveIterationSolverIsEquivalentToRef)
 {
     using Solver = gko::solver::FwdGaussSeidel<value_type, index_type>;
 
@@ -334,7 +333,7 @@ TEST_F(GaussSeidelKernelsEll, FiveIterationSolverIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsEll, EmptyColorPtrsDoesNothingIsEquivalentToRef)
+TEST_F(FwdGaussSeidelEll, EmptyColorPtrsDoesNothingIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 66);
     // Non-zero x to verify it is left unchanged
@@ -353,6 +352,146 @@ TEST_F(GaussSeidelKernelsEll, EmptyColorPtrsDoesNothingIsEquivalentToRef)
     GKO_ASSERT_MTX_NEAR(d_x, x, 0.0);
 }
 
+
+class FwdGaussSeidelCsr : public CommonTestFixture {
+protected:
+    using CsrMtx = gko::matrix::Csr<value_type, index_type>;
+    using EllMtx = gko::matrix::Ell<value_type, index_type>;
+    using Vec = gko::matrix::Dense<value_type>;
+
+    static constexpr index_type n_rows = 35;
+    static constexpr index_type n_colors = 4;
+
+    FwdGaussSeidelCsr()
+    {
+        auto [gen_ell, gen_color_ptrs] =
+            generate_colored_matrix<value_type, index_type>(ref, n_rows,
+                                                            n_colors);
+        color_ptrs = std::move(gen_color_ptrs);
+        mtx = CsrMtx::create(ref);
+        gen_ell->convert_to(mtx.get());
+        d_mtx = gko::clone(exec, mtx);
+    }
+
+    std::unique_ptr<CsrMtx> mtx;
+    std::unique_ptr<CsrMtx> d_mtx;
+    std::vector<index_type> color_ptrs;
+};
+
+
+TEST_F(FwdGaussSeidelCsr, SingleIterationFromZeroIsEquivalentToRef)
+{
+    auto b = generate_random_dense<value_type>(ref, n_rows, 1, 11);
+    auto x =
+        Vec::create(ref, gko::dim<2>{static_cast<gko::size_type>(n_rows), 1});
+    x->fill(gko::zero<value_type>());
+    auto stop = gko::array<gko::stopping_status>(ref, 1);
+    auto d_b = gko::clone(exec, b);
+    auto d_x = gko::clone(exec, x);
+    auto d_stop = gko::array<gko::stopping_status>(exec, 1);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        ref, color_ptrs, mtx.get(), b.get(), x.get(), true, &stop);
+    gko::kernels::GKO_DEVICE_NAMESPACE::gssdl::multicolor_fgs_csr(
+        exec, color_ptrs, d_mtx.get(), d_b.get(), d_x.get(), true, &d_stop);
+
+    GKO_ASSERT_MTX_NEAR(d_x, x, r<value_type>::value);
+}
+
+
+TEST_F(FwdGaussSeidelCsr, UsesCurrentXAsInitialGuessIsEquivalentToRef)
+{
+    auto b = generate_random_dense<value_type>(ref, n_rows, 1, 22);
+    auto x = generate_random_dense<value_type>(ref, n_rows, 1, 23);
+    auto stop = gko::array<gko::stopping_status>(ref, 1);
+    auto d_b = gko::clone(exec, b);
+    auto d_x = gko::clone(exec, x);
+    auto d_stop = gko::array<gko::stopping_status>(exec, 1);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        ref, color_ptrs, mtx.get(), b.get(), x.get(), true, &stop);
+    gko::kernels::GKO_DEVICE_NAMESPACE::gssdl::multicolor_fgs_csr(
+        exec, color_ptrs, d_mtx.get(), d_b.get(), d_x.get(), true, &d_stop);
+
+    GKO_ASSERT_MTX_NEAR(d_x, x, r<value_type>::value);
+}
+
+
+TEST_F(FwdGaussSeidelCsr, MultipleRHSIsEquivalentToRef)
+{
+    auto b = generate_random_dense<value_type>(ref, n_rows, 2, 33);
+    auto x =
+        Vec::create(ref, gko::dim<2>{static_cast<gko::size_type>(n_rows), 2});
+    x->fill(gko::zero<value_type>());
+    auto stop = gko::array<gko::stopping_status>(ref, 2);
+    auto d_b = gko::clone(exec, b);
+    auto d_x = gko::clone(exec, x);
+    auto d_stop = gko::array<gko::stopping_status>(exec, 2);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        ref, color_ptrs, mtx.get(), b.get(), x.get(), true, &stop);
+    gko::kernels::GKO_DEVICE_NAMESPACE::gssdl::multicolor_fgs_csr(
+        exec, color_ptrs, d_mtx.get(), d_b.get(), d_x.get(), true, &d_stop);
+
+    GKO_ASSERT_MTX_NEAR(d_x, x, r<value_type>::value);
+}
+
+
+TEST_F(FwdGaussSeidelCsr, MatchesELLKernelExactly)
+{
+    auto ell_mtx = EllMtx::create(ref);
+    mtx->convert_to(ell_mtx.get());
+
+    auto b = generate_random_dense<value_type>(ref, n_rows, 1, 44);
+    auto x_csr = generate_random_dense<value_type>(ref, n_rows, 1, 45);
+    auto x_ell = gko::clone(ref, x_csr);
+    auto stop = gko::array<gko::stopping_status>(ref, 1);
+
+    gko::kernels::reference::gssdl::multicolor_fgs_csr(
+        ref, color_ptrs, mtx.get(), b.get(), x_csr.get(), true, &stop);
+    gko::kernels::reference::gssdl::multicolor_fgs_ell(
+        ref, color_ptrs, ell_mtx.get(), b.get(), x_ell.get(), true, &stop);
+
+    GKO_ASSERT_MTX_NEAR(x_csr, x_ell, r<value_type>::value);
+}
+
+
+TEST_F(FwdGaussSeidelCsr, FiveIterationSolverIsEquivalentToRef)
+{
+    using Solver = gko::solver::FwdGaussSeidel<value_type, index_type>;
+
+    auto ref_mtx = gko::share(gko::clone(ref, mtx));
+    auto dev_mtx = gko::share(gko::clone(exec, mtx));
+
+    auto b = generate_random_dense<value_type>(ref, n_rows, 1, 77);
+    auto x =
+        Vec::create(ref, gko::dim<2>{static_cast<gko::size_type>(n_rows), 1});
+    x->fill(gko::zero<value_type>());
+    auto d_b = gko::clone(exec, b);
+    auto d_x = gko::clone(exec, x);
+
+    auto ref_solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
+            .with_color_ptrs(color_ptrs)
+            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
+            .on(ref)
+            ->generate(ref_mtx);
+    auto dev_solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
+            .with_color_ptrs(color_ptrs)
+            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
+            .on(exec)
+            ->generate(dev_mtx);
+
+    ref_solver->apply(b, x);
+    dev_solver->apply(d_b, d_x);
+
+    GKO_ASSERT_MTX_NEAR(d_x, x, r<value_type>::value);
+}
+
+
 // ============================================================
 // AMP Gauss-Seidel device-vs-reference tests
 // ============================================================
@@ -363,7 +502,7 @@ TEST_F(GaussSeidelKernelsEll, EmptyColorPtrsDoesNothingIsEquivalentToRef)
 // fully implemented.  Once the CUDA/HIP kernel lands the skip will
 // disappear automatically.
 
-class GaussSeidelKernelsAMP : public CommonTestFixture {
+class FwdGaussSeidelAMPEll : public CommonTestFixture {
 protected:
     using AMPMtx = gko::matrix::AMP<value_type, index_type>;
     using EllMtx = gko::matrix::Ell<value_type, index_type>;
@@ -377,7 +516,7 @@ protected:
     // code path in the AMP kernel.
     static constexpr float amp_tol = 1e-6f;
 
-    GaussSeidelKernelsAMP()
+    FwdGaussSeidelAMPEll()
     {
         auto [gen_ell, gen_color_ptrs] =
             generate_colored_matrix<value_type, index_type>(ref, n_rows,
@@ -414,7 +553,7 @@ protected:
 };
 
 
-TEST_F(GaussSeidelKernelsAMP, SingleIterationFromZeroIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPEll, SingleIterationFromZeroIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 11);
     auto x =
@@ -434,7 +573,7 @@ TEST_F(GaussSeidelKernelsAMP, SingleIterationFromZeroIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsAMP, UsesCurrentXAsInitialGuessIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPEll, UsesCurrentXAsInitialGuessIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 22);
     auto x = generate_random_dense<value_type>(ref, n_rows, 1, 23);
@@ -452,7 +591,7 @@ TEST_F(GaussSeidelKernelsAMP, UsesCurrentXAsInitialGuessIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsAMP, MultipleRHSIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPEll, MultipleRHSIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 2, 33);
     auto x =
@@ -472,7 +611,7 @@ TEST_F(GaussSeidelKernelsAMP, MultipleRHSIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsAMP, FirstIterResetsStopStatus)
+TEST_F(FwdGaussSeidelAMPEll, FirstIterResetsStopStatus)
 {
     const gko::uint32 n_cols = 2;
     auto b = generate_random_dense<value_type>(ref, n_rows, n_cols, 44);
@@ -506,7 +645,7 @@ TEST_F(GaussSeidelKernelsAMP, FirstIterResetsStopStatus)
 }
 
 
-TEST_F(GaussSeidelKernelsAMP, SubsequentIterDoesNotResetStopStatus)
+TEST_F(FwdGaussSeidelAMPEll, SubsequentIterDoesNotResetStopStatus)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 55);
     auto d_b = gko::clone(exec, b);
@@ -533,7 +672,7 @@ TEST_F(GaussSeidelKernelsAMP, SubsequentIterDoesNotResetStopStatus)
 }
 
 
-TEST_F(GaussSeidelKernelsAMP, EmptyColorPtrsDoesNothingIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPEll, EmptyColorPtrsDoesNothingIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 66);
     auto x = generate_random_dense<value_type>(ref, n_rows, 1, 67);
@@ -552,7 +691,7 @@ TEST_F(GaussSeidelKernelsAMP, EmptyColorPtrsDoesNothingIsEquivalentToRef)
 }
 
 
-TEST_F(GaussSeidelKernelsAMP, FiveIterationSolverIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPEll, FiveIterationSolverIsEquivalentToRef)
 {
     using Solver = gko::solver::FwdGaussSeidel<value_type, index_type>;
 
@@ -586,33 +725,59 @@ TEST_F(GaussSeidelKernelsAMP, FiveIterationSolverIsEquivalentToRef)
 }
 
 
-class GaussSeidelKernelsCSR : public CommonTestFixture {
+// ============================================================
+// AMP-CSR Gauss-Seidel device-vs-reference tests
+// ============================================================
+
+class FwdGaussSeidelAMPCsr : public CommonTestFixture {
 protected:
+    using AMPMtx = gko::matrix::AMP<value_type, index_type>;
     using CsrMtx = gko::matrix::Csr<value_type, index_type>;
     using EllMtx = gko::matrix::Ell<value_type, index_type>;
     using Vec = gko::matrix::Dense<value_type>;
 
     static constexpr index_type n_rows = 35;
     static constexpr index_type n_colors = 4;
+    static constexpr float amp_tol = 1e-6f;
 
-    GaussSeidelKernelsCSR()
+    FwdGaussSeidelAMPCsr()
     {
         auto [gen_ell, gen_color_ptrs] =
             generate_colored_matrix<value_type, index_type>(ref, n_rows,
                                                             n_colors);
         color_ptrs = std::move(gen_color_ptrs);
-        mtx = CsrMtx::create(ref);
-        gen_ell->convert_to(mtx.get());
-        d_mtx = gko::clone(exec, mtx);
+
+        // Convert ELL to CSR to get CSR-based AMP bins
+        auto csr = CsrMtx::create(ref);
+        gen_ell->convert_to(csr.get());
+        auto d_csr = gko::clone(exec, csr);
+
+        amp = AMPMtx::build().with_tolerance(amp_tol).on(ref)->generate(
+            gko::share(std::move(csr)));
+
+        d_amp = AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(
+            gko::share(std::move(d_csr)));
     }
 
-    std::unique_ptr<CsrMtx> mtx;
-    std::unique_ptr<CsrMtx> d_mtx;
+    template <typename... Args>
+    void run_device_amp_csr(Args&&... args)
+    {
+        try {
+            gko::kernels::GKO_DEVICE_NAMESPACE::gssdl::multicolor_fgs_amp_csr(
+                std::forward<Args>(args)...);
+        } catch (const gko::NotImplemented&) {
+            GTEST_SKIP() << "multicolor_fgs_amp_csr not yet implemented on "
+                            "this executor";
+        }
+    }
+
+    std::unique_ptr<AMPMtx> amp;
+    std::unique_ptr<AMPMtx> d_amp;
     std::vector<index_type> color_ptrs;
 };
 
 
-TEST_F(GaussSeidelKernelsCSR, SingleIterationFromZeroIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPCsr, SingleIterationFromZeroIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 11);
     auto x =
@@ -623,16 +788,16 @@ TEST_F(GaussSeidelKernelsCSR, SingleIterationFromZeroIsEquivalentToRef)
     auto d_x = gko::clone(exec, x);
     auto d_stop = gko::array<gko::stopping_status>(exec, 1);
 
-    gko::kernels::reference::gssdl::multicolor_fgs_csr(
-        ref, color_ptrs, mtx.get(), b.get(), x.get(), true, &stop);
-    gko::kernels::GKO_DEVICE_NAMESPACE::gssdl::multicolor_fgs_csr(
-        exec, color_ptrs, d_mtx.get(), d_b.get(), d_x.get(), true, &d_stop);
+    gko::kernels::reference::gssdl::multicolor_fgs_amp_csr(
+        ref, color_ptrs, amp.get(), b.get(), x.get(), true, &stop);
+    run_device_amp_csr(exec, color_ptrs, d_amp.get(), d_b.get(), d_x.get(),
+                       true, &d_stop);
 
     GKO_ASSERT_MTX_NEAR(d_x, x, r<value_type>::value);
 }
 
 
-TEST_F(GaussSeidelKernelsCSR, UsesCurrentXAsInitialGuessIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPCsr, UsesCurrentXAsInitialGuessIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 22);
     auto x = generate_random_dense<value_type>(ref, n_rows, 1, 23);
@@ -641,16 +806,16 @@ TEST_F(GaussSeidelKernelsCSR, UsesCurrentXAsInitialGuessIsEquivalentToRef)
     auto d_x = gko::clone(exec, x);
     auto d_stop = gko::array<gko::stopping_status>(exec, 1);
 
-    gko::kernels::reference::gssdl::multicolor_fgs_csr(
-        ref, color_ptrs, mtx.get(), b.get(), x.get(), true, &stop);
-    gko::kernels::GKO_DEVICE_NAMESPACE::gssdl::multicolor_fgs_csr(
-        exec, color_ptrs, d_mtx.get(), d_b.get(), d_x.get(), true, &d_stop);
+    gko::kernels::reference::gssdl::multicolor_fgs_amp_csr(
+        ref, color_ptrs, amp.get(), b.get(), x.get(), true, &stop);
+    run_device_amp_csr(exec, color_ptrs, d_amp.get(), d_b.get(), d_x.get(),
+                       true, &d_stop);
 
     GKO_ASSERT_MTX_NEAR(d_x, x, r<value_type>::value);
 }
 
 
-TEST_F(GaussSeidelKernelsCSR, MultipleRHSIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPCsr, MultipleRHSIsEquivalentToRef)
 {
     auto b = generate_random_dense<value_type>(ref, n_rows, 2, 33);
     auto x =
@@ -661,45 +826,44 @@ TEST_F(GaussSeidelKernelsCSR, MultipleRHSIsEquivalentToRef)
     auto d_x = gko::clone(exec, x);
     auto d_stop = gko::array<gko::stopping_status>(exec, 2);
 
-    gko::kernels::reference::gssdl::multicolor_fgs_csr(
-        ref, color_ptrs, mtx.get(), b.get(), x.get(), true, &stop);
-    gko::kernels::GKO_DEVICE_NAMESPACE::gssdl::multicolor_fgs_csr(
-        exec, color_ptrs, d_mtx.get(), d_b.get(), d_x.get(), true, &d_stop);
+    gko::kernels::reference::gssdl::multicolor_fgs_amp_csr(
+        ref, color_ptrs, amp.get(), b.get(), x.get(), true, &stop);
+    run_device_amp_csr(exec, color_ptrs, d_amp.get(), d_b.get(), d_x.get(),
+                       true, &d_stop);
 
     GKO_ASSERT_MTX_NEAR(d_x, x, r<value_type>::value);
 }
 
 
-TEST_F(GaussSeidelKernelsCSR, MatchesELLKernelExactly)
+TEST_F(FwdGaussSeidelAMPCsr, EmptyColorPtrsDoesNothingIsEquivalentToRef)
 {
-    auto ell_mtx = EllMtx::create(ref);
-    mtx->convert_to(ell_mtx.get());
-
-    auto b = generate_random_dense<value_type>(ref, n_rows, 1, 44);
-    auto x_csr = generate_random_dense<value_type>(ref, n_rows, 1, 45);
-    auto x_ell = gko::clone(ref, x_csr);
+    auto b = generate_random_dense<value_type>(ref, n_rows, 1, 66);
+    auto x = generate_random_dense<value_type>(ref, n_rows, 1, 67);
     auto stop = gko::array<gko::stopping_status>(ref, 1);
+    auto d_b = gko::clone(exec, b);
+    auto d_x = gko::clone(exec, x);
+    auto d_stop = gko::array<gko::stopping_status>(exec, 1);
+    std::vector<index_type> empty_ptrs{};
 
-    gko::kernels::reference::gssdl::multicolor_fgs_csr(
-        ref, color_ptrs, mtx.get(), b.get(), x_csr.get(), true, &stop);
-    gko::kernels::reference::gssdl::multicolor_fgs_ell(
-        ref, color_ptrs, ell_mtx.get(), b.get(), x_ell.get(), true, &stop);
+    gko::kernels::reference::gssdl::multicolor_fgs_amp_csr(
+        ref, empty_ptrs, amp.get(), b.get(), x.get(), true, &stop);
+    run_device_amp_csr(exec, empty_ptrs, d_amp.get(), d_b.get(), d_x.get(),
+                       true, &d_stop);
 
-    GKO_ASSERT_MTX_NEAR(x_csr, x_ell, r<value_type>::value);
+    GKO_ASSERT_MTX_NEAR(d_x, x, 0.0);
 }
 
 
-TEST_F(GaussSeidelKernelsCSR, FiveIterationSolverIsEquivalentToRef)
+TEST_F(FwdGaussSeidelAMPCsr, FiveIterationSolverIsEquivalentToRef)
 {
     using Solver = gko::solver::FwdGaussSeidel<value_type, index_type>;
 
-    auto ref_mtx = gko::share(gko::clone(ref, mtx));
-    auto dev_mtx = gko::share(gko::clone(exec, mtx));
+    auto ref_amp = gko::share(gko::clone(ref, amp));
+    auto dev_amp = gko::share(gko::clone(exec, d_amp));
 
     auto b = generate_random_dense<value_type>(ref, n_rows, 1, 77);
     auto x =
         Vec::create(ref, gko::dim<2>{static_cast<gko::size_type>(n_rows), 1});
-    x->fill(gko::zero<value_type>());
     auto d_b = gko::clone(exec, b);
     auto d_x = gko::clone(exec, x);
 
@@ -707,16 +871,14 @@ TEST_F(GaussSeidelKernelsCSR, FiveIterationSolverIsEquivalentToRef)
         Solver::build()
             .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
             .with_color_ptrs(color_ptrs)
-            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
             .on(ref)
-            ->generate(ref_mtx);
+            ->generate(ref_amp);
     auto dev_solver =
         Solver::build()
             .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
             .with_color_ptrs(color_ptrs)
-            .with_init_guess_mode(gko::solver::initial_guess_mode::provided)
             .on(exec)
-            ->generate(dev_mtx);
+            ->generate(dev_amp);
 
     ref_solver->apply(b, x);
     dev_solver->apply(d_b, d_x);

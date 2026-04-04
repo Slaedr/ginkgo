@@ -27,6 +27,7 @@ namespace {
 GKO_REGISTER_OPERATION(multicolor_fgs_ell, gssdl::multicolor_fgs_ell);
 GKO_REGISTER_OPERATION(multicolor_fgs_amp, gssdl::multicolor_fgs_amp);
 GKO_REGISTER_OPERATION(multicolor_fgs_csr, gssdl::multicolor_fgs_csr);
+GKO_REGISTER_OPERATION(multicolor_fgs_amp_csr, gssdl::multicolor_fgs_amp_csr);
 
 
 }  // anonymous namespace
@@ -144,9 +145,20 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
                 color_row_ptrs_, ellmat.get(), gko::detail::get_local(dense_b),
                 gko::detail::get_local(dense_x), iter == 0, &stop_status));
         } else if (ampmat) {
-            exec->run(gssdl::make_multicolor_fgs_amp(
-                color_row_ptrs_, ampmat.get(), gko::detail::get_local(dense_b),
-                gko::detail::get_local(dense_x), iter == 0, &stop_status));
+            const bool csr_bins =
+                dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(
+                    ampmat->get_bin_matrix(0)) != nullptr;
+            if (csr_bins) {
+                exec->run(gssdl::make_multicolor_fgs_amp_csr(
+                    color_row_ptrs_, ampmat.get(),
+                    gko::detail::get_local(dense_b),
+                    gko::detail::get_local(dense_x), iter == 0, &stop_status));
+            } else {
+                exec->run(gssdl::make_multicolor_fgs_amp(
+                    color_row_ptrs_, ampmat.get(),
+                    gko::detail::get_local(dense_b),
+                    gko::detail::get_local(dense_x), iter == 0, &stop_status));
+            }
         } else {
             exec->run(gssdl::make_multicolor_fgs_csr(
                 color_row_ptrs_, csrmat.get(), gko::detail::get_local(dense_b),
