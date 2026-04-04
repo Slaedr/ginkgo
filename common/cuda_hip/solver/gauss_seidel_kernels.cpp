@@ -173,19 +173,17 @@ __global__ __launch_bounds__(default_block_size) void mc_fgs_amp(
         auto avals = std::get<k>(bin_values);
         auto acols = bin_col_idxs[k];
         const auto max_nnz = bin_max_nnz_rows[k];
-        if (max_nnz > 0) {
-            for (uint32 j = 0; j < max_nnz; ++j) {
-                const auto col = acols[j * stride + row];
-                if (col == invalid) {
-                    continue;
-                }
-                const auto val = avals[j * stride + row];
-                if (col == row) {
-                    diag = static_cast<MValueType>(val);
-                } else {
-                    sum -= static_cast<highest_type>(val) *
-                           static_cast<highest_type>(x[col * x_stride + irhs]);
-                }
+        for (uint32 j = 0; j < max_nnz; ++j) {
+            const auto col = acols[j * stride + row];
+            if (col == invalid) {
+                continue;
+            }
+            const auto val = avals[j * stride + row];
+            if (col == row) {
+                diag = static_cast<MValueType>(val);
+            } else {
+                sum -= static_cast<highest_type>(val) *
+                       static_cast<highest_type>(x[col * x_stride + irhs]);
             }
         }
     });
