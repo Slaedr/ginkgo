@@ -63,6 +63,7 @@ if(GINKGO_BUILD_MPI)
     list(
         APPEND
         EXAMPLES_LIST
+        distributed-amp-solver
         distributed-solver
         distributed-multigrid-preconditioned-solver
     )
