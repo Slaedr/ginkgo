@@ -13,6 +13,7 @@
 #include <ginkgo/core/matrix/ell.hpp>
 #include <ginkgo/core/solver/solver_base.hpp>
 
+#include "core/config/config_helper.hpp"
 #include "core/distributed/helpers.hpp"
 #include "core/solver/gauss_seidel_kernels.hpp"
 #include "core/solver/solver_boilerplate.hpp"
@@ -247,6 +248,34 @@ std::vector<int>
 workspace_traits<FwdGaussSeidel<ValueType, IndexType>>::vectors(const Solver&)
 {
     return {};
+}
+
+
+template <typename ValueType, typename IndexType>
+typename FwdGaussSeidel<ValueType, IndexType>::parameters_type
+FwdGaussSeidel<ValueType, IndexType>::parse(
+    const config::pnode& config, const config::registry& context,
+    const config::type_descriptor& td_for_child)
+{
+    auto params = FwdGaussSeidel::build();
+    config::config_check_decorator config_check(config);
+    if (auto& obj = config_check.get("criteria")) {
+        params.with_criteria(
+            config::parse_or_get_criteria(obj, context, td_for_child));
+    }
+    if (auto& obj = config_check.get("color_ptrs")) {
+        auto arr = obj.get_array();
+        std::vector<IndexType> ptrs;
+        ptrs.reserve(arr.size());
+        for (const auto& elem : arr) {
+            ptrs.push_back(config::get_value<IndexType>(elem));
+        }
+        params.with_color_ptrs(std::move(ptrs));
+    }
+    if (auto& obj = config_check.get("init_guess_mode")) {
+        params.with_init_guess_mode(config::get_value<initial_guess_mode>(obj));
+    }
+    return params;
 }
 
 

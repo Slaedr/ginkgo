@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -15,6 +15,7 @@
 #include <ginkgo/core/solver/chebyshev.hpp>
 #include <ginkgo/core/solver/direct.hpp>
 #include <ginkgo/core/solver/fcg.hpp>
+#include <ginkgo/core/solver/gauss_seidel.hpp>
 #include <ginkgo/core/solver/gcr.hpp>
 #include <ginkgo/core/solver/gmres.hpp>
 #include <ginkgo/core/solver/idr.hpp>
@@ -49,6 +50,8 @@ GKO_PARSE_VALUE_AND_INDEX_TYPE(Direct, gko::experimental::solver::Direct);
 GKO_PARSE_VALUE_AND_INDEX_TYPE(LowerTrs, gko::solver::LowerTrs);
 GKO_PARSE_VALUE_AND_INDEX_TYPE(UpperTrs, gko::solver::UpperTrs);
 GKO_PARSE_VALUE_TYPE(Chebyshev, gko::solver::Chebyshev);
+GKO_PARSE_VALUE_AND_INDEX_TYPE_BASE(FwdGaussSeidel,
+                                    gko::solver::FwdGaussSeidel);
 
 
 template <>
