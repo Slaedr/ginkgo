@@ -5,8 +5,10 @@
 #ifndef GKO_CORE_MATRIX_AMP_HELPERS_H
 #define GKO_CORE_MATRIX_AMP_HELPERS_H
 
+#include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/matrix/amp.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
+#include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 
 #include "core/base/utils.hpp"

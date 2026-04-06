@@ -165,8 +165,8 @@ protected:
         }
     }
 
-    template <typename VectorType>
-    void apply_dense_impl(const VectorType* b, VectorType* x) const;
+    template <typename VectorType_b, typename VectorType_x>
+    void apply_dense_impl(const VectorType_b* b, VectorType_x* x) const;
 
     std::vector<IndexType> color_row_ptrs_;
 };

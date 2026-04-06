@@ -475,6 +475,76 @@ TYPED_TEST(Amp, AdvancedApplyCompletesWithoutError)
 }
 
 
+TYPED_TEST(Amp, ApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherDense = gko::matrix::Dense<other_type>;
+    auto mtx = this->create_amp_from_one_dense(gko::dim<2>{3, 4});
+    auto x = OtherDense::create(this->exec, gko::dim<2>{4, 1});
+    x->fill(gko::one<other_type>());
+    auto y = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+
+    ASSERT_NO_THROW(mtx->apply(x, y));
+}
+
+
+TYPED_TEST(Amp, AdvancedApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherDense = gko::matrix::Dense<other_type>;
+    auto mtx = this->create_amp_from_one_dense(gko::dim<2>{3, 4});
+    auto alpha = gko::initialize<OtherDense>({2.0}, this->exec);
+    auto beta = gko::initialize<OtherDense>({-1.0}, this->exec);
+    auto x = OtherDense::create(this->exec, gko::dim<2>{4, 1});
+    x->fill(gko::one<other_type>());
+    auto y = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+    y->fill(gko::one<other_type>());
+
+    ASSERT_NO_THROW(mtx->apply(alpha, x, beta, y));
+}
+
+
+TYPED_TEST(Amp, ApplyWithMixedPrecisionVectorsProducesCorrectResult)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Dense = typename TestFixture::Dense;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherDense = gko::matrix::Dense<other_type>;
+
+    // Create a known 3x3 matrix: all ones
+    auto mtx = this->create_amp_from_one_dense(gko::dim<2>{3, 3});
+
+    // Apply with same-precision vectors
+    auto x_same = Dense::create(this->exec, gko::dim<2>{3, 1});
+    x_same->fill(gko::one<value_type>());
+    auto y_same = Dense::create(this->exec, gko::dim<2>{3, 1});
+    mtx->apply(x_same, y_same);
+
+    // Apply with different-precision vectors
+    auto x_other = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+    x_other->fill(gko::one<other_type>());
+    auto y_other = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+    mtx->apply(x_other, y_other);
+
+    // Convert both results to same type and compare
+    auto y_same_dense = Dense::create(this->exec);
+    y_same->convert_to(y_same_dense.get());
+    // y_other should have the same result (3.0 in each entry for all-ones 3x3)
+    GKO_ASSERT_MTX_NEAR(y_same_dense, y_other, 1e-5);
+}
+
+
 TYPED_TEST(Amp, CanConvertToDense)
 {
     using value_type = typename TestFixture::value_type;

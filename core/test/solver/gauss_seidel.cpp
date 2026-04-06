@@ -320,6 +320,70 @@ TYPED_TEST(FwdGaussSeidel, IterationConvergesTowardKnownExactSolution)
 }
 
 
+TYPED_TEST(FwdGaussSeidel, ApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+    auto b = gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<OtherVec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+
+    ASSERT_NO_THROW(this->solver->apply(b, x));
+}
+
+
+TYPED_TEST(FwdGaussSeidel, AdvancedApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+    auto alpha = gko::initialize<OtherVec>({2.0}, this->exec);
+    auto beta = gko::initialize<OtherVec>({-1.0}, this->exec);
+    auto b = gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<OtherVec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+
+    ASSERT_NO_THROW(this->solver->apply(alpha, b, beta, x));
+}
+
+
+TYPED_TEST(FwdGaussSeidel, ApplyWithMixedPrecisionVectorsProducesCorrectResult)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using Vec = gko::matrix::Dense<value_type>;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .on(this->exec)
+            ->generate(this->mtx);
+
+    // Apply with same-precision vectors
+    auto b_same = gko::initialize<Vec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x_same = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    solver->apply(b_same, x_same);
+
+    // Apply with different-precision vectors
+    auto b_other =
+        gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x_other = gko::initialize<OtherVec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    solver->apply(b_other, x_other);
+
+    GKO_ASSERT_MTX_NEAR(x_same, x_other, 1e-5);
+}
+
+
 template <typename ValueIndexType>
 class FwdGaussSeidelAMP : public ::testing::Test {
 protected:
@@ -395,6 +459,69 @@ TYPED_TEST(FwdGaussSeidelAMP, IterationConvergesTowardKnownExactSolution)
     solver->apply(b, x);
 
     GKO_ASSERT_MTX_NEAR(x, exact, 1e-3);
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMP, ApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+    auto b = gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<OtherVec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+
+    ASSERT_NO_THROW(this->solver->apply(b, x));
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMP, AdvancedApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+    auto alpha = gko::initialize<OtherVec>({2.0}, this->exec);
+    auto beta = gko::initialize<OtherVec>({-1.0}, this->exec);
+    auto b = gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<OtherVec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+
+    ASSERT_NO_THROW(this->solver->apply(alpha, b, beta, x));
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMP,
+           ApplyWithMixedPrecisionVectorsProducesCorrectResult)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using Vec = gko::matrix::Dense<value_type>;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .on(this->exec)
+            ->generate(this->mtx);
+
+    auto b_same = gko::initialize<Vec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x_same = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    solver->apply(b_same, x_same);
+
+    auto b_other =
+        gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x_other = gko::initialize<OtherVec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    solver->apply(b_other, x_other);
+
+    GKO_ASSERT_MTX_NEAR(x_same, x_other, 1e-5);
 }
 
 
@@ -477,6 +604,70 @@ TYPED_TEST(FwdGaussSeidelAMPCSR, IterationConvergesTowardKnownExactSolution)
     solver->apply(b, x);
 
     GKO_ASSERT_MTX_NEAR(x, exact, 1e-3);
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMPCSR, ApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+    auto b = gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<OtherVec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+
+    ASSERT_NO_THROW(this->solver->apply(b, x));
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMPCSR,
+           AdvancedApplySupportsVectorsOfDifferentPrecision)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+    auto alpha = gko::initialize<OtherVec>({2.0}, this->exec);
+    auto beta = gko::initialize<OtherVec>({-1.0}, this->exec);
+    auto b = gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x = gko::initialize<OtherVec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+
+    ASSERT_NO_THROW(this->solver->apply(alpha, b, beta, x));
+}
+
+
+TYPED_TEST(FwdGaussSeidelAMPCSR,
+           ApplyWithMixedPrecisionVectorsProducesCorrectResult)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Solver = typename TestFixture::Solver;
+    using Vec = gko::matrix::Dense<value_type>;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherVec = gko::matrix::Dense<other_type>;
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(5u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .on(this->exec)
+            ->generate(this->mtx);
+
+    auto b_same = gko::initialize<Vec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x_same = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    solver->apply(b_same, x_same);
+
+    auto b_other =
+        gko::initialize<OtherVec>({2.0, -3.0, 4.0, -1.0}, this->exec);
+    auto x_other = gko::initialize<OtherVec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    solver->apply(b_other, x_other);
+
+    GKO_ASSERT_MTX_NEAR(x_same, x_other, 1e-5);
 }
 
 
