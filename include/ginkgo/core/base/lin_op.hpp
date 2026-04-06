@@ -299,8 +299,8 @@ protected:
      */
     void validate_application_parameters(const LinOp* b, const LinOp* x) const
     {
-        //GKO_ASSERT_CONFORMANT(this, b);
-        //GKO_ASSERT_EQUAL_ROWS(this, x);
+        GKO_ASSERT_CONFORMANT(this, b);
+        GKO_ASSERT_EQUAL_ROWS(this, x);
         GKO_ASSERT_EQUAL_COLS(b, x);
     }
 

@@ -153,7 +153,7 @@ protected:
                             std::shared_ptr<const LinOp> system_matrix)
         : EnableLinOp<FwdGaussSeidel>(
               factory->get_executor(),
-              system_matrix->get_size()),
+              gko::transpose(system_matrix->get_size())),
           EnableSolverBase<FwdGaussSeidel<ValueType, IndexType>>{system_matrix},
           EnableIterativeBase<FwdGaussSeidel>{
               stop::combine(factory->get_parameters().criteria)},

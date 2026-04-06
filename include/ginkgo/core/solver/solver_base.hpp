@@ -176,8 +176,8 @@ protected:
     {
         self()->template log<log::Logger::linop_apply_started>(self(), b, x);
         auto exec = self()->get_executor();
-        //GKO_ASSERT_CONFORMANT(self(), b);
-        //GKO_ASSERT_EQUAL_ROWS(self(), x);
+        GKO_ASSERT_CONFORMANT(self(), b);
+        GKO_ASSERT_EQUAL_ROWS(self(), x);
         GKO_ASSERT_EQUAL_COLS(b, x);
         this->apply_with_initial_guess_impl(make_temporary_clone(exec, b).get(),
                                             make_temporary_clone(exec, x).get(),
@@ -196,8 +196,8 @@ protected:
         self()->template log<log::Logger::linop_advanced_apply_started>(
             self(), alpha, b, beta, x);
         auto exec = self()->get_executor();
-        //GKO_ASSERT_CONFORMANT(self(), b);
-        //GKO_ASSERT_EQUAL_ROWS(self(), x);
+        GKO_ASSERT_CONFORMANT(self(), b);
+        GKO_ASSERT_EQUAL_ROWS(self(), x);
         GKO_ASSERT_EQUAL_COLS(b, x);
         GKO_ASSERT_EQUAL_DIMENSIONS(alpha, dim<2>(1, 1));
         GKO_ASSERT_EQUAL_DIMENSIONS(beta, dim<2>(1, 1));
@@ -645,7 +645,7 @@ protected:
         auto exec = self()->get_executor();
         if (new_system_matrix) {
             GKO_ASSERT_EQUAL_DIMENSIONS(self(), new_system_matrix);
-            //GKO_ASSERT_IS_SQUARE_MATRIX(new_system_matrix);
+            GKO_ASSERT_IS_SQUARE_MATRIX(new_system_matrix);
             if (new_system_matrix->get_executor() != exec) {
                 new_system_matrix = gko::clone(exec, new_system_matrix);
             }
