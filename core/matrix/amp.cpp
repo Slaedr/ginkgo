@@ -99,15 +99,17 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* b, LinOp* x) const
     const bool csr_bins =
         dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(
             this->get_bin_matrix(0)) != nullptr;
-    if (csr_bins) {
-        this->get_executor()->run(
-            amp::make_spmv_csr(this, gko::as<matrix::Dense<ValueType>>(b),
-                               gko::as<matrix::Dense<ValueType>>(x)));
-    } else {
-        this->get_executor()->run(
-            amp::make_spmv_ell(this, gko::as<matrix::Dense<ValueType>>(b),
-                               gko::as<matrix::Dense<ValueType>>(x)));
-    }
+    mixed_precision_base_dispatch_real_complex<ValueType>(
+        [this, csr_bins](auto dense_b, auto dense_x) {
+            if (csr_bins) {
+                this->get_executor()->run(
+                    amp::make_spmv_csr(this, dense_b, dense_x));
+            } else {
+                this->get_executor()->run(
+                    amp::make_spmv_ell(this, dense_b, dense_x));
+            }
+        },
+        b, x);
 }
 
 
@@ -115,31 +117,37 @@ template <typename ValueType, typename IndexType>
 void AMP<ValueType, IndexType>::apply_impl(const LinOp* alpha, const LinOp* b,
                                            const LinOp* beta, LinOp* x) const
 {
-    // mixed_precision_dispatch_real_complex<ValueType>(
-    //     [this, alpha, beta](auto dense_b, auto dense_x) {
-    //         auto d_alpha = make_temporary_conversion<ValueType>(alpha);
-    //         auto d_beta = make_temporary_conversion<
-    //             typename std::decay_t<decltype(*dense_x)>::value_type>(beta);
-    //         this->get_executor()->run(amp::make_advanced_spmv(
-    //             d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
-    //     },
-    //     b, x);
     const bool csr_bins =
         dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(
             this->get_bin_matrix(0)) != nullptr;
-    if (csr_bins) {
-        this->get_executor()->run(amp::make_advanced_spmv_csr(
-            gko::as<matrix::Dense<ValueType>>(alpha), this,
-            gko::as<matrix::Dense<ValueType>>(b),
-            gko::as<matrix::Dense<ValueType>>(beta),
-            gko::as<matrix::Dense<ValueType>>(x)));
-    } else {
-        this->get_executor()->run(amp::make_advanced_spmv_ell(
-            gko::as<matrix::Dense<ValueType>>(alpha), this,
-            gko::as<matrix::Dense<ValueType>>(b),
-            gko::as<matrix::Dense<ValueType>>(beta),
-            gko::as<matrix::Dense<ValueType>>(x)));
-    }
+
+    mixed_precision_base_dispatch_real_complex<ValueType>(
+        [this, csr_bins, alpha, beta](auto dense_b, auto dense_x) {
+            auto d_alpha = make_temporary_conversion<ValueType>(alpha);
+            auto d_beta = make_temporary_conversion<
+                typename std::decay_t<decltype(*dense_x)>::value_type>(beta);
+            if (csr_bins) {
+                this->get_executor()->run(amp::make_advanced_spmv_csr(
+                    d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
+            } else {
+                this->get_executor()->run(amp::make_advanced_spmv_ell(
+                    d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
+            }
+        },
+        b, x);
+    // if (csr_bins) {
+    //     this->get_executor()->run(amp::make_advanced_spmv_csr(
+    //         gko::as<matrix::Dense<ValueType>>(alpha), this,
+    //         gko::as<matrix::Dense<ValueType>>(b),
+    //         gko::as<matrix::Dense<ValueType>>(beta),
+    //         gko::as<matrix::Dense<ValueType>>(x)));
+    // } else {
+    //     this->get_executor()->run(amp::make_advanced_spmv_ell(
+    //         gko::as<matrix::Dense<ValueType>>(alpha), this,
+    //         gko::as<matrix::Dense<ValueType>>(b),
+    //         gko::as<matrix::Dense<ValueType>>(beta),
+    //         gko::as<matrix::Dense<ValueType>>(x)));
+    // }
 }
 
 

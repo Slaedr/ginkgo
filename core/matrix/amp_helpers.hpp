@@ -5,14 +5,98 @@
 #ifndef GKO_CORE_MATRIX_AMP_HELPERS_H
 #define GKO_CORE_MATRIX_AMP_HELPERS_H
 
+#include <type_traits>
+
+#include <ginkgo/core/base/exception_helpers.hpp>
+#include <ginkgo/core/base/math.hpp>
+#include <ginkgo/core/base/temporary_conversion.hpp>
 #include <ginkgo/core/matrix/amp.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
+#include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 
 #include "core/base/utils.hpp"
 
 
 namespace gko {
+
+
+/**
+ * Dispatches the given function with the input/output LinOps dynamically cast
+ * to Dense<double> or Dense<float> (all four combinations).
+ *
+ * Unlike mixed_precision_dispatch, this does NOT walk the full
+ * next_precision chain (which may include half/bfloat16). It only considers
+ * double and float, which is sufficient for AMP matrix apply where the
+ * vectors should be either double or float.
+ *
+ * @tparam ValueType  used only to decide whether the dispatch is over real
+ *                    or complex types. If complex, dispatches over
+ *                    complex<double> and complex<float>.
+ */
+template <typename ValueType, typename Function>
+void mixed_precision_base_dispatch(Function fn, const LinOp* in, LinOp* out)
+{
+    using fst_type = matrix::Dense<ValueType>;
+    using snd_type = matrix::Dense<
+        typename detail::next_precision_base_impl<ValueType>::type>;
+    auto dispatch_out = [&](auto dense_in) {
+        if (auto dense_out = dynamic_cast<fst_type*>(out)) {
+            fn(dense_in, dense_out);
+        } else if (auto dense_out = dynamic_cast<snd_type*>(out)) {
+            fn(dense_in, dense_out);
+        } else {
+            GKO_NOT_SUPPORTED(out);
+        }
+    };
+    if (auto dense_in = dynamic_cast<const fst_type*>(in)) {
+        dispatch_out(dense_in);
+    } else if (auto dense_in = dynamic_cast<const snd_type*>(in)) {
+        dispatch_out(dense_in);
+    } else {
+        GKO_NOT_SUPPORTED(in);
+    }
+}
+
+
+/**
+ * Like mixed_precision_base_dispatch, but handles the case where ValueType
+ * is real and the vectors are complex: converts via create_real_view().
+ *
+ * Supports Dense<double>, Dense<float>, Dense<complex<double>>, and
+ * Dense<complex<float>> as vector types.
+ *
+ * @note When ValueType is complex, real vectors are not supported and will
+ *       throw NotSupported. This is acceptable because multiplying a complex
+ *       matrix by a real vector is not a typical use case.
+ */
+template <typename ValueType, typename Function,
+          std::enable_if_t<is_complex<ValueType>()>* = nullptr>
+void mixed_precision_base_dispatch_real_complex(Function fn, const LinOp* in,
+                                                LinOp* out)
+{
+    mixed_precision_base_dispatch<ValueType>(fn, in, out);
+}
+
+
+template <typename ValueType, typename Function,
+          std::enable_if_t<!is_complex<ValueType>()>* = nullptr>
+void mixed_precision_base_dispatch_real_complex(Function fn, const LinOp* in,
+                                                LinOp* out)
+{
+    if (!dynamic_cast<const ConvertibleTo<matrix::Dense<>>*>(in)) {
+        mixed_precision_base_dispatch<to_complex<ValueType>>(
+            [&fn](auto dense_in, auto dense_out) {
+                fn(dense_in->create_real_view().get(),
+                   dense_out->create_real_view().get());
+            },
+            in, out);
+    } else {
+        mixed_precision_base_dispatch<ValueType>(fn, in, out);
+    }
+}
+
+
 namespace amp {
 
 
