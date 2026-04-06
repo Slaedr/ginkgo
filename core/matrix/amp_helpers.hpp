@@ -23,7 +23,9 @@ namespace gko {
 
 /**
  * Dispatches the given function with the input/output LinOps dynamically cast
- * to Dense<double> or Dense<float> (all four combinations).
+ * to Dense<double> or Dense<float> (all four combinations), but only if
+ * GINKGO_MIXED_PRECISION was set to ON during configuration. Otherwise,
+ * it falls back to temporary conversions.
  *
  * Unlike mixed_precision_dispatch, this does NOT walk the full
  * next_precision chain (which may include half/bfloat16). It only considers
@@ -37,6 +39,7 @@ namespace gko {
 template <typename ValueType, typename Function>
 void mixed_precision_base_dispatch(Function fn, const LinOp* in, LinOp* out)
 {
+#ifdef GINKGO_MIXED_PRECISION
     using fst_type = matrix::Dense<ValueType>;
     using snd_type = matrix::Dense<
         typename detail::next_precision_base_impl<ValueType>::type>;
@@ -56,6 +59,9 @@ void mixed_precision_base_dispatch(Function fn, const LinOp* in, LinOp* out)
     } else {
         GKO_NOT_SUPPORTED(in);
     }
+#else
+    precision_dispatch<ValueType>(fn, in, out);
+#endif
 }
 
 
@@ -75,7 +81,11 @@ template <typename ValueType, typename Function,
 void mixed_precision_base_dispatch_real_complex(Function fn, const LinOp* in,
                                                 LinOp* out)
 {
+#ifdef GINKGO_MIXED_PRECISION
     mixed_precision_base_dispatch<ValueType>(fn, in, out);
+#else
+    precision_dispatch<ValueType>(fn, in, out);
+#endif
 }
 
 
@@ -84,6 +94,7 @@ template <typename ValueType, typename Function,
 void mixed_precision_base_dispatch_real_complex(Function fn, const LinOp* in,
                                                 LinOp* out)
 {
+#ifdef GINKGO_MIXED_PRECISION
     if (!dynamic_cast<const ConvertibleTo<matrix::Dense<>>*>(in)) {
         mixed_precision_base_dispatch<to_complex<ValueType>>(
             [&fn](auto dense_in, auto dense_out) {
@@ -94,6 +105,9 @@ void mixed_precision_base_dispatch_real_complex(Function fn, const LinOp* in,
     } else {
         mixed_precision_base_dispatch<ValueType>(fn, in, out);
     }
+#else
+    precision_dispatch_real_complex<ValueType>(fn, in, out);
+#endif
 }
 
 
