@@ -14,6 +14,7 @@
 #include <ginkgo/core/solver/solver_base.hpp>
 
 #include "core/distributed/helpers.hpp"
+#include "core/matrix/amp_helpers.hpp"
 #include "core/solver/gauss_seidel_kernels.hpp"
 #include "core/solver/solver_boilerplate.hpp"
 
@@ -89,9 +90,8 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_impl(const LinOp* b,
     if (!this->get_system_matrix()) {
         return;
     }
-    experimental::precision_dispatch_real_complex_distributed<ValueType>(
+    mixed_precision_base_dispatch_real_complex<ValueType>(
         [this](auto dense_b, auto dense_x) {
-            // prepare_initial_guess(dense_b, dense_x, guess);
             this->apply_dense_impl(dense_b, dense_x);
         },
         b, x);
@@ -99,9 +99,9 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_impl(const LinOp* b,
 
 
 template <typename ValueType, typename IndexType>
-template <typename VectorType>
+template <typename VectorType_b, typename VectorType_x>
 void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
-    const VectorType* dense_b, VectorType* dense_x) const
+    const VectorType_b* dense_b, VectorType_x* dense_x) const
 {
     using ws = workspace_traits<FwdGaussSeidel>;
     constexpr uint8 stopping_id{1};
@@ -117,7 +117,7 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
         std::shared_ptr<const LinOp>(dense_b, [](const LinOp*) {}), dense_x);
 
     if (parameters_.init_guess_mode == initial_guess_mode::zero) {
-        dense_x->fill(zero<typename VectorType::value_type>());
+        dense_x->fill(zero<typename VectorType_x::value_type>());
     } else if (parameters_.init_guess_mode == initial_guess_mode::rhs) {
         dense_x->copy_from(dense_b);
     }
@@ -190,14 +190,17 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_impl(const LinOp* alpha,
     if (!this->get_system_matrix()) {
         return;
     }
-    experimental::precision_dispatch_real_complex_distributed<ValueType>(
-        [this](auto dense_alpha, auto dense_b, auto dense_beta, auto dense_x) {
+    mixed_precision_base_dispatch_real_complex<ValueType>(
+        [this, alpha, beta](auto dense_b, auto dense_x) {
+            // auto d_alpha = make_temporary_conversion<ValueType>(alpha);
+            // auto d_beta = make_temporary_conversion<
+            //     typename std::decay_t<decltype(*dense_x)>::value_type>(beta);
             auto x_clone = dense_x->clone();
             this->apply_dense_impl(dense_b, x_clone.get());
-            dense_x->scale(dense_beta);
-            dense_x->add_scaled(dense_alpha, x_clone);
+            dense_x->scale(beta);
+            dense_x->add_scaled(alpha, x_clone);
         },
-        alpha, b, beta, x);
+        b, x);
 }
 
 

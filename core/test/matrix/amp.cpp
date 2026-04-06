@@ -541,10 +541,6 @@ TYPED_TEST(Amp, ApplyWithMixedPrecisionVectorsProducesCorrectResult)
     auto y_same_dense = Dense::create(this->exec);
     y_same->convert_to(y_same_dense.get());
     // y_other should have the same result (3.0 in each entry for all-ones 3x3)
-    // for (gko::size_type i = 0; i < 3; i++) {
-    //     EXPECT_NEAR(static_cast<double>(y_other->at(i, 0)),
-    //                 static_cast<double>(y_same_dense->at(i, 0)), 1e-5);
-    // }
     GKO_ASSERT_MTX_NEAR(y_same_dense, y_other, 1e-5);
 }
 

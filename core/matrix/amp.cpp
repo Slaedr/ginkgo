@@ -135,19 +135,6 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* alpha, const LinOp* b,
             }
         },
         b, x);
-    // if (csr_bins) {
-    //     this->get_executor()->run(amp::make_advanced_spmv_csr(
-    //         gko::as<matrix::Dense<ValueType>>(alpha), this,
-    //         gko::as<matrix::Dense<ValueType>>(b),
-    //         gko::as<matrix::Dense<ValueType>>(beta),
-    //         gko::as<matrix::Dense<ValueType>>(x)));
-    // } else {
-    //     this->get_executor()->run(amp::make_advanced_spmv_ell(
-    //         gko::as<matrix::Dense<ValueType>>(alpha), this,
-    //         gko::as<matrix::Dense<ValueType>>(b),
-    //         gko::as<matrix::Dense<ValueType>>(beta),
-    //         gko::as<matrix::Dense<ValueType>>(x)));
-    // }
 }
 
 
