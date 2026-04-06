@@ -13,6 +13,7 @@
 #include <ginkgo/core/matrix/ell.hpp>
 #include <ginkgo/core/solver/solver_base.hpp>
 
+#include "core/base/precision_dispatch_extra.hpp"
 #include "core/distributed/helpers.hpp"
 #include "core/matrix/amp_helpers.hpp"
 #include "core/solver/gauss_seidel_kernels.hpp"
