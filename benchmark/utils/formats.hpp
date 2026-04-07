@@ -14,6 +14,7 @@
 
 #include <ginkgo/ginkgo.hpp>
 
+#include "benchmark/utils/json.hpp"
 #include "benchmark/utils/sparselib_linops.hpp"
 #include "benchmark/utils/types.hpp"
 
@@ -329,6 +330,42 @@ std::unique_ptr<gko::LinOp> matrix_factory(
             data);
     }
     return mat;
+}
+
+
+/**
+ * If the given LinOp is an AMP matrix, writes per-bin nonzero metadata
+ * into the provided JSON object under an "amp_bins" key.
+ * For AMP[CSR], records total nonzeros per bin.
+ * For AMP[ELL], records max nonzeros per row per bin.
+ */
+void write_amp_bin_info(const gko::LinOp* mtx, json& format_case)
+{
+    const auto* amp_mat = dynamic_cast<const amp_type*>(mtx);
+    if (!amp_mat) {
+        return;
+    }
+    using csr_double = gko::matrix::Csr<double, itype>;
+    using ell_double = gko::matrix::Ell<double, itype>;
+    const bool is_csr =
+        dynamic_cast<const csr_double*>(amp_mat->get_bin_matrix(0)) != nullptr;
+    auto bins_json = json::object();
+    for (int k = 0; k < amp_type::num_precisions; ++k) {
+        const auto* bin = amp_mat->get_bin_matrix(k);
+        if (!bin) {
+            continue;
+        }
+        const auto key = "bin_" + std::to_string(k);
+        if (is_csr) {
+            const auto* bin_csr = static_cast<const csr_double*>(bin);
+            bins_json[key] = bin_csr->get_num_stored_elements();
+        } else {
+            const auto* bin_ell = static_cast<const ell_double*>(bin);
+            bins_json[key] = bin_ell->get_num_stored_elements_per_row();
+        }
+    }
+    bins_json["base_type"] = is_csr ? "csr" : "ell";
+    format_case["amp_bins"] = std::move(bins_json);
 }
 
 

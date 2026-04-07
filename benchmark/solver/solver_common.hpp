@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -440,9 +440,14 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             auto [data, size] = generator.generate_matrix_data(test_case);
             auto permutation = reorder(data, test_case);
 
+            const auto spmv_format =
+                test_case["optimal"]["spmv"].get<std::string>();
             state.system_matrix = generator.generate_matrix_with_format(
-                exec, test_case["optimal"]["spmv"].get<std::string>(), data,
-                size);
+                exec, spmv_format, data, size);
+            if (spmv_format == "amp") {
+                formats::write_amp_bin_info(state.system_matrix.get(),
+                                            test_case);
+            }
             state.b = generator.generate_rhs(exec, state.system_matrix.get(),
                                              test_case);
             if (permutation) {
