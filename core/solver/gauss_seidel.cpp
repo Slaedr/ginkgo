@@ -123,7 +123,7 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
         dense_x->copy_from(dense_b);
     }
 
-    int iter = -1;
+    int iter = 0;
 
     auto ellmat =
         std::dynamic_pointer_cast<const matrix::Ell<ValueType, IndexType>>(
@@ -139,8 +139,6 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
     }
 
     while (true) {
-        ++iter;
-
         if (ellmat) {
             exec->run(gssdl::make_multicolor_fgs_ell(
                 color_row_ptrs_, ellmat.get(), gko::detail::get_local(dense_b),
@@ -165,6 +163,8 @@ void FwdGaussSeidel<ValueType, IndexType>::apply_dense_impl(
                 color_row_ptrs_, csrmat.get(), gko::detail::get_local(dense_b),
                 gko::detail::get_local(dense_x), iter == 0, &stop_status));
         }
+
+        ++iter;
 
         bool one_changed = false;
         bool all_stopped =

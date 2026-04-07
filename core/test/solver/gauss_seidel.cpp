@@ -292,6 +292,35 @@ TYPED_TEST(FwdGaussSeidel, ColorPtrsAreStoredFromParameters)
 }
 
 
+// After one sweep starting from x=0:
+//   Color 0: x[0] = b[0]/2,  x[1] = b[1]/3
+//   Color 1: x[2] = (b[2] - A[2,0]*x[0]) / 4
+//            x[3] = (b[3] - A[3,1]*x[1]) / 5
+TYPED_TEST(FwdGaussSeidel, CorrectSingleIterationFromZero)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Vec = gko::matrix::Dense<value_type>;
+    using Solver = typename TestFixture::Solver;
+
+    auto b = gko::initialize<Vec>({2.0, 3.0, 3.0, 2.0}, this->exec);
+    auto x = gko::initialize<Vec>({0.0, 0.0, 0.0, 0.0}, this->exec);
+    auto stop = gko::array<gko::stopping_status>(this->exec, 1);
+
+    auto solver =
+        Solver::build()
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
+            .with_color_ptrs(std::vector<index_type>{0, 2, 4})
+            .on(this->exec)
+            ->generate(this->mtx);
+    solver->apply(b, x);
+
+    // x[0] = 2/2 = 1, x[1] = 3/3 = 1
+    // x[2] = (3 - 1*1)/4 = 0.5, x[3] = (2 - 1*1)/5 = 0.2
+    GKO_ASSERT_MTX_NEAR(x, l({1.0, 1.0, 0.5, 0.2}), r<value_type>::value);
+}
+
+
 TYPED_TEST(FwdGaussSeidel, IterationConvergesTowardKnownExactSolution)
 {
     using value_type = typename TestFixture::value_type;
