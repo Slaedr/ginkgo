@@ -57,6 +57,33 @@ if [ ! "${ELL_IMBALANCE_LIMIT}" ]; then
     print_default ELL_IMBALANCE_LIMIT
 fi
 
+if [ ! "${AMP_BASE_TYPE}" ]; then
+    AMP_BASE_TYPE="ell"
+    print_default AMP_BASE_TYPE
+fi
+
+if [ "${AMP_BASE_TYPE}" != "ell" ] && [ "${AMP_BASE_TYPE}" != "csr" ]; then
+    echo "AMP_BASE_TYPE is set to the unsupported \"${AMP_BASE_TYPE}\"." 1>&2
+    echo "Currently supported values: \"ell\" and \"csr\"" 1>&2
+    exit 1
+fi
+
+if [ ! "${AMP_TOLERANCE_TYPE}" ]; then
+    AMP_TOLERANCE_TYPE="componentwise"
+    print_default AMP_TOLERANCE_TYPE
+fi
+
+if [ "${AMP_TOLERANCE_TYPE}" != "componentwise" ] && [ "${AMP_TOLERANCE_TYPE}" != "normwise" ]; then
+    echo "AMP_TOLERANCE_TYPE is set to the unsupported \"${AMP_TOLERANCE_TYPE}\"." 1>&2
+    echo "Currently supported values: \"componentwise\" and \"normwise\"" 1>&2
+    exit 1
+fi
+
+if [ ! "${AMP_TOLERANCE}" ]; then
+    AMP_TOLERANCE="1e-14"
+    print_default AMP_TOLERANCE
+fi
+
 if [ ! "${SOLVERS}" ]; then
     SOLVERS="bicgstab,cg,cgs,fcg,gmres,cb_gmres_reduce1,idr"
     print_default SOLVERS
@@ -236,6 +263,9 @@ run_conversion_benchmarks() {
                 --device_id="${DEVICE_ID}" --gpu_timer=${GPU_TIMER} --timer_method=${TIMER_OUTPUT} \
                 --repetitions="${REPETITIONS}" \
                 --ell_imbalance_limit="${ELL_IMBALANCE_LIMIT}" \
+                --amp_base_type="${AMP_BASE_TYPE}" \
+                --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
+                --amp_tolerance="${AMP_TOLERANCE}" \
                 <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }
@@ -254,6 +284,9 @@ run_spmv_benchmarks() {
                 --device_id="${DEVICE_ID}" --gpu_timer=${GPU_TIMER} --timer_method=${TIMER_OUTPUT} \
                 --repetitions="${REPETITIONS}" \
                 --ell_imbalance_limit="${ELL_IMBALANCE_LIMIT}" \
+                --amp_base_type="${AMP_BASE_TYPE}" \
+                --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
+                --amp_tolerance="${AMP_TOLERANCE}" \
                 <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }
@@ -276,6 +309,9 @@ run_solver_benchmarks() {
                     --jacobi_max_block_size=${SOLVERS_JACOBI_MAX_BS} --device_id="${DEVICE_ID}" \
                     --gmres_restart="${SOLVERS_GMRES_RESTART}" \
                     --repetitions="${SOLVER_REPETITIONS}" \
+                    --amp_base_type="${AMP_BASE_TYPE}" \
+                    --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
+                    --amp_tolerance="${AMP_TOLERANCE}" \
                     <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }
