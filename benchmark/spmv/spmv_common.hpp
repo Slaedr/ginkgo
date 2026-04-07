@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -114,6 +114,7 @@ struct SpmvBenchmark : Benchmark<spmv_benchmark_state<Generator>> {
         auto system_matrix = generator.generate_matrix_with_format(
             exec, format_name, state.data.first, state.data.second,
             &format_case);
+        formats::write_amp_bin_info(system_matrix.get(), format_case);
 
         // check the residual
         if (FLAGS_detailed) {

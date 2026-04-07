@@ -14,6 +14,7 @@
 
 #include <ginkgo/ginkgo.hpp>
 
+#include "benchmark/utils/json.hpp"
 #include "benchmark/utils/sparselib_linops.hpp"
 #include "benchmark/utils/types.hpp"
 
@@ -25,7 +26,7 @@ std::string available_format =
     "coo, csr, ell, ell_mixed, sellp, hybrid, hybrid0, hybrid25, hybrid33, "
     "hybrid40, "
     "hybrid60, hybrid80, hybridlimit0, hybridlimit25, hybridlimit33, "
-    "hybridminstorage, amp, amp_normwise"
+    "hybridminstorage, amp"
 #ifdef HAS_CUDA
     ", cusparse_csr, cusparse_csrex, cusparse_coo"
     ", cusparse_csrmp, cusparse_csrmm, cusparse_ell, cusparse_hybrid"
@@ -64,10 +65,11 @@ std::string format_description =
     "    but with an additional absolute limit on the number of entries\n"
     "    per row stored in ELL.\n"
     "hybridminstorage: Use the minimal storage to store the matrix.\n"
-    "amp: Adaptive Mixed Precision format. Sorts nonzeros into ELL bins of\n"
-    "     different precisions (FP64/FP32/BF16/FP16) using componentwise\n"
-    "     tolerance strategy.\n"
-    "amp_normwise: AMP format with normwise tolerance strategy."
+    "amp: Adaptive Mixed Precision format. Sorts nonzeros into bins of\n"
+    "     different precisions (FP64/FP32/BF16/FP16). Base format is\n"
+    "     controlled by --amp_base_type (ell or csr), tolerance type by\n"
+    "     --amp_tolerance_type (componentwise or normwise), and tolerance\n"
+    "     value by --amp_tolerance."
 #ifdef HAS_CUDA
     "\n"
     "cusparse_coo: cuSPARSE COO SpMV, using cusparseXhybmv with \n"
@@ -127,6 +129,12 @@ DEFINE_int64(ell_imbalance_limit, 100,
 DEFINE_double(amp_tolerance, 1e-14,
               "Backward error (componentwise/normwise) "
               "tolerance for AMP matrix type.");
+
+DEFINE_string(amp_base_type, "ell",
+              "Base matrix format for AMP: \"ell\" or \"csr\".");
+
+DEFINE_string(amp_tolerance_type, "componentwise",
+              "Tolerance type for AMP: \"componentwise\" or \"normwise\".");
 
 
 namespace formats {
@@ -278,17 +286,26 @@ std::unique_ptr<gko::LinOp> matrix_factory(
     const std::string& format, std::shared_ptr<const gko::Executor> exec,
     const gko::matrix_data<etype, itype>& data)
 {
-    if (format == "amp" || format == "amp_normwise") {
-        auto ell_mat = ell::create(exec);
-        ell_mat->read(data);
-        auto strategy = (format == "amp_normwise")
-                            ? amp_type::tolerance_type::normwise
-                            : amp_type::tolerance_type::componentwise;
+    if (format == "amp") {
+        const auto strategy = (FLAGS_amp_tolerance_type == "normwise")
+                                  ? amp_type::tolerance_type::normwise
+                                  : amp_type::tolerance_type::componentwise;
+        std::shared_ptr<gko::LinOp> base_mat;
+        if (FLAGS_amp_base_type == "csr") {
+            auto csr_mat = csr::create(exec);
+            csr_mat->read(data);
+            base_mat = std::move(csr_mat);
+        } else {
+            check_ell_admissibility(data);
+            auto ell_mat = ell::create(exec);
+            ell_mat->read(data);
+            base_mat = std::move(ell_mat);
+        }
         return amp_type::build()
             .with_strategy(strategy)
             .with_tolerance(static_cast<float>(FLAGS_amp_tolerance))
             .on(exec)
-            ->generate(gko::share(std::move(ell_mat)));
+            ->generate(std::move(base_mat));
     }
     auto mat = matrix_type_factory.at(format)(exec);
     if (format == "ell" || format == "ell_mixed") {
@@ -313,6 +330,42 @@ std::unique_ptr<gko::LinOp> matrix_factory(
             data);
     }
     return mat;
+}
+
+
+/**
+ * If the given LinOp is an AMP matrix, writes per-bin nonzero metadata
+ * into the provided JSON object under an "amp_bins" key.
+ * For AMP[CSR], records total nonzeros per bin.
+ * For AMP[ELL], records max nonzeros per row per bin.
+ */
+void write_amp_bin_info(const gko::LinOp* mtx, json& format_case)
+{
+    const auto* amp_mat = dynamic_cast<const amp_type*>(mtx);
+    if (!amp_mat) {
+        return;
+    }
+    using csr_double = gko::matrix::Csr<double, itype>;
+    using ell_double = gko::matrix::Ell<double, itype>;
+    const bool is_csr =
+        dynamic_cast<const csr_double*>(amp_mat->get_bin_matrix(0)) != nullptr;
+    auto bins_json = json::object();
+    for (int k = 0; k < amp_type::num_precisions; ++k) {
+        const auto* bin = amp_mat->get_bin_matrix(k);
+        if (!bin) {
+            continue;
+        }
+        const auto key = "bin_" + std::to_string(k);
+        if (is_csr) {
+            const auto* bin_csr = static_cast<const csr_double*>(bin);
+            bins_json[key] = bin_csr->get_num_stored_elements();
+        } else {
+            const auto* bin_ell = static_cast<const ell_double*>(bin);
+            bins_json[key] = bin_ell->get_num_stored_elements_per_row();
+        }
+    }
+    bins_json["base_type"] = is_csr ? "csr" : "ell";
+    format_case["amp_bins"] = std::move(bins_json);
 }
 
 
