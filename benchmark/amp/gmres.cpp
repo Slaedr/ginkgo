@@ -196,6 +196,10 @@ GmresStats run_gmres(comm_t comm, std::shared_ptr<const gko::Executor> exec,
     auto logger = gko::share(gko::log::Convergence<double>::create());
     solver->add_logger(logger);
 
+    // warm-up run
+    x->fill(0.0);
+    solver->apply(b, x);
+
     exec->synchronize();
     comm.synchronize();
     const auto t_solve0 = std::chrono::high_resolution_clock::now();
@@ -207,7 +211,8 @@ GmresStats run_gmres(comm_t comm, std::shared_ptr<const gko::Executor> exec,
     comm.synchronize();
     const auto t_solve1 = std::chrono::high_resolution_clock::now();
     const double solve_ms =
-        std::chrono::duration<double, std::milli>(t_solve1 - t_solve0).count();
+        std::chrono::duration<double, std::milli>(t_solve1 - t_solve0).count() /
+        cfg.solver_reps;
 
     // --- Final residual norm ---
     auto rnorm = RVec::create(exec, gko::dim<2>{1, 1});
