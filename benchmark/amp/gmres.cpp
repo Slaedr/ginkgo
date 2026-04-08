@@ -103,8 +103,10 @@ std::shared_ptr<const DistVec> compute_reference_solution(
     const double ref_tol = 1e-14;
 
     auto local_factory = gko::share(
-        gko::preconditioner::GaussSeidel<double, local_idx_t>::build().on(
-            exec));
+        FGS::build()
+            .with_color_ptrs(prob.color_ptrs)
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
+            .on(exec));
 
     auto solver =
         Gmres::build()
