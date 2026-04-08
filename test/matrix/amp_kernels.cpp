@@ -301,10 +301,14 @@ TEST_F(Amp, ExtractDiagonalIsEquivalentToRef)
 }
 
 
-TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0IsEmpty)
+TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 {
     using T = value_type;
-    // Build a constant 1D tridiagonal stencil [-1, 2, -1]
+    // Build a constant 1D tridiagonal stencil [-1, 2, -1].  At tau=0.01,
+    // the magnitude rule alone would put no entries into bin 0; the
+    // diagonal-in-bin-0 override forces every diagonal into bin 0, so
+    // bin 0 has nnzrow=1 (just diagonals).  This exercises the SpMV code
+    // path where bin 0 is populated only via the diagonal override.
     const int n = 64;
     auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
     dns_ref->fill(0.0);
@@ -317,10 +321,10 @@ TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0IsEmpty)
     dns_ref->convert_to(ell_ref.get());
     auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
         gko::share(ell_ref->clone()));
-    // Verify bin 0 is actually empty
+    // Verify bin 0 contains only the diagonals (one entry per row).
     auto bin0 = dynamic_cast<const Mtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
-    ASSERT_EQ(bin0->get_num_stored_elements_per_row(), 0);
+    ASSERT_EQ(bin0->get_num_stored_elements_per_row(), 1);
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(n, 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -336,9 +340,10 @@ TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0IsEmpty)
 }
 
 
-TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
+TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 {
     using T = value_type;
+    // See SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal for the rationale.
     const int n = 64;
     auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
     dns_ref->fill(0.0);
@@ -351,10 +356,10 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
     dns_ref->convert_to(ell_ref.get());
     auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
         gko::share(ell_ref->clone()));
-    // Verify bin 0 is actually empty
+    // Verify bin 0 contains only the diagonals (one entry per row).
     auto bin0 = dynamic_cast<const Mtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
-    ASSERT_EQ(bin0->get_num_stored_elements_per_row(), 0);
+    ASSERT_EQ(bin0->get_num_stored_elements_per_row(), 1);
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(n, 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -716,10 +721,13 @@ TEST_F(AmpCsr, ExtractDiagonalIsEquivalentToRef)
 }
 
 
-TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0IsEmpty)
+TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 {
     using T = value_type;
-    // Build a constant 1D tridiagonal stencil [-1, 2, -1] as CSR
+    // Build a constant 1D tridiagonal stencil [-1, 2, -1] as CSR.  At
+    // tau=0.01, the magnitude rule alone would put no entries into bin 0;
+    // the diagonal-in-bin-0 override forces every diagonal into bin 0,
+    // so bin 0 contains exactly n entries (one diagonal per row).
     const int n = 64;
     auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
     dns_ref->fill(0.0);
@@ -732,11 +740,11 @@ TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0IsEmpty)
     dns_ref->convert_to(csr_ref.get());
     auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
         gko::share(csr_ref->clone()));
-    // Verify bin 0 is actually empty (no nonzeros assigned to highest
-    // precision)
+    // Verify bin 0 contains only the diagonals (n entries).
     auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
-    ASSERT_EQ(bin0->get_num_stored_elements(), 0);
+    ASSERT_EQ(bin0->get_num_stored_elements(),
+              static_cast<gko::size_type>(n));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(n, 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -752,9 +760,10 @@ TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0IsEmpty)
 }
 
 
-TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
+TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 {
     using T = value_type;
+    // See SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal for the rationale.
     const int n = 64;
     auto dns_ref = Vec::create(ref, gko::dim<2>{n, n});
     dns_ref->fill(0.0);
@@ -767,10 +776,11 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0IsEmpty)
     dns_ref->convert_to(csr_ref.get());
     auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
         gko::share(csr_ref->clone()));
-    // Verify bin 0 is actually empty
+    // Verify bin 0 contains only the diagonals (n entries).
     auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
-    ASSERT_EQ(bin0->get_num_stored_elements(), 0);
+    ASSERT_EQ(bin0->get_num_stored_elements(),
+              static_cast<gko::size_type>(n));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(n, 1);
     auto b_d = gko::clone(exec, b_ref);

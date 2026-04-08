@@ -158,6 +158,43 @@ inline int get_adjusted_bin(
 }
 
 /**
+ * Get the precision bin for an entry that may be a diagonal.
+ *
+ * Diagonal entries are placed unconditionally in bin 0 (the highest
+ * precision) regardless of magnitude.  This protects iterative methods that
+ * divide by the diagonal (e.g., Gauss-Seidel, ILU sweeps) from accumulating
+ * the bin's quantization error in the divisor, and decouples the per-row
+ * error bound from the user's choice of AMP tolerance @c tau.  Off-diagonal
+ * entries are dispatched to @ref get_adjusted_bin as usual.
+ *
+ * The storage cost of this override is at most one extra FP64 entry per row
+ * compared to the pure binning rule, which is negligible relative to total
+ * matrix storage.
+ *
+ * @tparam RealType  Highest precision real type.
+ *
+ * @param lower_bounds  Lower bound of each precision bin,
+ *                      @see get_bins_precision_lower_bounds.
+ * @param min_representable  Minimum value that can be represented in each
+ *                           precision bin. @see get_bins_min_representable.
+ * @param abs_number  Absolute value of the entry to be classified.
+ * @param is_diagonal  True iff the entry sits on the matrix diagonal
+ *                     (i.e., its row and column indices are equal).
+ */
+template <typename RealType>
+inline int get_adjusted_bin_for_entry(
+    const precision_array<float, RealType>& lower_bounds,
+    const precision_array<RealType, RealType>& min_representable,
+    const RealType abs_number, const bool is_diagonal)
+{
+    if (is_diagonal) {
+        return 0;
+    }
+    return get_adjusted_bin<RealType>(lower_bounds, min_representable,
+                                      abs_number);
+}
+
+/**
  * Assigns a given value to the given index in a tuple.
  *
  * @tparam k  Position in the tuple to check against the runtime index.

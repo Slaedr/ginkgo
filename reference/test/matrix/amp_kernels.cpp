@@ -442,16 +442,22 @@ TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
         rexec, this->ell1.get(), this->tol, max_nnz);
 
+    // Bin 0 holds two entries in row 1: the diagonal a_{1,1}=1.2e-11
+    // (forced into bin 0 by the diagonal-in-bin-0 override) plus the
+    // off-diagonal a_{1,2}=2.0 that the magnitude rule already placed
+    // there.  Without the override the diagonal would be dropped
+    // entirely (it falls below every bin's lower bound), which would
+    // silently break Gauss-Seidel on this row.  See get_adjusted_bin_for_entry.
 #if GKO_AMP_HALF_IS_FP16
-    EXPECT_EQ(max_nnz[0], 1);
+    EXPECT_EQ(max_nnz[0], 2);
     EXPECT_EQ(max_nnz[1], 2);
     EXPECT_EQ(max_nnz[2], 0);
 #elif GKO_AMP_HALF_IS_BFLOAT16
-    EXPECT_EQ(max_nnz[0], 1);
+    EXPECT_EQ(max_nnz[0], 2);
     EXPECT_EQ(max_nnz[1], 1);
     EXPECT_EQ(max_nnz[2], 1);
 #else
-    EXPECT_EQ(max_nnz[0], 1);
+    EXPECT_EQ(max_nnz[0], 2);
     EXPECT_EQ(max_nnz[1], 2);
 #endif
 }
@@ -472,12 +478,15 @@ TYPED_TEST(AMPDouble, GenerateEllScattersBinsCorrectly)
 #endif
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
+    // Bin 0 has nnzrow=2 to accommodate both entries of row 1 after the
+    // diagonal-in-bin-0 override (the forced diagonal a_{1,1}=1.2e-11
+    // and the magnitude-binned a_{1,2}=2.0).
 #if GKO_AMP_HALF_IS_FP16
-    auto max_nnzs = gko::amp::precision_array<int, T>{1, 2, 0};
+    auto max_nnzs = gko::amp::precision_array<int, T>{2, 2, 0};
 #elif GKO_AMP_HALF_IS_BFLOAT16
-    auto max_nnzs = gko::amp::precision_array<int, T>{1, 1, 1};
+    auto max_nnzs = gko::amp::precision_array<int, T>{2, 1, 1};
 #else
-    auto max_nnzs = gko::amp::precision_array<int, T>{1, 2};
+    auto max_nnzs = gko::amp::precision_array<int, T>{2, 2};
 #endif
     auto abins = gko::amp::allocate_bins<T, int>(
         this->exec, this->ell1->get_size(), max_nnzs);
@@ -498,17 +507,35 @@ TYPED_TEST(AMPDouble, GenerateEllScattersBinsCorrectly)
         auto vals = amat0->get_const_values();
         auto colids = amat0->get_const_col_idxs();
         if (k == 0) {
-            EXPECT_EQ(nnzrow, 1);
-            EXPECT_EQ(colids[0], 0);
-            EXPECT_EQ(colids[1], 2);
-            EXPECT_EQ(colids[2], 2);
-            EXPECT_EQ(colids[3], 2);
-            EXPECT_EQ(colids[4], 2);
+            // Bin 0 nnzrow grew from 1 to 2 because the diagonal-in-bin-0
+            // override forces a_{1,1}=1.2e-11 into bin 0, displacing the
+            // a_{1,2}=2.0 entry that previously occupied row 1's only slot
+            // into the new second slot.  All other rows have only one
+            // bin-0 entry, so their slot-1 columns are invalid_index and
+            // values are zero.  ELL is column-major: index = slot*stride + row.
+            EXPECT_EQ(nnzrow, 2);
+            // slot 0 (rows 0..4)
+            EXPECT_EQ(colids[0], 0);  // row 0: a_{0,0}=1.1 (also diag)
+            EXPECT_EQ(colids[1], 1);  // row 1: a_{1,1}=1.2e-11 (diag, forced)
+            EXPECT_EQ(colids[2], 2);  // row 2: a_{2,2}=0.8 (also diag)
+            EXPECT_EQ(colids[3], 2);  // row 3: a_{3,2}=1.6e-4 (no diag in row)
+            EXPECT_EQ(colids[4], 2);  // row 4: a_{4,2}=-2.0  (no diag in row)
+            // slot 1 (rows 0..4)
+            EXPECT_EQ(colids[5], gko::invalid_index<int>());  // row 0
+            EXPECT_EQ(colids[6], 2);  // row 1: a_{1,2}=2.0 (displaced)
+            EXPECT_EQ(colids[7], gko::invalid_index<int>());  // row 2
+            EXPECT_EQ(colids[8], gko::invalid_index<int>());  // row 3
+            EXPECT_EQ(colids[9], gko::invalid_index<int>());  // row 4
             EXPECT_EQ(vals[0], static_cast<value_type>(1.1));
-            EXPECT_EQ(vals[1], static_cast<value_type>(2.0));
+            EXPECT_EQ(vals[1], static_cast<value_type>(1.2e-11));
             EXPECT_EQ(vals[2], static_cast<value_type>(0.8));
             EXPECT_EQ(vals[3], static_cast<value_type>(1.6e-4));
             EXPECT_EQ(vals[4], static_cast<value_type>(-2.0));
+            EXPECT_EQ(vals[5], static_cast<value_type>(0.0));
+            EXPECT_EQ(vals[6], static_cast<value_type>(2.0));
+            EXPECT_EQ(vals[7], static_cast<value_type>(0.0));
+            EXPECT_EQ(vals[8], static_cast<value_type>(0.0));
+            EXPECT_EQ(vals[9], static_cast<value_type>(0.0));
         }
 #if GKO_AMP_HALF_IS_FP16
         else if (k == 1) {
@@ -827,20 +854,22 @@ TYPED_TEST(AMPDouble, ExtractDiagonalSumsOverBins)
 
     // Diagonal entries from mtx1:
     // diag[0] = 1.1
-    // diag[1] = 0 (dropped from 1.2e-11)
+    // diag[1] = 1.2e-11 (forced into bin 0 by the diagonal-in-bin-0 override;
+    //          without it, this entry would be silently dropped)
     // diag[2] = 0.8
-    // diag[3] = 0.0
+    // diag[3] = 0.0 (no entry at (3,3) in the matrix)
     auto diag_vals = diag->get_const_values();
     EXPECT_NEAR(std::abs(diag_vals[0] - static_cast<T>(1.1)), real_T{0},
                 static_cast<real_T>(this->tol));
-    EXPECT_NEAR(std::abs(diag_vals[1]), real_T{0}, 0.0);
+    EXPECT_NEAR(std::abs(diag_vals[1] - static_cast<T>(1.2e-11)), real_T{0},
+                static_cast<real_T>(this->tol));
     EXPECT_NEAR(std::abs(diag_vals[2] - static_cast<T>(0.8)), real_T{0},
                 static_cast<real_T>(this->tol));
     EXPECT_NEAR(std::abs(diag_vals[3]), real_T{0}, 0.0);
 }
 
 
-TEST(AMPEmptyBin0, SpmvIsCorrectWhenBin0IsEmpty)
+TEST(AMPEmptyBin0, SpmvIsCorrectWhenBin0HasOnlyDiagonal)
 {
     using ValueType = double;
     using IndexType = int;
@@ -848,7 +877,13 @@ TEST(AMPEmptyBin0, SpmvIsCorrectWhenBin0IsEmpty)
     using Ell = gko::matrix::Ell<ValueType, IndexType>;
     using Vec = gko::matrix::Dense<ValueType>;
     auto exec = gko::ReferenceExecutor::create();
-    // 4x4 constant 1D stencil: [-1, 2, -1] (tridiagonal)
+    // 4x4 constant 1D stencil: [-1, 2, -1] (tridiagonal).  At tau=0.01, the
+    // magnitude rule alone would put no entries into bin 0 (every value is
+    // far below tau*r_i/eps^(1)), but the diagonal-in-bin-0 override forces
+    // every diagonal entry into bin 0, so bin 0 has nnzrow=1 holding only
+    // the diagonal.  This test exercises the SpMV code path where bin 0 is
+    // populated only via the diagonal override and the off-diagonals all
+    // live in lower-precision bins.
     // clang-format off
     auto dns = gko::initialize<gko::matrix::Dense<ValueType>>(
         {{ 2.0, -1.0,  0.0,  0.0},
@@ -864,7 +899,7 @@ TEST(AMPEmptyBin0, SpmvIsCorrectWhenBin0IsEmpty)
 
     auto bin0 = dynamic_cast<const Ell*>(amp->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
-    EXPECT_EQ(bin0->get_num_stored_elements_per_row(), 0);
+    EXPECT_EQ(bin0->get_num_stored_elements_per_row(), 1);
 
     auto x = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0}, exec);
     auto y_amp = Vec::create(exec, gko::dim<2>{4, 1});
@@ -1023,27 +1058,32 @@ TYPED_TEST(AMPFloat, GenerateEllScattersBinsCorrectly)
         ASSERT_TRUE(amat0);
         auto vals = amat0->get_const_values();
         auto colids = amat0->get_const_col_idxs();
+    // Note: row 1's bin 0 now contains both the forced diagonal
+    // (a_{1,1}=1.2e-11) and the magnitude-binned a_{1,2}=2.0; iterating
+    // over the original ELL stores col 1 before col 2, so slot 0 holds
+    // the diagonal and slot 1 holds 2.0.
 #if GKO_AMP_HALF_IS_FP16
         if (k == 0) {
             EXPECT_EQ(amat0->get_num_stored_elements_per_row(), 2);
             EXPECT_EQ(colids[0], 0);
-            EXPECT_EQ(colids[1], 2);
+            EXPECT_EQ(colids[1], 1);  // row 1 diag forced (was col 2)
             EXPECT_EQ(colids[2], 2);
             EXPECT_EQ(colids[3], 2);
             EXPECT_EQ(colids[4], 0);
             EXPECT_EQ(colids[5], gko::invalid_index<int>());
-            EXPECT_EQ(colids[6], gko::invalid_index<int>());
+            EXPECT_EQ(colids[6], 2);  // row 1 slot 1 = displaced 2.0
             EXPECT_EQ(colids[7], gko::invalid_index<int>());
             EXPECT_EQ(colids[8], gko::invalid_index<int>());
             EXPECT_EQ(colids[9], 2);
             EXPECT_EQ(vals[0], static_cast<value_type>(1.1));
-            EXPECT_EQ(vals[1], static_cast<value_type>(2.0));
+            EXPECT_EQ(vals[1], static_cast<value_type>(1.2e-11));
             EXPECT_EQ(vals[2], static_cast<value_type>(0.8));
             EXPECT_EQ(vals[3], static_cast<value_type>(1.6e-4));
             EXPECT_EQ(vals[4], static_cast<value_type>(-2e-5));
-            for (int j = 5; j < 9; j++) {
-                EXPECT_EQ(vals[j], static_cast<value_type>(0));
-            }
+            EXPECT_EQ(vals[5], static_cast<value_type>(0));
+            EXPECT_EQ(vals[6], static_cast<value_type>(2.0));
+            EXPECT_EQ(vals[7], static_cast<value_type>(0));
+            EXPECT_EQ(vals[8], static_cast<value_type>(0));
             EXPECT_EQ(vals[9], static_cast<value_type>(-2.0));
         } else if (k == 1) {
             EXPECT_EQ(amat0->get_num_stored_elements_per_row(), 1);
@@ -1062,22 +1102,23 @@ TYPED_TEST(AMPFloat, GenerateEllScattersBinsCorrectly)
         if (k == 0) {
             EXPECT_EQ(amat0->get_num_stored_elements_per_row(), 2);
             EXPECT_EQ(colids[0], 0);
-            EXPECT_EQ(colids[1], 2);
+            EXPECT_EQ(colids[1], 1);  // row 1 diag forced (was col 2)
             EXPECT_EQ(colids[2], 2);
             EXPECT_EQ(colids[3], 2);
             EXPECT_EQ(colids[4], 2);
             EXPECT_EQ(colids[5], 3);
-            EXPECT_EQ(colids[6], gko::invalid_index<int>());
+            EXPECT_EQ(colids[6], 2);  // row 1 slot 1 = displaced 2.0
             EXPECT_EQ(colids[7], gko::invalid_index<int>());
             EXPECT_EQ(colids[8], gko::invalid_index<int>());
             EXPECT_EQ(colids[9], gko::invalid_index<int>());
             EXPECT_EQ(vals[0], static_cast<value_type>(1.1));
-            EXPECT_EQ(vals[1], static_cast<value_type>(2.0));
+            EXPECT_EQ(vals[1], static_cast<value_type>(1.2e-11));
             EXPECT_EQ(vals[2], static_cast<value_type>(0.8));
             EXPECT_EQ(vals[3], static_cast<value_type>(1.6e-4));
             EXPECT_EQ(vals[4], static_cast<value_type>(-2.0));
             EXPECT_EQ(vals[5], static_cast<value_type>(4.5e-4));
-            for (int j = 6; j < 10; j++) {
+            EXPECT_EQ(vals[6], static_cast<value_type>(2.0));
+            for (int j = 7; j < 10; j++) {
                 EXPECT_EQ(vals[j], static_cast<value_type>(0));
             }
         } else if (k == 1) {
@@ -1098,22 +1139,23 @@ TYPED_TEST(AMPFloat, GenerateEllScattersBinsCorrectly)
         if (k == 0) {
             EXPECT_EQ(amat0->get_num_stored_elements_per_row(), 2);
             EXPECT_EQ(colids[0], 0);
-            EXPECT_EQ(colids[1], 2);
+            EXPECT_EQ(colids[1], 1);  // row 1 diag forced (was col 2)
             EXPECT_EQ(colids[2], 2);
             EXPECT_EQ(colids[3], 2);
             EXPECT_EQ(colids[4], 0);
             EXPECT_EQ(colids[5], 3);
-            EXPECT_EQ(colids[6], gko::invalid_index<int>());
+            EXPECT_EQ(colids[6], 2);  // row 1 slot 1 = displaced 2.0
             EXPECT_EQ(colids[7], gko::invalid_index<int>());
             EXPECT_EQ(colids[8], gko::invalid_index<int>());
             EXPECT_EQ(colids[9], 2);
             EXPECT_EQ(vals[0], static_cast<value_type>(1.1));
-            EXPECT_EQ(vals[1], static_cast<value_type>(2.0));
+            EXPECT_EQ(vals[1], static_cast<value_type>(1.2e-11));
             EXPECT_EQ(vals[2], static_cast<value_type>(0.8));
             EXPECT_EQ(vals[3], static_cast<value_type>(1.6e-4));
             EXPECT_EQ(vals[4], static_cast<value_type>(-2e-5));
             EXPECT_EQ(vals[5], static_cast<value_type>(4.5e-4));
-            for (int j = 6; j < 9; j++) {
+            EXPECT_EQ(vals[6], static_cast<value_type>(2.0));
+            for (int j = 7; j < 9; j++) {
                 EXPECT_EQ(vals[j], static_cast<value_type>(0));
             }
             EXPECT_EQ(vals[9], static_cast<value_type>(-2.0));
@@ -1353,13 +1395,15 @@ TYPED_TEST(AMPFloat, ExtractDiagonalSumsOverBins)
 
     // Diagonal entries from mtx1:
     // diag[0] = 1.1
-    // diag[1] = 0 (dropped from 1.2e-11)
+    // diag[1] = 1.2e-11 (forced into bin 0 by the diagonal-in-bin-0 override;
+    //          without it, this entry would be silently dropped)
     // diag[2] = 0.8
-    // diag[3] = 0.0
+    // diag[3] = 0.0 (no entry at (3,3) in the matrix)
     auto diag_vals = diag->get_const_values();
     EXPECT_NEAR(std::abs(diag_vals[0] - static_cast<T>(1.1)), real_T{0},
                 static_cast<real_T>(this->tol));
-    EXPECT_NEAR(std::abs(diag_vals[1]), real_T{0}, 0.0);
+    EXPECT_NEAR(std::abs(diag_vals[1] - static_cast<T>(1.2e-11)), real_T{0},
+                static_cast<real_T>(this->tol));
     EXPECT_NEAR(std::abs(diag_vals[2] - static_cast<T>(0.8)), real_T{0},
                 static_cast<real_T>(this->tol));
     EXPECT_NEAR(std::abs(diag_vals[3]), real_T{0}, 0.0);
@@ -1421,9 +1465,14 @@ TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizes)
         rexec, this->csr1.get(), this->tol, row_sz_ptrs);
 
     auto rnv = row_sz_ptrs;
-    for (int i = 0; i < 5; i++) {
-        EXPECT_EQ(rnv[0][i], 1);
-    }
+    // Bin 0: rows 0, 2, 3, 4 each contribute 1 entry; row 1 contributes 2
+    // (the diagonal a_{1,1}=1.2e-11 is forced into bin 0 by the
+    // diagonal-in-bin-0 override on top of the magnitude-binned a_{1,2}=2.0).
+    EXPECT_EQ(rnv[0][0], 1);
+    EXPECT_EQ(rnv[0][1], 2);
+    EXPECT_EQ(rnv[0][2], 1);
+    EXPECT_EQ(rnv[0][3], 1);
+    EXPECT_EQ(rnv[0][4], 1);
 #if GKO_AMP_HALF_IS_FP16
     EXPECT_EQ(rnv[1][0], 2);
     EXPECT_EQ(rnv[1][1], 0);
@@ -1467,9 +1516,13 @@ TYPED_TEST(AMPDoubleCsr, GenerateCsrScattersBinsCorrectly)
         row_sizes[i].resize_and_reset(this->csr1->get_size()[0] + 1);
     }
     auto row_ptrs = gko::amp::get_pointer_array<index_type, T>(row_sizes);
-    for (int i = 0; i < 5; i++) {
-        row_ptrs[0][i] = 1;
-    }
+    // Bin 0 row sizes: row 1 has two entries (diagonal a_{1,1} forced into
+    // bin 0 plus the magnitude-binned a_{1,2}=2.0); all other rows have 1.
+    row_ptrs[0][0] = 1;
+    row_ptrs[0][1] = 2;
+    row_ptrs[0][2] = 1;
+    row_ptrs[0][3] = 1;
+    row_ptrs[0][4] = 1;
 #if GKO_AMP_HALF_IS_FP16
     row_ptrs[1][0] = 2;
     row_ptrs[1][1] = 0;
@@ -1519,23 +1572,26 @@ TYPED_TEST(AMPDoubleCsr, GenerateCsrScattersBinsCorrectly)
         auto vals = cbin->get_const_values();
 
         if (k == 0) {
-            // Bin 0: one dominant entry per row
+            // Bin 0: row 1 has two entries (forced diagonal + magnitude-binned
+            // off-diagonal); rows 0, 2, 3, 4 each have one entry.
             EXPECT_EQ(row_ptrs[0], 0);
             EXPECT_EQ(row_ptrs[1], 1);
-            EXPECT_EQ(row_ptrs[2], 2);
-            EXPECT_EQ(row_ptrs[3], 3);
-            EXPECT_EQ(row_ptrs[4], 4);
-            EXPECT_EQ(row_ptrs[5], 5);
-            EXPECT_EQ(col_idxs[0], 0);
-            EXPECT_EQ(col_idxs[1], 2);
-            EXPECT_EQ(col_idxs[2], 2);
-            EXPECT_EQ(col_idxs[3], 2);
-            EXPECT_EQ(col_idxs[4], 2);
+            EXPECT_EQ(row_ptrs[2], 3);
+            EXPECT_EQ(row_ptrs[3], 4);
+            EXPECT_EQ(row_ptrs[4], 5);
+            EXPECT_EQ(row_ptrs[5], 6);
+            EXPECT_EQ(col_idxs[0], 0);  // row 0, a_{0,0}=1.1
+            EXPECT_EQ(col_idxs[1], 1);  // row 1, a_{1,1}=1.2e-11 (diag, forced)
+            EXPECT_EQ(col_idxs[2], 2);  // row 1, a_{1,2}=2.0
+            EXPECT_EQ(col_idxs[3], 2);  // row 2, a_{2,2}=0.8
+            EXPECT_EQ(col_idxs[4], 2);  // row 3, a_{3,2}=1.6e-4
+            EXPECT_EQ(col_idxs[5], 2);  // row 4, a_{4,2}=-2.0
             EXPECT_EQ(vals[0], static_cast<value_type>(1.1));
-            EXPECT_EQ(vals[1], static_cast<value_type>(2.0));
-            EXPECT_EQ(vals[2], static_cast<value_type>(0.8));
-            EXPECT_EQ(vals[3], static_cast<value_type>(1.6e-4));
-            EXPECT_EQ(vals[4], static_cast<value_type>(-2.0));
+            EXPECT_EQ(vals[1], static_cast<value_type>(1.2e-11));
+            EXPECT_EQ(vals[2], static_cast<value_type>(2.0));
+            EXPECT_EQ(vals[3], static_cast<value_type>(0.8));
+            EXPECT_EQ(vals[4], static_cast<value_type>(1.6e-4));
+            EXPECT_EQ(vals[5], static_cast<value_type>(-2.0));
         }
 #if GKO_AMP_HALF_IS_FP16
         else if (k == 1) {
@@ -1714,13 +1770,16 @@ TYPED_TEST(AMPDoubleCsr, ExtractDiagonalIsCorrect)
                                                    diag.get());
 
     // diag[0] = 1.1 (dominant, in bin 0)
-    // diag[1] = dropped (1.2e-11 is too small), no diagonal entry
+    // diag[1] = 1.2e-11 (forced into bin 0 by the diagonal-in-bin-0
+    //          override; without it, this entry would be dropped because
+    //          its magnitude is below every bin's lower bound for tau=1e-10)
     // diag[2] = 0.8 (dominant, in bin 0)
     // diag[3] = 0.0 (no entry at (3,3) in the matrix)
     auto diag_vals = diag->get_const_values();
     EXPECT_NEAR(std::abs(diag_vals[0] - static_cast<T>(1.1)), real_T{0},
                 static_cast<real_T>(this->tol));
-    EXPECT_NEAR(std::abs(diag_vals[1]), real_T{0}, 0.0);
+    EXPECT_NEAR(std::abs(diag_vals[1] - static_cast<T>(1.2e-11)), real_T{0},
+                static_cast<real_T>(this->tol));
     EXPECT_NEAR(std::abs(diag_vals[2] - static_cast<T>(0.8)), real_T{0},
                 static_cast<real_T>(this->tol));
     EXPECT_NEAR(std::abs(diag_vals[3]), real_T{0}, 0.0);
