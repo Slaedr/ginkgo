@@ -62,24 +62,23 @@ using DistVec = dist_vec_t<double>;
 using DistMtx = dist_mtx_t<double>;
 
 /**
- * Generate a sine-wave RHS as a distributed vector.
- * Each rank fills its local portion based on global row indices.
+ * Generate a uniform-1 RHS as a distributed vector.
+ * Each rank fills its local portion with 1.
  */
-std::shared_ptr<const DistVec> generate_rhs(
+template <typename scalar_t>
+std::shared_ptr<const dist_vec_t<scalar_t>> generate_rhs(
     std::shared_ptr<const gko::Executor> exec, comm_t comm,
     const gko::size_type global_n, const gko::size_type local_n, const int rank)
 {
-    // const auto offset = static_cast<gko::size_type>(rank) * local_n;
-    auto local_b = Vec::create(exec->get_master(), gko::dim<2>{local_n, 1});
+    auto local_b = gko::matrix::Dense<scalar_t>::create(
+        exec->get_master(), gko::dim<2>{local_n, 1});
     auto vals = local_b->get_values();
     for (gko::size_type i = 0; i < local_n; ++i) {
-        // const auto gx = static_cast<double>(offset + i);
-        // vals[i] = 2.0 * std::sin(4.0 * 3.14159265358979 * gx / global_n);
-        vals[i] = 1.0;
+        vals[i] = scalar_t{1};
     }
     auto local_dev = gko::clone(exec, local_b);
-    return gko::share(DistVec::create(exec, comm, gko::dim<2>{global_n, 1},
-                                      std::move(local_dev)));
+    return gko::share(dist_vec_t<scalar_t>::create(
+        exec, comm, gko::dim<2>{global_n, 1}, std::move(local_dev)));
 }
 
 /**
@@ -151,36 +150,45 @@ std::shared_ptr<const DistVec> compute_reference_solution(
 
 /**
  * Solve A*x = b using distributed GMRES + Schwarz(FGS) preconditioner.
- * Returns timing, iteration count, and solution error vs x_ref.
+ * Returns timing, iteration count, and solution error vs x_ref (double).
  */
+template <typename scalar_t>
 GmresStats run_gmres(comm_t comm, std::shared_ptr<const gko::Executor> exec,
                      const std::vector<local_idx_t>& color_ptrs,
                      std::shared_ptr<const gko::LinOp> system_mat,
-                     std::shared_ptr<const DistVec> b,
+                     std::shared_ptr<const dist_vec_t<scalar_t>> b,
                      std::shared_ptr<const DistVec> x_ref,
                      const gko::size_type global_n,
                      const gko::size_type local_n, const Config& cfg)
 {
+    using Schwarz_t = gko::experimental::distributed::preconditioner::Schwarz<
+        scalar_t, local_idx_t, global_idx_t>;
+    using FGS_t = gko::solver::FwdGaussSeidel<scalar_t, local_idx_t>;
+    using Gmres_t = gko::solver::Gmres<scalar_t>;
+    using Vec_t = gko::matrix::Dense<scalar_t>;
+    using RVec_t = gko::matrix::Dense<gko::remove_complex<scalar_t>>;
+
     // --- Setup ---
     exec->synchronize();
     comm.synchronize();
     const auto t_setup0 = std::chrono::high_resolution_clock::now();
 
     auto fgs_factory = gko::share(
-        FGS::build()
+        FGS_t::build()
             .with_color_ptrs(color_ptrs)
             .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
             .on(exec));
     auto solver =
-        Gmres::build()
+        Gmres_t::build()
             .with_krylov_dim(static_cast<gko::size_type>(cfg.gmres_krylov_dim))
-            .with_criteria(
-                gko::stop::Iteration::build().with_max_iters(
-                    static_cast<unsigned>(cfg.gmres_max_iters)),
-                gko::stop::ResidualNorm<double>::build().with_reduction_factor(
-                    cfg.gmres_tol))
+            .with_criteria(gko::stop::Iteration::build().with_max_iters(
+                               static_cast<unsigned>(cfg.gmres_max_iters)),
+                           gko::stop::ResidualNorm<scalar_t>::build()
+                               .with_reduction_factor(
+                                   static_cast<gko::remove_complex<scalar_t>>(
+                                       cfg.gmres_tol)))
             .with_preconditioner(
-                Schwarz::build().with_local_solver(fgs_factory).on(exec))
+                Schwarz_t::build().with_local_solver(fgs_factory).on(exec))
             .on(exec)
             ->generate(system_mat);
     exec->synchronize();
@@ -189,22 +197,22 @@ GmresStats run_gmres(comm_t comm, std::shared_ptr<const gko::Executor> exec,
     const double setup_ms =
         std::chrono::duration<double, std::milli>(t_setup1 - t_setup0).count();
 
-    auto x = DistVec::create(exec, comm, gko::dim<2>{global_n, 1},
-                             gko::dim<2>{local_n, 1});
+    auto x = dist_vec_t<scalar_t>::create(exec, comm, gko::dim<2>{global_n, 1},
+                                          gko::dim<2>{local_n, 1});
 
     // --- Solve ---
-    auto logger = gko::share(gko::log::Convergence<double>::create());
+    auto logger = gko::share(gko::log::Convergence<scalar_t>::create());
     solver->add_logger(logger);
 
     // warm-up run
-    x->fill(0.0);
+    x->fill(scalar_t{0});
     solver->apply(b, x);
 
     exec->synchronize();
     comm.synchronize();
     const auto t_solve0 = std::chrono::high_resolution_clock::now();
     for (int irep = 0; irep < cfg.solver_reps; ++irep) {
-        x->fill(0.0);
+        x->fill(scalar_t{0});
         solver->apply(b, x);
     }
     exec->synchronize();
@@ -215,17 +223,23 @@ GmresStats run_gmres(comm_t comm, std::shared_ptr<const gko::Executor> exec,
         cfg.solver_reps;
 
     // --- Final residual norm ---
-    auto rnorm = RVec::create(exec, gko::dim<2>{1, 1});
+    auto rnorm = RVec_t::create(exec, gko::dim<2>{1, 1});
     auto residual = gko::clone(exec, b);
-    const auto one = gko::initialize<Vec>({1.0}, exec);
-    const auto neg_one = gko::initialize<Vec>({-1.0}, exec);
+    const auto one = gko::initialize<Vec_t>({scalar_t{1}}, exec);
+    const auto neg_one = gko::initialize<Vec_t>({scalar_t{-1}}, exec);
     system_mat->apply(neg_one, x, one, residual);  // residual = b - A*x
     residual->compute_norm2(rnorm);
     const double final_res_norm =
-        gko::clone(exec->get_master(), rnorm)->at(0, 0);
+        static_cast<double>(gko::clone(exec->get_master(), rnorm)->at(0, 0));
 
-    // --- Solution error vs reference ---
-    const double err = relative_error(exec, x.get(), x_ref.get());
+    // --- Solution error vs reference (always double) ---
+    double err{};
+    if constexpr (std::is_same_v<scalar_t, double>) {
+        err = relative_error(exec, x.get(), x_ref.get());
+    } else {
+        const auto x_d = to_dist_double(exec, comm, x.get());
+        err = relative_error(exec, x_d.get(), x_ref.get());
+    }
 
     return {setup_ms,
             solve_ms,
@@ -290,7 +304,7 @@ int main(int argc, char* argv[])
     if (do_print) {
         std::cout << "Generating RHS and reference solution...\n";
     }
-    const auto b = generate_rhs(exec, comm, global_n, local_n, rank);
+    const auto b = generate_rhs<double>(exec, comm, global_n, local_n, rank);
 
     // ---- Initial residual norm ----
     json results;
@@ -392,6 +406,37 @@ int main(int argc, char* argv[])
         s.setup_ms += setup_ms;
         print_row(fmt_upper + "<double>", s, s);
         ref_s = s;
+    }
+
+    // ---- Base<float> system ----
+    {
+        exec->synchronize();
+        comm.synchronize();
+        const auto t0 = std::chrono::high_resolution_clock::now();
+
+        gko::matrix_data<float, global_idx_t> mat_data_f;
+        mat_data_f.size = mat_data.size;
+        mat_data_f.nonzeros.reserve(mat_data.nonzeros.size());
+        for (const auto& nz : mat_data.nonzeros) {
+            mat_data_f.nonzeros.emplace_back(nz.row, nz.column,
+                                             static_cast<float>(nz.value));
+        }
+        auto float_mat =
+            gko::share(create_dist_matrix<float, local_idx_t, global_idx_t>(
+                exec, comm, cfg));
+        float_mat->read_distributed(mat_data_f, partition);
+        exec->synchronize();
+        comm.synchronize();
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double setup_ms =
+            std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+        const auto b_f =
+            generate_rhs<float>(exec, comm, global_n, local_n, rank);
+        auto s = run_gmres<float>(comm, exec, data.color_ptrs, float_mat, b_f,
+                                  x_ref, global_n, local_n, cfg);
+        s.setup_ms += setup_ms;
+        print_row(fmt_upper + "<float>", s, ref_s);
     }
 
     // ---- AMP<double> system ----
