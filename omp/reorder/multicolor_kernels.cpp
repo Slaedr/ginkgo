@@ -5,13 +5,15 @@
 #include "core/reorder/multicolor_kernels.hpp"
 
 #include <algorithm>
+#include <random>
 #include <vector>
+
+#include <omp.h>
 
 #include <ginkgo/config.hpp>
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/base/types.hpp>
-#include <ginkgo/core/matrix/coo.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/permutation.hpp>
 #include <ginkgo/core/matrix/sparsity_csr.hpp>
@@ -28,6 +30,31 @@ namespace omp {
  * @ingroup reorder
  */
 namespace multicolor {
+
+
+template <typename IndexType>
+std::vector<int> generate_random(const size_type N, const IndexType lo,
+                                 const IndexType hi)
+{
+    std::vector<int> v(N);
+
+#pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        const int nthreads = omp_get_num_threads();
+
+        // Each thread initializes its own RNG
+        std::random_device rd;
+        std::seed_seq seq{rd(), rd(), rd(), rd(), static_cast<uint32_t>(tid)};
+        std::mt19937 rng{seq};
+        std::uniform_int_distribution<IndexType> dist{lo, hi};
+
+#pragma omp for schedule(static)
+        for (size_type i = 0; i < N; ++i) v[i] = dist(rng);
+    }
+
+    return v;
+}
 
 
 template <typename IndexType>
