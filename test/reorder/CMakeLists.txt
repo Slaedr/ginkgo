@@ -1,5 +1,6 @@
 ginkgo_create_common_test(amd)
 ginkgo_create_common_test(mc64)
+ginkgo_create_common_test(multicolor_kernels DISABLE_EXECUTORS cuda dpcpp hip)
 if(GINKGO_HAVE_METIS)
     ginkgo_create_common_test(nested_dissection)
 endif()
