@@ -19,6 +19,7 @@
 #include <ginkgo/core/matrix/sparsity_csr.hpp>
 
 #include "core/base/allocator.hpp"
+#include "core/components/prefix_sum_kernels.hpp"
 
 
 namespace gko {
@@ -33,10 +34,10 @@ namespace multicolor {
 
 
 template <typename IndexType>
-std::vector<int> generate_random(const size_type N, const IndexType lo,
-                                 const IndexType hi)
+std::vector<IndexType> generate_random(const size_type N, const IndexType lo,
+                                       const IndexType hi)
 {
-    std::vector<int> v(N);
+    std::vector<IndexType> v(N);
 
 #pragma omp parallel
     {
@@ -44,16 +45,182 @@ std::vector<int> generate_random(const size_type N, const IndexType lo,
         const int nthreads = omp_get_num_threads();
 
         // Each thread initializes its own RNG
-        std::random_device rd;
-        std::seed_seq seq{rd(), rd(), rd(), rd(), static_cast<uint32_t>(tid)};
+        // std::random_device rd;
+        // std::seed_seq seq{rd(), rd(), rd(), rd(),
+        // static_cast<uint32_t>(tid)};
+        std::seed_seq seq{1u, 101u, 42u, 23u, static_cast<uint32_t>(tid)};
         std::mt19937 rng{seq};
         std::uniform_int_distribution<IndexType> dist{lo, hi};
 
 #pragma omp for schedule(static)
-        for (size_type i = 0; i < N; ++i) v[i] = dist(rng);
+        for (size_type i = 0; i < N; ++i) {
+            v[i] = dist(rng);
+        }
     }
 
     return v;
+}
+
+// TODO: Implement early exit.
+template <typename T>
+bool check_value_exists(const std::vector<T>& vec, const T& target)
+{
+    bool found = false;
+#pragma omp parallel for shared(found)
+    for (size_t i = 0; i < vec.size(); i++) {
+        if (vec[i] == target) {
+#pragma omp atomic write
+            found = true;
+        }
+    }
+    return found;
+}
+
+/* Compute an independent set according to Luby.
+ * and return whether there are remaining uncolored vertices.
+ */
+template <typename IndexType>
+void independent_set(const IndexType num_vertices,
+                     const IndexType* const row_ptrs,
+                     const IndexType* const col_idxs,
+                     const std::vector<IndexType>& randvec,
+                     const int current_color,
+                     const std::vector<int>& prev_color,
+                     std::vector<int>& new_color)
+{
+    int indset_empty = 0;
+    int iter = 0;
+    std::vector<int> cur_neigh(num_vertices, 0);
+    std::vector<int> prev_neigh(num_vertices);
+    while (!indset_empty) {
+        // In each iteration, we remove the independent set vertices and their
+        // (uncolored) neighbors from the graph, and try to find more
+        // independent vertices to augment the independent set.
+        prev_neigh = cur_neigh;
+        indset_empty = 1;
+#pragma omp parallel for shared(indset_empty)
+        for (IndexType irow = 0; irow < num_vertices; irow++) {
+            // go over un-colored nodes
+            // std::cout << "  node " << irow << " initially has color "
+            //           << prev_color[irow] << std::endl;
+            int this_thread_indset_not_empy = 0;
+            const bool ipoin_in_graph =
+                prev_color[irow] == -1 && prev_neigh[irow] == 0;
+            if (ipoin_in_graph) {
+                IndexType max_nbr_rand = 0;
+                for (int jz = row_ptrs[irow]; jz < row_ptrs[irow + 1]; jz++) {
+                    const int j = col_idxs[jz];
+                    const bool j_in_graph =
+                        prev_color[j] == -1 && prev_neigh[j] == 0;
+                    if (j_in_graph && j != irow) {
+                        // max reduce
+                        max_nbr_rand = std::max(max_nbr_rand, randvec[j]);
+                    }
+                }
+                // std::cout << "    randvec = " << randvec[irow]
+                //           << ", max = " << max_nbr_rand << std::endl;
+                if (randvec[irow] > max_nbr_rand) {
+                    // irow is to be added to this color
+                    new_color[irow] = current_color;
+#pragma omp atomic write
+                    cur_neigh[irow] = 1;
+                    // record the neighbours of the current color
+                    for (int jz = row_ptrs[irow]; jz < row_ptrs[irow + 1];
+                         jz++) {
+                        const int j = col_idxs[jz];
+                        if (prev_color[j] == -1 && j != irow) {
+#pragma omp atomic write
+                            cur_neigh[j] = 1;
+                        }
+                    }
+                    // std::cout << "  Node " << irow << " assigned color "
+                    //           << current_color << std::endl;
+                } else {
+                    // this node will be un-colored at the end of this
+                    // iteration
+                    // #pragma omp atomic
+                    indset_empty = 0;
+                }
+            }
+        }  // end parallel for
+        iter++;
+        printf("  Color %d: iteration %d.\n", current_color, iter);
+        if (iter > 10) {
+            break;
+        }
+    }  // end independent set
+}
+
+struct Coloring {
+    int num_colors;
+    std::vector<int> vertex_colors;
+};
+
+template <typename IndexType>
+Coloring compute_coloring(const IndexType num_vertices,
+                          const IndexType* const row_ptrs,
+                          const IndexType* const col_idxs,
+                          const std::vector<IndexType>& randvec)
+{
+    std::vector<int> color(num_vertices);
+    std::vector<int> new_color(num_vertices);
+    std::vector<int> cur_neigh(num_vertices);
+#pragma omp parallel for schedule(static)
+    for (IndexType i = 0; i < num_vertices; i++) {
+        color[i] = -1;
+        new_color[i] = -1;
+        cur_neigh[i] = 0;
+    }
+    bool uncolored_exist = true;
+    int current_color = 0;
+    while (uncolored_exist) {
+        // In each iteration, compute one color (independent set)
+        printf("Color %d..\n", current_color);
+        fflush(stdout);
+        independent_set(num_vertices, row_ptrs, col_idxs, randvec,
+                        current_color, color, new_color);
+        uncolored_exist = check_value_exists(new_color, -1);
+        std::cout << " Uncolored exist? " << uncolored_exist << std::endl;
+        if (current_color >= 1000) {
+            break;
+        }
+        if (uncolored_exist) {
+            color = new_color;
+        }
+        current_color++;
+    }
+    return Coloring{current_color, new_color};
+}
+
+template <typename IndexType>
+void compute_color_ptrs(std::shared_ptr<const OmpExecutor> exec,
+                        const Coloring& coloring, const IndexType num_vertices,
+                        std::vector<IndexType>& color_vec,
+                        IndexType* const old_to_new,
+                        IndexType* const new_to_old)
+{
+    color_vec.assign(coloring.num_colors + 1, 0);
+    printf("Num colors = %d\n", coloring.num_colors);
+    fflush(stdout);
+#pragma omp parallel for
+    for (IndexType old_i = 0; old_i < num_vertices; old_i++) {
+        const int color = coloring.vertex_colors[old_i];
+        IndexType ind = 0;
+        // #pragma omp atomic capture
+        ind = color_vec[color]++;
+        old_to_new[old_i] = ind;
+    }
+
+    gko::kernels::omp::components::prefix_sum_nonnegative(
+        exec, color_vec.data(), coloring.num_colors);
+    color_vec[coloring.num_colors] = num_vertices;
+
+#pragma omp parallel for
+    for (IndexType old_i = 0; old_i < num_vertices; old_i++) {
+        const int color = coloring.vertex_colors[old_i];
+        old_to_new[old_i] += color_vec[color];
+        new_to_old[old_to_new[old_i]] = old_i;
+    }
 }
 
 
@@ -66,7 +233,18 @@ void compute_permutation_csr(std::shared_ptr<const OmpExecutor> exec,
                              IndexType* const permutation,
                              IndexType* const inv_permutation)
 {
-    GKO_NOT_IMPLEMENTED;
+    constexpr int rand_mult = 4;
+    const auto randvec = generate_random<IndexType>(
+        num_vertices, 1, rand_mult * num_vertices - 1);
+    for (int i = 0; i < num_vertices; i++) {
+        std::cout << " randvec[" << i << "] = " << randvec[i] << " ";
+    }
+    std::cout << std::endl;
+
+    const auto coloring =
+        compute_coloring<IndexType>(num_vertices, row_ptrs, col_idxs, randvec);
+    compute_color_ptrs<IndexType>(exec, coloring, num_vertices, color_ptrs,
+                                  permutation, inv_permutation);
 }
 
 GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(
