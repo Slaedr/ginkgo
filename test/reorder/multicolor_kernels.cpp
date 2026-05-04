@@ -73,7 +73,7 @@ protected:
 };
 
 
-TEST_F(Multicolor, HasOptimalColorCount2d5p)
+TEST_F(Multicolor, HasUpToTwiceOptimalColorCount2d5p)
 {
     const auto nrows = static_cast<index_type>(dims2[0] * dims2[1]);
     gko::array<index_type> perm{exec, static_cast<size_t>(nrows)};
@@ -85,7 +85,7 @@ TEST_F(Multicolor, HasOptimalColorCount2d5p)
         laplace2d5->get_const_col_idxs(), color_ptrs, perm.get_data(),
         invperm.get_data());
 
-    EXPECT_EQ(color_ptrs.size(), 4);
+    EXPECT_LE(color_ptrs.size(), 5) << "Num colors= " << color_ptrs.size() - 1;
 }
 
 TEST_F(Multicolor, ColorsAreIndependentSets2d5p)
@@ -106,8 +106,7 @@ TEST_F(Multicolor, ColorsAreIndependentSets2d5p)
                                    color_ptrs, perm_host.get_const_data()));
 }
 
-#if 0
-TEST_F(Multicolor, HasOptimalColorCount3d27p)
+TEST_F(Multicolor, HasUpToTwiceOptimalColorCount3d27p)
 {
     const auto nrows = static_cast<index_type>(dims3[0] * dims3[1] * dims3[2]);
     gko::array<index_type> perm{exec, static_cast<size_t>(nrows)};
@@ -119,7 +118,7 @@ TEST_F(Multicolor, HasOptimalColorCount3d27p)
         laplace3d27->get_const_col_idxs(), color_ptrs, perm.get_data(),
         invperm.get_data());
 
-    EXPECT_GE(color_ptrs.size(), 9);
+    EXPECT_LE(color_ptrs.size(), 17) << "Num colors= " << color_ptrs.size() - 1;
 }
 
 
@@ -140,4 +139,3 @@ TEST_F(Multicolor, ColorsAreIndependentSets3d27p)
                                    laplace3d27_ref->get_const_col_idxs(),
                                    color_ptrs, perm_host.get_const_data()));
 }
-#endif

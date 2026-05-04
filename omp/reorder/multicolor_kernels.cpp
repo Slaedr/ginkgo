@@ -89,7 +89,6 @@ void independent_set(const IndexType num_vertices,
                      std::vector<int>& new_color)
 {
     int indset_empty = 0;
-    int iter = 0;
     std::vector<int> cur_neigh(num_vertices, 0);
     std::vector<int> prev_neigh(num_vertices);
     while (!indset_empty) {
@@ -101,25 +100,25 @@ void independent_set(const IndexType num_vertices,
 #pragma omp parallel for shared(indset_empty)
         for (IndexType irow = 0; irow < num_vertices; irow++) {
             // go over un-colored nodes
-            // std::cout << "  node " << irow << " initially has color "
-            //           << prev_color[irow] << std::endl;
             int this_thread_indset_not_empy = 0;
             const bool ipoin_in_graph =
                 prev_color[irow] == -1 && prev_neigh[irow] == 0;
             if (ipoin_in_graph) {
-                IndexType max_nbr_rand = 0;
+                // Use lexicographic (randvec, index) comparison to break ties.
+                bool irow_dominated = false;
                 for (int jz = row_ptrs[irow]; jz < row_ptrs[irow + 1]; jz++) {
                     const int j = col_idxs[jz];
                     const bool j_in_graph =
                         prev_color[j] == -1 && prev_neigh[j] == 0;
                     if (j_in_graph && j != irow) {
-                        // max reduce
-                        max_nbr_rand = std::max(max_nbr_rand, randvec[j]);
+                        if (randvec[j] > randvec[irow] ||
+                            (randvec[j] == randvec[irow] && j < irow)) {
+                            irow_dominated = true;
+                            break;
+                        }
                     }
                 }
-                // std::cout << "    randvec = " << randvec[irow]
-                //           << ", max = " << max_nbr_rand << std::endl;
-                if (randvec[irow] > max_nbr_rand) {
+                if (!irow_dominated) {
                     // irow is to be added to this color
                     new_color[irow] = current_color;
 #pragma omp atomic write
@@ -133,22 +132,15 @@ void independent_set(const IndexType num_vertices,
                             cur_neigh[j] = 1;
                         }
                     }
-                    // std::cout << "  Node " << irow << " assigned color "
-                    //           << current_color << std::endl;
                 } else {
-                    // this node will be un-colored at the end of this
+                    // this node may remain in the graph at the end of this
                     // iteration
-                    // #pragma omp atomic
+#pragma omp atomic write
                     indset_empty = 0;
                 }
             }
         }  // end parallel for
-        iter++;
-        printf("  Color %d: iteration %d.\n", current_color, iter);
-        if (iter > 10) {
-            break;
-        }
-    }  // end independent set
+    }      // end independent set
 }
 
 struct Coloring {
@@ -175,13 +167,10 @@ Coloring compute_coloring(const IndexType num_vertices,
     int current_color = 0;
     while (uncolored_exist) {
         // In each iteration, compute one color (independent set)
-        printf("Color %d..\n", current_color);
-        fflush(stdout);
         independent_set(num_vertices, row_ptrs, col_idxs, randvec,
                         current_color, color, new_color);
         uncolored_exist = check_value_exists(new_color, -1);
-        std::cout << " Uncolored exist? " << uncolored_exist << std::endl;
-        if (current_color >= 1000) {
+        if (current_color >= 100) {
             break;
         }
         if (uncolored_exist) {
@@ -200,13 +189,11 @@ void compute_color_ptrs(std::shared_ptr<const OmpExecutor> exec,
                         IndexType* const new_to_old)
 {
     color_vec.assign(coloring.num_colors + 1, 0);
-    printf("Num colors = %d\n", coloring.num_colors);
-    fflush(stdout);
 #pragma omp parallel for
     for (IndexType old_i = 0; old_i < num_vertices; old_i++) {
         const int color = coloring.vertex_colors[old_i];
         IndexType ind = 0;
-        // #pragma omp atomic capture
+#pragma omp atomic capture
         ind = color_vec[color]++;
         old_to_new[old_i] = ind;
     }
@@ -236,11 +223,6 @@ void compute_permutation_csr(std::shared_ptr<const OmpExecutor> exec,
     constexpr int rand_mult = 4;
     const auto randvec = generate_random<IndexType>(
         num_vertices, 1, rand_mult * num_vertices - 1);
-    for (int i = 0; i < num_vertices; i++) {
-        std::cout << " randvec[" << i << "] = " << randvec[i] << " ";
-    }
-    std::cout << std::endl;
-
     const auto coloring =
         compute_coloring<IndexType>(num_vertices, row_ptrs, col_idxs, randvec);
     compute_color_ptrs<IndexType>(exec, coloring, num_vertices, color_ptrs,
