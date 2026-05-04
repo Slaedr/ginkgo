@@ -36,6 +36,19 @@ protected:
         laplace3d27 = gko::share(gko::clone(exec, laplace3d27_ref));
     }
 
+    // Returns max_color_size / avg_color_size; 1.0 is perfectly balanced.
+    static double max_imbalance(const index_type nrows,
+                                const std::vector<index_type>& color_ptrs)
+    {
+        const auto num_colors = static_cast<index_type>(color_ptrs.size()) - 1;
+        const double avg = static_cast<double>(nrows) / num_colors;
+        index_type max_size = 0;
+        for (index_type c = 0; c < num_colors; c++) {
+            max_size = std::max(max_size, color_ptrs[c + 1] - color_ptrs[c]);
+        }
+        return max_size / avg;
+    }
+
     // Returns true iff no two adjacent nodes share the same color.
     // color_ptrs[c] .. color_ptrs[c+1]-1 are the new indices of color c;
     // perm maps old indices to new indices.
@@ -138,4 +151,36 @@ TEST_F(Multicolor, ColorsAreIndependentSets3d27p)
     EXPECT_TRUE(is_independent_set(nrows, laplace3d27_ref->get_const_row_ptrs(),
                                    laplace3d27_ref->get_const_col_idxs(),
                                    color_ptrs, perm_host.get_const_data()));
+}
+
+
+TEST_F(Multicolor, ColorClassesAreBalanced2d5p)
+{
+    const auto nrows = static_cast<index_type>(dims2[0] * dims2[1]);
+    gko::array<index_type> perm{exec, static_cast<size_t>(nrows)};
+    gko::array<index_type> invperm{exec, static_cast<size_t>(nrows)};
+    std::vector<index_type> color_ptrs;
+
+    gko::kernels::GKO_DEVICE_NAMESPACE::multicolor::compute_permutation_csr(
+        exec, nrows, laplace2d5->get_const_row_ptrs(),
+        laplace2d5->get_const_col_idxs(), color_ptrs, perm.get_data(),
+        invperm.get_data());
+
+    EXPECT_LE(max_imbalance(nrows, color_ptrs), 2.0);
+}
+
+
+TEST_F(Multicolor, ColorClassesAreBalanced3d27p)
+{
+    const auto nrows = static_cast<index_type>(dims3[0] * dims3[1] * dims3[2]);
+    gko::array<index_type> perm{exec, static_cast<size_t>(nrows)};
+    gko::array<index_type> invperm{exec, static_cast<size_t>(nrows)};
+    std::vector<index_type> color_ptrs;
+
+    gko::kernels::GKO_DEVICE_NAMESPACE::multicolor::compute_permutation_csr(
+        exec, nrows, laplace3d27->get_const_row_ptrs(),
+        laplace3d27->get_const_col_idxs(), color_ptrs, perm.get_data(),
+        invperm.get_data());
+
+    EXPECT_LE(max_imbalance(nrows, color_ptrs), 2.0);
 }
