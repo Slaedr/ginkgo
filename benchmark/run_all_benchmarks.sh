@@ -109,6 +109,16 @@ if [ ! "${SOLVERS_GMRES_RESTART}" ]; then
     print_default SOLVERS_GMRES_RESTART
 fi
 
+if [ ! "${SOLVERS_REORDER}" ]; then
+    SOLVERS_REORDER="none"
+    print_default SOLVERS_REORDER
+fi
+
+if [ ! "${SOLVERS_FGS_SWEEPS}" ]; then
+    SOLVERS_FGS_SWEEPS=1
+    print_default SOLVERS_FGS_SWEEPS
+fi
+
 if [ ! "${SYSTEM_NAME}" ]; then
     SYSTEM_NAME="unknown"
     print_default SYSTEM_NAME
@@ -312,6 +322,8 @@ run_solver_benchmarks() {
                     --amp_base_type="${AMP_BASE_TYPE}" \
                     --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
                     --amp_tolerance="${AMP_TOLERANCE}" \
+                    --reorder="${SOLVERS_REORDER}" \
+                    --fgs_sweeps="${SOLVERS_FGS_SWEEPS}" \
                     <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }

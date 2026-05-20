@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -22,6 +22,8 @@ std::string reordering_algorithm_desc =
     "    nd - Nested Dissection reordering algorithm\n"
 #endif
     "    rcm - Reverse Cuthill-McKee reordering algorithm\n"
+    "    multicolor - Multicolor (Jones-Plassman-Luby) reordering;\n"
+    "                 required when using --preconditioners=fgs\n"
     "This is a preprocessing step whose runtime will not be included\n"
     "in the measurements.";
 
@@ -36,46 +38,64 @@ DEFINE_string(reorder, "none", reordering_algorithm_desc.c_str());
 #endif
 
 
+template <typename IndexType>
+struct ReorderResult {
+    std::unique_ptr<gko::matrix::Permutation<IndexType>> permutation;
+    std::vector<IndexType> color_ptrs;
+};
+
+
 template <typename ValueType, typename IndexType>
-std::unique_ptr<gko::matrix::Permutation<IndexType>> reorder(
-    gko::matrix_data<ValueType, IndexType>& data, json& test_case)
+ReorderResult<IndexType> reorder(gko::matrix_data<ValueType, IndexType>& data,
+                                 json& test_case)
 {
 #ifndef GKO_BENCHMARK_DISTRIBUTED
     if (FLAGS_reorder == "none") {
-        return nullptr;
+        return {};
     }
     using Csr = gko::matrix::Csr<ValueType, IndexType>;
     auto ref = gko::ReferenceExecutor::create();
     auto mtx = gko::share(Csr::create(ref));
     mtx->read(data);
-    std::unique_ptr<gko::matrix::Permutation<IndexType>> perm;
+    ReorderResult<IndexType> result;
     if (FLAGS_reorder == "amd") {
-        perm = gko::experimental::reorder::Amd<IndexType>::build()
-                   .on(ref)
-                   ->generate(mtx);
+        result.permutation = gko::experimental::reorder::Amd<IndexType>::build()
+                                 .on(ref)
+                                 ->generate(mtx);
 #if GKO_HAVE_METIS
     } else if (FLAGS_reorder == "nd") {
-        perm = gko::experimental::reorder::NestedDissection<ValueType,
-                                                            IndexType>::build()
-                   .on(ref)
-                   ->generate(mtx);
+        result.permutation =
+            gko::experimental::reorder::NestedDissection<ValueType,
+                                                         IndexType>::build()
+                .on(ref)
+                ->generate(mtx);
 #endif
     } else if (FLAGS_reorder == "rcm") {
-        perm = gko::experimental::reorder::Rcm<IndexType>::build()
-                   .on(ref)
-                   ->generate(mtx);
+        result.permutation = gko::experimental::reorder::Rcm<IndexType>::build()
+                                 .on(ref)
+                                 ->generate(mtx);
+    } else if (FLAGS_reorder == "multicolor") {
+        auto mc_base = gko::reorder::Multicolor<ValueType, IndexType>::build()
+                           .on(ref)
+                           ->generate(mtx);
+        const auto* mc =
+            gko::as<gko::reorder::Multicolor<ValueType, IndexType>>(
+                mc_base.get());
+        result.color_ptrs = mc->get_color_pointers();
+        result.permutation = gko::as<gko::matrix::Permutation<IndexType>>(
+            mc->get_permutation()->clone());
     } else {
         throw std::runtime_error{"Unknown reordering algorithm " +
                                  FLAGS_reorder};
     }
-    auto perm_arr =
-        gko::array<IndexType>::view(ref, data.size[0], perm->get_permutation());
+    auto perm_arr = gko::array<IndexType>::view(
+        ref, data.size[0], result.permutation->get_permutation());
     gko::as<Csr>(mtx->permute(&perm_arr))->write(data);
     test_case["reordered"] = FLAGS_reorder;
-    return perm;
+    return result;
 #else
     // no reordering for distributed benchmarks
-    return nullptr;
+    return {};
 #endif
 }
 

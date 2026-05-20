@@ -377,6 +377,7 @@ struct solver_benchmark_state {
     std::shared_ptr<gko::LinOp> system_matrix;
     std::unique_ptr<Vec> b;
     std::unique_ptr<Vec> x;
+    std::vector<itype> color_ptrs;
 };
 
 
@@ -438,7 +439,7 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             state.x = generator.initialize({0.0}, exec);
         } else {
             auto [data, size] = generator.generate_matrix_data(test_case);
-            auto permutation = reorder(data, test_case);
+            auto reorder_result = reorder(data, test_case);
 
             const auto spmv_format =
                 test_case["optimal"]["spmv"].get<std::string>();
@@ -448,10 +449,14 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 formats::write_amp_bin_info(state.system_matrix.get(),
                                             test_case);
             }
+            if constexpr (std::is_same_v<typename Generator::index_type,
+                                         itype>) {
+                state.color_ptrs = std::move(reorder_result.color_ptrs);
+            }
             state.b = generator.generate_rhs(exec, state.system_matrix.get(),
                                              test_case);
-            if (permutation) {
-                permute(state.b, permutation.get());
+            if (reorder_result.permutation) {
+                permute(state.b, reorder_result.permutation.get());
             }
             state.x = generator.generate_initial_guess(
                 exec, state.system_matrix.get(), state.b.get());
@@ -496,7 +501,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             auto range = annotate("warmup", FLAGS_warmup > 0);
             for (auto _ : ic.warmup_run()) {
                 auto x_clone = clone(state.x);
-                auto precond = precond_factory.at(precond_name)(exec);
+                auto precond = precond_factory.at(precond_name)(
+                    PrecondArgs{exec, state.color_ptrs});
                 auto solver = generate_solver(exec, give(precond), solver_name,
                                               FLAGS_warmup_max_iters)
                                   ->generate(state.system_matrix);
@@ -519,7 +525,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 }
 
                 {
-                    auto precond = precond_factory.at(precond_name)(exec);
+                    auto precond = precond_factory.at(precond_name)(
+                        PrecondArgs{exec, state.color_ptrs});
                     auto solver = generate_solver(exec, give(precond),
                                                   solver_name, FLAGS_max_iters)
                                       ->generate(state.system_matrix);
@@ -532,7 +539,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             }
 
             // generate it for apply usage
-            auto precond = precond_factory.at(precond_name)(exec);
+            auto precond = precond_factory.at(precond_name)(
+                PrecondArgs{exec, state.color_ptrs});
             auto detailed_solver = generate_solver(exec, give(precond),
                                                    solver_name, FLAGS_max_iters)
                                        ->generate(state.system_matrix);
@@ -589,7 +597,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
         // operations once. we can not rely on the warmup one because it uses
         // different iteration criterion.
         if (!FLAGS_benchmark_from_scratch) {
-            auto precond = precond_factory.at(precond_name)(exec);
+            auto precond = precond_factory.at(precond_name)(
+                PrecondArgs{exec, state.color_ptrs});
             solver = gko::share(generate_solver(exec, give(precond),
                                                 solver_name, FLAGS_max_iters)
                                     ->generate(state.system_matrix));
@@ -602,7 +611,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             {
                 exec->synchronize();
                 generate_timer->tic();
-                auto precond = precond_factory.at(precond_name)(exec);
+                auto precond = precond_factory.at(precond_name)(
+                    PrecondArgs{exec, state.color_ptrs});
                 auto generated_solver =
                     gko::share(generate_solver(exec, give(precond), solver_name,
                                                FLAGS_max_iters)
