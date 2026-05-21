@@ -101,7 +101,7 @@ gko::precision_reduction parse_storage_optimization(const std::string& flag)
 /**
  * Arguments passed to each entry in precond_factory.
  *
- * Most preconditioners only use exec; the fgs entry additionally requires
+ * Most preconditioners only use exec; some, like FGS, additionally require
  * color_ptrs from a prior multicolor reordering.
  */
 struct PrecondArgs {
