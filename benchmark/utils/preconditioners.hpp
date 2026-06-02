@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -24,7 +24,7 @@
     "A comma-separated list of preconditioners to use. "              \
     "Supported values are: none, jacobi, mg, paric, parict, parilu, " \
     "parilut, ic, ilu, paric-isai, parict-isai, parilu-isai, "        \
-    "parilut-isai, ic-isai, ilu-isai, sor, overhead"
+    "parilut-isai, ic-isai, ilu-isai, fgs, sor, overhead"
 #if GINKGO_BUILD_MPI
 DEFINE_string(preconditioners, "none",
               PRECONDITIONERS_COMMON
@@ -78,6 +78,10 @@ DEFINE_double(mg_tolerance, false, "The tolerance for the coarse solver");
 DEFINE_uint32(mg_max_iters, false,
               "The max number of iterations for the coarse solver");
 
+DEFINE_uint32(fgs_sweeps, 1,
+              "Number of forward Gauss-Seidel sweeps per preconditioner "
+              "application (requires --reorder=multicolor)");
+
 
 // parses the Jacobi storage optimization command line argument
 gko::precision_reduction parse_storage_optimization(const std::string& flag)
@@ -94,15 +98,28 @@ gko::precision_reduction parse_storage_optimization(const std::string& flag)
 }
 
 
+/**
+ * Arguments passed to each entry in precond_factory.
+ *
+ * Most preconditioners only use exec; some, like FGS, additionally require
+ * color_ptrs from a prior multicolor reordering.
+ */
+struct PrecondArgs {
+    std::shared_ptr<const gko::Executor> exec;
+    std::vector<itype> color_ptrs;
+};
+
+
 const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
-                                std::shared_ptr<const gko::Executor>)>>
+                                const PrecondArgs&)>>
     precond_factory{
         {"none",
-         [](std::shared_ptr<const gko::Executor> exec) {
-             return gko::matrix::IdentityFactory<etype>::create(exec);
+         [](const PrecondArgs& args) {
+             return gko::matrix::IdentityFactory<etype>::create(args.exec);
          }},
         {"jacobi",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              return gko::preconditioner::Jacobi<etype, itype>::build()
                  .with_max_block_size(FLAGS_jacobi_max_block_size)
                  .with_storage_optimization(
@@ -112,7 +129,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"paric",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact =
                  gko::share(gko::factorization::ParIc<etype, itype>::build()
                                 .with_iterations(FLAGS_parilu_iterations)
@@ -124,7 +142,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"parict",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::ParIct<etype, itype>::build()
                      .with_iterations(FLAGS_parilu_iterations)
@@ -139,7 +158,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                      .on(exec);
          }},
         {"parilu",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact =
                  gko::share(gko::factorization::ParIlu<etype, itype>::build()
                                 .with_iterations(FLAGS_parilu_iterations)
@@ -152,7 +172,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                      .on(exec);
          }},
         {"parilut",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::ParIlut<etype, itype>::build()
                      .with_iterations(FLAGS_parilu_iterations)
@@ -167,7 +188,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                      .on(exec);
          }},
         {"ic",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::Ic<etype, itype>::build().on(exec));
              return gko::preconditioner::Ic<gko::solver::LowerTrs<etype, itype>,
@@ -176,7 +198,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"ilu",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::Ilu<etype, itype>::build().on(exec));
              return gko::preconditioner::
@@ -186,7 +209,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                      .on(exec);
          }},
         {"paric-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact =
                  gko::share(gko::factorization::ParIc<etype, itype>::build()
                                 .with_iterations(FLAGS_parilu_iterations)
@@ -204,7 +228,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"parict-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::ParIct<etype, itype>::build()
                      .with_iterations(FLAGS_parilu_iterations)
@@ -224,7 +249,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"parilu-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact =
                  gko::share(gko::factorization::ParIlu<etype, itype>::build()
                                 .with_iterations(FLAGS_parilu_iterations)
@@ -248,7 +274,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"parilut-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::ParIlut<etype, itype>::build()
                      .with_iterations(FLAGS_parilu_iterations)
@@ -274,7 +301,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"ic-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::Ic<etype, itype>::build().on(exec));
              auto lisai = gko::share(
@@ -289,7 +317,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"ilu-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::factorization::Ilu<etype, itype>::build().on(exec));
              auto lisai = gko::share(
@@ -310,35 +339,49 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"general-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
              return gko::preconditioner::GeneralIsai<etype, itype>::build()
                  .with_sparsity_power(FLAGS_isai_power)
-                 .on(exec);
+                 .on(args.exec);
          }},
         {"spd-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
              return gko::preconditioner::SpdIsai<etype, itype>::build()
                  .with_sparsity_power(FLAGS_isai_power)
-                 .on(exec);
+                 .on(args.exec);
+         }},
+        {"fgs",
+         [](const PrecondArgs& args) {
+             if (args.color_ptrs.empty()) {
+                 throw std::runtime_error{
+                     "fgs preconditioner requires --reorder=multicolor"};
+             }
+             return gko::solver::FwdGaussSeidel<etype, itype>::build()
+                 .with_criteria(gko::stop::Iteration::build()
+                                    .with_max_iters(FLAGS_fgs_sweeps)
+                                    .on(args.exec))
+                 .with_color_ptrs(args.color_ptrs)
+                 .on(args.exec);
          }},
         {"sor",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
              return gko::preconditioner::Sor<etype, itype>::build()
                  .with_relaxation_factor(
                      static_cast<gko::remove_complex<etype>>(
                          FLAGS_sor_relaxation_factor))
                  .with_symmetric(FLAGS_sor_symmetric)
-                 .on(exec);
+                 .on(args.exec);
          }},
         {"overhead",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
              return gko::Overhead<etype>::build()
                  .with_criteria(gko::stop::ResidualNorm<etype>::build()
                                     .with_reduction_factor(rc_etype{}))
-                 .on(exec);
+                 .on(args.exec);
          }},
         {"mg",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              using ir = gko::solver::Ir<etype>;
              auto iter_stop = gko::share(gko::stop::Iteration::build()
                                              .with_max_iters(FLAGS_mg_max_iters)
@@ -359,7 +402,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
 #if GINKGO_BUILD_MPI
         ,
         {"schwarz-jacobi",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              return gko::experimental::distributed::preconditioner::Schwarz<
                         etype>::build()
                  .with_local_solver(
@@ -374,7 +418,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"schwarz-general-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              return gko::experimental::distributed::preconditioner::Schwarz<
                         etype, itype>::build()
                  .with_local_solver(
@@ -384,7 +429,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"schwarz-spd-isai",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              return gko::experimental::distributed::preconditioner::Schwarz<
                         etype, itype>::build()
                  .with_local_solver(
@@ -394,7 +440,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"schwarz-ilu",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact =
                  gko::share(gko::factorization::Ilu<etype, itype>::build()
                                 .with_skip_sorting(true)
@@ -410,7 +457,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"schwarz-ic",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact =
                  gko::share(gko::factorization::Ic<etype, itype>::build()
                                 .with_skip_sorting(true)
@@ -425,7 +473,8 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
                  .on(exec);
          }},
         {"schwarz-lu",
-         [](std::shared_ptr<const gko::Executor> exec) {
+         [](const PrecondArgs& args) {
+             const auto& exec = args.exec;
              auto fact = gko::share(
                  gko::experimental::factorization::Lu<etype, itype>::build().on(
                      exec));
