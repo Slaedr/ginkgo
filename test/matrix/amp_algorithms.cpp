@@ -100,8 +100,8 @@ void adjusted_bin(std::shared_ptr<gko::EXEC_TYPE> exec, const double rownorm,
                     rownorm, tol);
             const auto mins =
                 gkda::get_bins_min_representable<highest_real_type>();
-            result[i] = gkda::get_adjusted_bin<highest_real_type>(lbs, mins,
-                                                                  abs_number);
+            result[i] = gkda::get_adjusted_bin<highest_real_type>(
+                lbs, mins, abs_number, false);
         },
         result_array.get_size(), result_array);
 }

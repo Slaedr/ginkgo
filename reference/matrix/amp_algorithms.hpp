@@ -146,16 +146,13 @@ inline int adjust_bin_for_underflow(
  *                           precision bin. @see get_bins_min_representable.
  * @param abs_number  Absolute value of the number to be classified into a bin.
  */
-template <typename RealType>
-inline int get_adjusted_bin(
-    const precision_array<float, RealType>& lower_bounds,
-    const precision_array<RealType, RealType>& min_representable,
-    const RealType abs_number)
-{
-    int ibin = get_precision_bin<RealType>(lower_bounds, abs_number, 0);
-    return adjust_bin_for_underflow<RealType>(min_representable, abs_number,
-                                              ibin);
-}
+// template <typename RealType>
+// inline int get_adjusted_bin(
+//     const precision_array<float, RealType>& lower_bounds,
+//     const precision_array<RealType, RealType>& min_representable,
+//     const RealType abs_number)
+// {
+// }
 
 /**
  * Get the precision bin for an entry that may be a diagonal.
@@ -165,7 +162,7 @@ inline int get_adjusted_bin(
  * divide by the diagonal (e.g., Gauss-Seidel, ILU sweeps) from accumulating
  * the bin's quantization error in the divisor, and decouples the per-row
  * error bound from the user's choice of AMP tolerance @c tau.  Off-diagonal
- * entries are dispatched to @ref get_adjusted_bin as usual.
+ * entries are binned according to their absolute values as usual.
  *
  * The storage cost of this override is at most one extra FP64 entry per row
  * compared to the pure binning rule, which is negligible relative to total
@@ -182,7 +179,7 @@ inline int get_adjusted_bin(
  *                     (i.e., its row and column indices are equal).
  */
 template <typename RealType>
-inline int get_adjusted_bin_for_entry(
+inline int get_adjusted_bin(
     const precision_array<float, RealType>& lower_bounds,
     const precision_array<RealType, RealType>& min_representable,
     const RealType abs_number, const bool is_diagonal)
@@ -190,8 +187,9 @@ inline int get_adjusted_bin_for_entry(
     if (is_diagonal) {
         return 0;
     }
-    return get_adjusted_bin<RealType>(lower_bounds, min_representable,
-                                      abs_number);
+    const int ibin = get_precision_bin<RealType>(lower_bounds, abs_number, 0);
+    return adjust_bin_for_underflow<RealType>(min_representable, abs_number,
+                                              ibin);
 }
 
 /**

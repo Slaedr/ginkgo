@@ -510,7 +510,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
         }
         for (int j = 0; j < omax_nnz; j++) {
             const auto jcol = ocolids[j * ostride + irow];
-            const int ibin = get_adjusted_bin_for_entry<real_type>(
+            const int ibin = get_adjusted_bin<real_type>(
                 min_bin, min_repr, abs(ovals[j * ostride + irow]),
                 jcol == static_cast<IndexType>(irow));
             if (ibin >= 0) {

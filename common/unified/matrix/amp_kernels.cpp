@@ -63,7 +63,7 @@ void generate_cwise_csr_calculate_row_sizes(
 
             // Count NNZ per bin across all rows
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
-                const int ibin = get_adjusted_bin_for_entry<d_real_type>(
+                const int ibin = get_adjusted_bin<d_real_type>(
                     min_bin, min_repr, abs(ovals[j]),
                     ocolidxs[j] == static_cast<IndexType>(irow));
                 if (ibin >= 0) {
@@ -133,7 +133,7 @@ void generate_cwise_csr_scatter_bins(
             const std::array<float, q> min_bin =
                 get_bins_precision_lower_bounds<d_real_type>(rnorm, tolerance);
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
-                const int ibin = get_adjusted_bin_for_entry<d_real_type>(
+                const int ibin = get_adjusted_bin<d_real_type>(
                     min_bin, min_repr, abs(ovals[j]),
                     ocolidxs[j] == static_cast<IndexType>(irow));
                 if (ibin >= 0) {
@@ -230,7 +230,7 @@ void generate_ell_scatter_bins(
             for (int j = 0; j < omax_nnz; j++) {
                 const ptrdiff_t oloc = j * ostride + irow;
                 const auto jcol = ocolidxs[oloc];
-                const int ibin = get_adjusted_bin_for_entry<d_real_type>(
+                const int ibin = get_adjusted_bin<d_real_type>(
                     min_bin, min_repr, abs(ovals[oloc]),
                     jcol == static_cast<IndexType>(irow));
                 if (ibin >= 0) {

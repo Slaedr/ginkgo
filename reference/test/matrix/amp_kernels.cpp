@@ -156,7 +156,7 @@ TEST(AMPAlgorithm, AdjustsBinForUnderflow)
 }
 
 
-TEST(AMPAlgorithm, GetsAdjustedBin)
+TEST(AMPAlgorithm, GetsAdjustedBinByMagnitude)
 {
     const double rownorm = 1.0;
     const float tol = 1e-10;
@@ -165,12 +165,13 @@ TEST(AMPAlgorithm, GetsAdjustedBin)
     const auto mins = gkra::get_bins_min_representable<double>();
 
     // Large value goes to bin 0
-    auto bin_large = gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0);
+    auto bin_large =
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false);
     EXPECT_EQ(bin_large, 0);
 
     // Value in middle range: precision bin then adjusted for underflow
     double val_mid = (lbs[0] + lbs[1]) / 2.0;
-    int bin_mid = gkra::get_adjusted_bin<double>(lbs, mins, val_mid);
+    int bin_mid = gkra::get_adjusted_bin<double>(lbs, mins, val_mid, false);
     // Should be assigned to some bin (precision determined, then underflow
     // adjusted)
     EXPECT_GE(bin_mid, 0);
@@ -180,7 +181,8 @@ TEST(AMPAlgorithm, GetsAdjustedBin)
     // Values just smaller than FP16 min are put in float bin
     //  but those smaller than bfloat16 min are discarded.
     const double val_under = mins[2] / 1.1;
-    const int bin_under = gkra::get_adjusted_bin<double>(lbs, mins, val_under);
+    const int bin_under =
+        gkra::get_adjusted_bin<double>(lbs, mins, val_under, false);
 #if GKO_AMP_HALF_IS_FP16
     EXPECT_EQ(bin_under, 1);
 #else
@@ -188,18 +190,35 @@ TEST(AMPAlgorithm, GetsAdjustedBin)
 #endif
 
     // Very small value gets dropped
-    auto bin_drop = gkra::get_adjusted_bin<double>(lbs, mins, lbs[2] * 0.5);
+    auto bin_drop =
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[2] * 0.5, false);
     EXPECT_EQ(bin_drop, -1);
 
     // Test with float as base type
     const auto lbs_f =
         gkra::get_bins_precision_lower_bounds<float>(rownorm, tol);
     const auto mins_f = gkra::get_bins_min_representable<float>();
-    auto bin_f0 = gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[0] * 2.0f);
+    auto bin_f0 =
+        gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[0] * 2.0f, false);
     EXPECT_EQ(bin_f0, 0);
     auto bin_f_drop =
-        gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[1] * 0.5f);
+        gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[1] * 0.5f, false);
     EXPECT_EQ(bin_f_drop, -1);
+}
+
+
+TEST(AMPAlgorithm, DiagonalGoesToBin0)
+{
+    const double rownorm = 1.0;
+    const float tol = 1e-10;
+    const auto lbs =
+        gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
+    const auto mins = gkra::get_bins_min_representable<double>();
+    const double val = std::sqrt(lbs[0] * lbs[1]);
+
+    const int bin = gkra::get_adjusted_bin<double>(lbs, mins, val, true);
+
+    EXPECT_EQ(bin, 0);
 }
 
 
@@ -302,18 +321,20 @@ TEST(AMPAlgorithm, GetsAdjustedBin)
     const auto mins = gkra::get_bins_min_representable<double>();
 
     // Large value goes to bin 0
-    auto bin_large = gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0);
+    auto bin_large =
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false);
     EXPECT_EQ(bin_large, 0);
 
     // Value that would go to bin 1 and is representable stays in bin 1
     double val_bin1 = (lbs[0] + lbs[1]) / 2.0;
     if (val_bin1 >= static_cast<double>(mins[1])) {
-        auto bin1 = gkra::get_adjusted_bin<double>(lbs, mins, val_bin1);
+        auto bin1 = gkra::get_adjusted_bin<double>(lbs, mins, val_bin1, false);
         EXPECT_EQ(bin1, 1);
     }
 
     // Very small value gets dropped
-    auto bin_drop = gkra::get_adjusted_bin<double>(lbs, mins, lbs[1] * 0.5);
+    auto bin_drop =
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[1] * 0.5, false);
     EXPECT_EQ(bin_drop, -1);
 }
 
@@ -1058,10 +1079,10 @@ TYPED_TEST(AMPFloat, GenerateEllScattersBinsCorrectly)
         ASSERT_TRUE(amat0);
         auto vals = amat0->get_const_values();
         auto colids = amat0->get_const_col_idxs();
-    // Note: row 1's bin 0 now contains both the forced diagonal
-    // (a_{1,1}=1.2e-11) and the magnitude-binned a_{1,2}=2.0; iterating
-    // over the original ELL stores col 1 before col 2, so slot 0 holds
-    // the diagonal and slot 1 holds 2.0.
+        // Note: row 1's bin 0 now contains both the forced diagonal
+        // (a_{1,1}=1.2e-11) and the magnitude-binned a_{1,2}=2.0; iterating
+        // over the original ELL stores col 1 before col 2, so slot 0 holds
+        // the diagonal and slot 1 holds 2.0.
 #if GKO_AMP_HALF_IS_FP16
         if (k == 0) {
             EXPECT_EQ(amat0->get_num_stored_elements_per_row(), 2);
