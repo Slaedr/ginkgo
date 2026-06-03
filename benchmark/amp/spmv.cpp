@@ -40,13 +40,13 @@
 template <typename scalar_t>
 using dist_vec_t = gko::experimental::distributed::Vector<scalar_t>;
 template <typename scalar_t>
-using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, int32_t, int64_t>;
+using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, gko::int32, gko::int64>;
 
 int main(int argc, char* argv[])
 {
     using scalar_t = double;
-    using local_idx_t = int32_t;
-    using global_idx_t = int64_t;
+    using local_idx_t = gko::int32;
+    using global_idx_t = gko::int64;
 
     gko::experimental::mpi::environment mpi_env{argc, argv};
 
@@ -75,8 +75,8 @@ int main(int argc, char* argv[])
     const gko::size_type local_n =
         static_cast<gko::size_type>(cfg.nx) * cfg.ny * cfg.nz;
     const gko::size_type global_n = local_n * num_procs;
-    const int64_t local_nnz =
-        static_cast<int64_t>(data.mat_data.nonzeros.size());
+    const gko::int64 local_nnz =
+        static_cast<gko::int64>(data.mat_data.nonzeros.size());
     if (do_print) {
         std::cout << " done.\n";
     }
@@ -92,12 +92,12 @@ int main(int argc, char* argv[])
 
     // SpMV flops = 2 * nnz (one multiply + one add per nonzero)
     // Gather global nnz for GFLOP/s calculation
-    int64_t global_nnz = 0;
+    gko::int64 global_nnz = 0;
     MPI_Allreduce(&local_nnz, &global_nnz, 1, MPI_INT64_T, MPI_SUM, comm.get());
     const double flops = 2.0 * static_cast<double>(global_nnz);
 
     if (do_print) {
-        print_perf_header("SpMV", static_cast<int64_t>(global_n), global_nnz,
+        print_perf_header("SpMV", static_cast<gko::int64>(global_n), global_nnz,
                           num_procs);
     }
 

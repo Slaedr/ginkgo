@@ -21,10 +21,10 @@ namespace {
 TEST(Helpers, 3dFromFlatIsCorrect)
 {
     const int flat = 33;
-    const std::array<int32_t, 3> dims{4, 4, 4};
-    const std::array<int32_t, 3> expected{1, 0, 2};
+    const std::array<gko::int32, 3> dims{4, 4, 4};
+    const std::array<gko::int32, 3> expected{1, 0, 2};
 
-    const std::array<int32_t, 3> result =
+    const std::array<gko::int32, 3> result =
         get_natural_3d_indices_from_flat(dims, flat);
 
     ASSERT_EQ(result, expected);
@@ -33,8 +33,8 @@ TEST(Helpers, 3dFromFlatIsCorrect)
 TEST(Helpers, 3dToFlatIsCorrect)
 {
     const int flat = 33;
-    const std::array<int32_t, 3> dims{4, 4, 4};
-    const std::array<int32_t, 3> coords{1, 0, 2};
+    const std::array<gko::int32, 3> dims{4, 4, 4};
+    const std::array<gko::int32, 3> coords{1, 0, 2};
 
     const auto result = get_natural_flat_index_from_3d(dims, coords);
 
@@ -81,11 +81,11 @@ public:
 //
 // The stencil connects each grid point (ix,iy,iz) to all (ix+di,iy+dj,iz+dk)
 // with di,dj,dk in {-1,0,1}, provided the neighbor is inside the grid.
-std::set<std::pair<int64_t, int64_t>> expected_nonzero_locations(
-    const std::array<int32_t, 3>& dims, const MulticolorOrdering& ordering)
+std::set<std::pair<gko::int64, gko::int64>> expected_nonzero_locations(
+    const std::array<gko::int32, 3>& dims, const MulticolorOrdering& ordering)
 {
     const int n = dims[0] * dims[1] * dims[2];
-    std::set<std::pair<int64_t, int64_t>> locs;
+    std::set<std::pair<gko::int64, gko::int64>> locs;
 
     for (int new_row = 0; new_row < n; ++new_row) {
         const int old_row = ordering.new_to_old[new_row];
@@ -94,7 +94,7 @@ std::set<std::pair<int64_t, int64_t>> expected_nonzero_locations(
         for (int dk = -1; dk <= 1; ++dk) {
             for (int dj = -1; dj <= 1; ++dj) {
                 for (int di = -1; di <= 1; ++di) {
-                    const std::array<int32_t, 3> nbd{
+                    const std::array<gko::int32, 3> nbd{
                         old_idx[0] + di, old_idx[1] + dj, old_idx[2] + dk};
                     if (!is_valid_point(nbd, dims)) {
                         continue;
@@ -102,8 +102,8 @@ std::set<std::pair<int64_t, int64_t>> expected_nonzero_locations(
                     const int nbd_flat =
                         get_natural_flat_index_from_3d(dims, nbd);
                     const int new_col = ordering.old_to_new[nbd_flat];
-                    locs.emplace(static_cast<int64_t>(new_row),
-                                 static_cast<int64_t>(new_col));
+                    locs.emplace(static_cast<gko::int64>(new_row),
+                                 static_cast<gko::int64>(new_col));
                 }
             }
         }
@@ -115,11 +115,11 @@ std::set<std::pair<int64_t, int64_t>> expected_nonzero_locations(
 // and 8-color multicolor ordering, on a single rank.
 // 8 corners have 8 nnz, 12 edges have 12 nnz, 6 faces have 18 nnz,
 // 1 interior has 27 nnz.  Total = 8*8 + 12*12 + 6*18 + 27 = 343.
-std::set<std::pair<int64_t, int64_t>> nonzero_locations_3x3()
+std::set<std::pair<gko::int64, gko::int64>> nonzero_locations_3x3()
 {
-    std::set<std::pair<int64_t, int64_t>> locs;
-    auto row = [&](int64_t r, std::initializer_list<int64_t> cols) {
-        for (const int64_t c : cols) {
+    std::set<std::pair<gko::int64, gko::int64>> locs;
+    auto row = [&](gko::int64 r, std::initializer_list<gko::int64> cols) {
+        for (const gko::int64 c : cols) {
             locs.emplace(r, c);
         }
     };
@@ -176,16 +176,16 @@ TEST_F(MatrixGeneration, SmallGridNonzeroLocationsMatch)
 {
     // Use a 3x3x3 grid: interior point (1,1,1) has 27 neighbors,
     // corners have 8, edges/faces have intermediate counts.
-    const std::array<int32_t, 3> dims{3, 3, 3};
+    const std::array<gko::int32, 3> dims{3, 3, 3};
     const auto ordering = compute_multicolor_ordering(dims);
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, int64_t, int32_t>(comm, dims, gen, ordering);
+        generate_stencil_data<double, gko::int64, gko::int32>(comm, dims, gen, ordering);
 
     const auto expected = nonzero_locations_3x3();
 
     // Collect actual (row, col) pairs
-    std::set<std::pair<int64_t, int64_t>> actual;
+    std::set<std::pair<gko::int64, gko::int64>> actual;
     for (const auto& nz : data.nonzeros) {
         actual.emplace(nz.row, nz.column);
     }
@@ -196,11 +196,11 @@ TEST_F(MatrixGeneration, SmallGridNonzeroLocationsMatch)
 
 TEST_F(MatrixGeneration, OffDiagonalValuesAreFromGenerator)
 {
-    const std::array<int32_t, 3> dims{3, 3, 3};
+    const std::array<gko::int32, 3> dims{3, 3, 3};
     const auto ordering = compute_multicolor_ordering(dims);
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, int64_t, int32_t>(comm, dims, gen, ordering);
+        generate_stencil_data<double, gko::int64, gko::int32>(comm, dims, gen, ordering);
 
     for (const auto& nz : data.nonzeros) {
         if (nz.row != nz.column) {
@@ -215,15 +215,15 @@ TEST_F(MatrixGeneration, OffDiagonalValuesAreFromGenerator)
 TEST_F(MatrixGeneration, InteriorPointHas27Nonzeros)
 {
     // 3x3x3 grid: (1,1,1) is the only interior point.
-    const std::array<int32_t, 3> dims{3, 3, 3};
+    const std::array<gko::int32, 3> dims{3, 3, 3};
     const auto ordering = compute_multicolor_ordering(dims);
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, int64_t, int32_t>(comm, dims, gen, ordering);
+        generate_stencil_data<double, gko::int64, gko::int32>(comm, dims, gen, ordering);
 
     // Find the multicolor index of the natural interior point (1,1,1).
     const int old_flat =
-        get_natural_flat_index_from_3d(dims, std::array<int32_t, 3>{1, 1, 1});
+        get_natural_flat_index_from_3d(dims, std::array<gko::int32, 3>{1, 1, 1});
     const int new_idx = ordering.old_to_new[old_flat];
 
     int count = 0;
@@ -239,14 +239,14 @@ TEST_F(MatrixGeneration, InteriorPointHas27Nonzeros)
 TEST_F(MatrixGeneration, CornerPointHas8Nonzeros)
 {
     // Corner (0,0,0) has 8 valid neighbors (itself + 7 that lie inside).
-    const std::array<int32_t, 3> dims{3, 3, 3};
+    const std::array<gko::int32, 3> dims{3, 3, 3};
     const auto ordering = compute_multicolor_ordering(dims);
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, int64_t, int32_t>(comm, dims, gen, ordering);
+        generate_stencil_data<double, gko::int64, gko::int32>(comm, dims, gen, ordering);
 
     const int old_flat =
-        get_natural_flat_index_from_3d(dims, std::array<int32_t, 3>{0, 0, 0});
+        get_natural_flat_index_from_3d(dims, std::array<gko::int32, 3>{0, 0, 0});
     const int new_idx = ordering.old_to_new[old_flat];
 
     int count = 0;
@@ -261,12 +261,12 @@ TEST_F(MatrixGeneration, CornerPointHas8Nonzeros)
 
 TEST_F(MatrixGeneration, MatrixDimensionsAreCorrect)
 {
-    const std::array<int32_t, 3> dims{4, 3, 2};
+    const std::array<gko::int32, 3> dims{4, 3, 2};
     const int n = dims[0] * dims[1] * dims[2];
     const auto ordering = compute_multicolor_ordering(dims);
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, int64_t, int32_t>(comm, dims, gen, ordering);
+        generate_stencil_data<double, gko::int64, gko::int32>(comm, dims, gen, ordering);
 
     EXPECT_EQ(data.size[0], n);
     EXPECT_EQ(data.size[1], n);
@@ -275,12 +275,12 @@ TEST_F(MatrixGeneration, MatrixDimensionsAreCorrect)
 
 TEST_F(MatrixGeneration, EachRowHasExactlyOneDiagonal)
 {
-    const std::array<int32_t, 3> dims{3, 3, 3};
+    const std::array<gko::int32, 3> dims{3, 3, 3};
     const int n = 27;
     const auto ordering = compute_multicolor_ordering(dims);
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, int64_t, int32_t>(comm, dims, gen, ordering);
+        generate_stencil_data<double, gko::int64, gko::int32>(comm, dims, gen, ordering);
 
     std::vector<int> diag_count(n, 0);
     for (const auto& nz : data.nonzeros) {
@@ -297,7 +297,7 @@ TEST_F(MatrixGeneration, EachRowHasExactlyOneDiagonal)
 
 TEST_F(MatrixGeneration, MulticolorOrderingColorPtrs)
 {
-    const std::array<int32_t, 3> dims{4, 4, 4};
+    const std::array<gko::int32, 3> dims{4, 4, 4};
     const auto ordering = compute_multicolor_ordering(dims);
 
     // 8 colors, 9 pointers
@@ -320,15 +320,15 @@ TEST_F(MatrixGeneration, MulticolorOrderingColorPtrs)
 
 TEST_F(MatrixGeneration, NonzeroLocationsWithNonCubicGrid)
 {
-    const std::array<int32_t, 3> dims{4, 3, 2};
+    const std::array<gko::int32, 3> dims{4, 3, 2};
     const auto ordering = compute_multicolor_ordering(dims);
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, int64_t, int32_t>(comm, dims, gen, ordering);
+        generate_stencil_data<double, gko::int64, gko::int32>(comm, dims, gen, ordering);
 
     const auto expected = expected_nonzero_locations(dims, ordering);
 
-    std::set<std::pair<int64_t, int64_t>> actual;
+    std::set<std::pair<gko::int64, gko::int64>> actual;
     for (const auto& nz : data.nonzeros) {
         actual.emplace(nz.row, nz.column);
     }
@@ -339,10 +339,10 @@ TEST_F(MatrixGeneration, NonzeroLocationsWithNonCubicGrid)
 
 TEST_F(MatrixGeneration, GenerateProblemDataConsistency)
 {
-    const std::array<int32_t, 3> dims{3, 3, 3};
+    const std::array<gko::int32, 3> dims{3, 3, 3};
     ConstOffdiag gen;
     const auto problem =
-        generate_problem_data<double, int64_t, int32_t>(comm, dims, gen);
+        generate_problem_data<double, gko::int64, gko::int32>(comm, dims, gen);
 
     EXPECT_EQ(problem.color_ptrs.size(), 9u);
     EXPECT_EQ(problem.color_ptrs[8], 27);
