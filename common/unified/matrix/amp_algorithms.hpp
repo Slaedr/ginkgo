@@ -140,26 +140,6 @@ GKO_INLINE GKO_KERNEL int adjust_bin_for_underflow(
 }
 
 /**
- * Get the appropriate precision bin for the given absolute value,
- * considering both precision and underflow.
- *
- * @tparam RealType  Highest precision real type.
- *
- * @param lower_bounds  Lower bound of each precision bin,
- *                      @see get_bins_precision_lower_bounds.
- * @param min_representable  Minimum value that can be represented in each
- *                           precision bin. @see get_bins_min_representable.
- * @param abs_number  Absolute value of the number to be classified into a bin.
- */
-// template <typename RealType>
-// GKO_INLINE GKO_KERNEL int get_adjusted_bin_by_magnitude(
-//     const precision_array<float, RealType>& lower_bounds,
-//     const precision_array<RealType, RealType>& min_representable,
-//     const RealType abs_number)
-// {
-// }
-
-/**
  * Get the precision bin for an entry that may be a diagonal.
  *
  * Diagonal entries are placed unconditionally in bin 0 (the highest
