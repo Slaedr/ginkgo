@@ -40,13 +40,13 @@
 template <typename scalar_t>
 using dist_vec_t = gko::experimental::distributed::Vector<scalar_t>;
 template <typename scalar_t>
-using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, int, long>;
+using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, int32_t, int64_t>;
 
 int main(int argc, char* argv[])
 {
     using scalar_t = double;
-    using local_idx_t = int;
-    using global_idx_t = long;
+    using local_idx_t = int32_t;
+    using global_idx_t = int64_t;
 
     gko::experimental::mpi::environment mpi_env{argc, argv};
 

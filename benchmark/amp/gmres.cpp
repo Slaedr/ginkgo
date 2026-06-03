@@ -45,12 +45,12 @@ struct GmresStats {
     double final_res_norm;
 };
 
-using local_idx_t = int;
-using global_idx_t = long;
+using local_idx_t = int32_t;
+using global_idx_t = int64_t;
 template <typename scalar_t>
 using dist_vec_t = gko::experimental::distributed::Vector<scalar_t>;
 template <typename scalar_t>
-using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, int, long>;
+using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, int32_t, int64_t>;
 using Schwarz =
     gko::experimental::distributed::preconditioner::Schwarz<double, local_idx_t,
                                                             global_idx_t>;
@@ -276,7 +276,7 @@ int main(int argc, char* argv[])
         std::cout.flush();
     }
     OffdiagFn fn(42 + rank, cfg);
-    const std::array<int, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
+    const std::array<int32_t, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
     const auto data =
         generate_problem_data<double, global_idx_t>(comm, local_grid_dims, fn);
 

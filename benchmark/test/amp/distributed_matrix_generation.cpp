@@ -28,9 +28,9 @@ public:
     using value_type = double;
     using Vec = gko::matrix::Dense<value_type>;
     using DistMtx =
-        gko::experimental::distributed::Matrix<value_type, int, long>;
+        gko::experimental::distributed::Matrix<value_type, int32_t, int64_t>;
     using DistVec = gko::experimental::distributed::Vector<value_type>;
-    using partition_t = gko::experimental::distributed::Partition<int, long>;
+    using partition_t = gko::experimental::distributed::Partition<int32_t, int64_t>;
 
     DistMatrixGeneration()
         : comm(MPI_COMM_WORLD),
@@ -51,13 +51,13 @@ public:
     }
 
     // Generate a global unit vector with 1 at the specified global index.
-    std::shared_ptr<const DistVec> generate_unit_vec(const long nonzero_idx)
+    std::shared_ptr<const DistVec> generate_unit_vec(const int64_t nonzero_idx)
     {
         const int myrank = comm.rank();
         auto local_b = Vec::create(
             exec->get_master(), gko::dim<2>{static_cast<size_t>(local_n), 1});
         local_b->fill(0.0);
-        const long* range_bounds = partition->get_range_bounds();
+        const int64_t* range_bounds = partition->get_range_bounds();
         if (nonzero_idx >= range_bounds[myrank] &&
             nonzero_idx < range_bounds[myrank + 1]) {
             const int local_idx = nonzero_idx % local_n;
@@ -75,21 +75,21 @@ public:
             std::move(local_dev)));
     }
 
-    void check_mat_times_unit_vec(const long input_nonzero_idx,
+    void check_mat_times_unit_vec(const int64_t input_nonzero_idx,
                                   const DistVec* const y)
     {
         const int myrank = comm.rank();
         const int local_new_idx = input_nonzero_idx % local_n;
         const int nonzero_rank = input_nonzero_idx / local_n;
         const int local_old_idx = ordering.new_to_old[local_new_idx];
-        const long global_old_idx =
-            local_old_idx + static_cast<long>(local_n) * nonzero_rank;
-        const std::array<int, 3> old_local_col =
+        const int64_t global_old_idx =
+            local_old_idx + static_cast<int64_t>(local_n) * nonzero_rank;
+        const std::array<int32_t, 3> old_local_col =
             get_natural_3d_indices_from_flat(ldims, local_old_idx);
 
         const auto local_y = y->get_const_local_values();
 
-        const long* range_bounds = partition->get_range_bounds();
+        const int64_t* range_bounds = partition->get_range_bounds();
         if (input_nonzero_idx >= range_bounds[myrank] &&
             input_nonzero_idx < range_bounds[myrank + 1]) {
             ASSERT_EQ(nonzero_rank, myrank);
@@ -130,9 +130,9 @@ public:
 
     // Use a 3x3x3 grid: interior point (1,1,1) has 27 neighbors,
     // corners have 8, edges/faces have intermediate counts.
-    const std::array<int, 3> ldims{3, 3, 3};
+    const std::array<int32_t, 3> ldims{3, 3, 3};
     const int local_n{27};
-    const long global_n{local_n * 4};
+    const int64_t global_n{local_n * 4};
 
     gko::experimental::mpi::communicator comm;
 
@@ -146,8 +146,8 @@ public:
 
 TEST_F(DistMatrixGeneration, RankDecompositionWorksAsExpected)
 {
-    std::array<int, 3> proc_dims = cubic_radical_search(4);
-    std::array<int, 3> expected{2, 1, 2};
+    std::array<int32_t, 3> proc_dims = cubic_radical_search(4);
+    std::array<int32_t, 3> expected{2, 1, 2};
 
     EXPECT_EQ(proc_dims, expected);
 
@@ -171,13 +171,13 @@ TEST_F(DistMatrixGeneration, Generated3x3MatrixAppliesCorrectlyToUnitVectors)
 
     ConstOffdiag gen;
     const auto data =
-        generate_stencil_data<double, long, int>(comm, ldims, gen, ordering);
+        generate_stencil_data<double, int64_t, int>(comm, ldims, gen, ordering);
     auto system_mat = gko::share(
         DistMtx::create(exec, comm, gko::with_matrix_type<gko::matrix::Ell>()));
     system_mat->read_distributed(data, partition);
 
     // Check each nonzero by checking each column
-    for (long j = 0; j < global_n; j++) {
+    for (int64_t j = 0; j < global_n; j++) {
         auto unitvec = generate_unit_vec(j);
         auto y = DistVec::create(exec, comm, gko::dim<2>(global_n, 1),
                                  gko::dim<2>(local_n, 1));

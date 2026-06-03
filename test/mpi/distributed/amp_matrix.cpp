@@ -22,8 +22,8 @@
 class DistributedAmpMatrix : public CommonMpiTestFixture {
 protected:
     using value_type = double;
-    using local_index_type = int;
-    using global_index_type = long;
+    using local_index_type = int32_t;
+    using global_index_type = int64_t;
     using Ell = gko::matrix::Ell<value_type, local_index_type>;
     using Amp = gko::matrix::AMP<value_type, local_index_type>;
     using Csr = gko::matrix::Csr<value_type, local_index_type>;
