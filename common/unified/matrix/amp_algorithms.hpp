@@ -140,8 +140,18 @@ GKO_INLINE GKO_KERNEL int adjust_bin_for_underflow(
 }
 
 /**
- * Get the appropriate precision bin for the given absolute value,
- * considering both precision and underflow.
+ * Get the precision bin for an entry that may be a diagonal.
+ *
+ * Diagonal entries are placed unconditionally in bin 0 (the highest
+ * precision) regardless of magnitude.  This protects iterative methods that
+ * divide by the diagonal (e.g., Gauss-Seidel, ILU sweeps) from accumulating
+ * the bin's quantization error in the divisor, and decouples the per-row
+ * error bound from the user's choice of AMP tolerance @c tau.  Off-diagonal
+ * entries are binned according to their magnitude.
+ *
+ * The storage cost of this override is at most one extra FP64 entry per row
+ * compared to the pure binning rule, which will typically be negligible
+ * relative to total matrix storage.
  *
  * @tparam RealType  Highest precision real type.
  *
@@ -149,15 +159,20 @@ GKO_INLINE GKO_KERNEL int adjust_bin_for_underflow(
  *                      @see get_bins_precision_lower_bounds.
  * @param min_representable  Minimum value that can be represented in each
  *                           precision bin. @see get_bins_min_representable.
- * @param abs_number  Absolute value of the number to be classified into a bin.
+ * @param abs_number  Absolute value of the entry to be classified.
+ * @param is_diagonal  True iff the entry sits on the matrix diagonal
+ *                     (i.e., its row and column indices are equal).
  */
 template <typename RealType>
 GKO_INLINE GKO_KERNEL int get_adjusted_bin(
     const precision_array<float, RealType>& lower_bounds,
     const precision_array<RealType, RealType>& min_representable,
-    const RealType abs_number)
+    const RealType abs_number, const bool is_diagonal)
 {
-    int ibin = get_precision_bin<RealType>(lower_bounds, abs_number);
+    if (is_diagonal) {
+        return 0;
+    }
+    const int ibin = get_precision_bin<RealType>(lower_bounds, abs_number);
     return adjust_bin_for_underflow<RealType>(min_representable, abs_number,
                                               ibin);
 }

@@ -41,10 +41,12 @@ void generate_cwise_csr_calculate_row_sizes(
 
     const auto nrows = a->get_size()[0];
     const DValueType* const ovals = as_device_type(a->get_const_values());
+    const IndexType* const ocolidxs = a->get_const_col_idxs();
     const IndexType* const orow_ptrs = a->get_const_row_ptrs();
     run_kernel(
         exec,
-        [tolerance, min_repr] GKO_KERNEL(auto irow, auto orow_ptrs, auto ovals,
+        [tolerance, min_repr] GKO_KERNEL(auto irow, auto orow_ptrs,
+                                         auto ocolidxs, auto ovals,
                                          auto bin_row_sizes) {
             for (int k = 0; k < q; k++) {
                 bin_row_sizes[k][irow] = 0;
@@ -62,13 +64,14 @@ void generate_cwise_csr_calculate_row_sizes(
             // Count NNZ per bin across all rows
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
                 const int ibin = get_adjusted_bin<d_real_type>(
-                    min_bin, min_repr, abs(ovals[j]));
+                    min_bin, min_repr, abs(ovals[j]),
+                    ocolidxs[j] == static_cast<IndexType>(irow));
                 if (ibin >= 0) {
                     bin_row_sizes[ibin][irow]++;
                 }
             }
         },
-        nrows, orow_ptrs, ovals, bin_row_sizes);
+        nrows, orow_ptrs, ocolidxs, ovals, bin_row_sizes);
 }
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
@@ -131,7 +134,8 @@ void generate_cwise_csr_scatter_bins(
                 get_bins_precision_lower_bounds<d_real_type>(rnorm, tolerance);
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
                 const int ibin = get_adjusted_bin<d_real_type>(
-                    min_bin, min_repr, abs(ovals[j]));
+                    min_bin, min_repr, abs(ovals[j]),
+                    ocolidxs[j] == static_cast<IndexType>(irow));
                 if (ibin >= 0) {
                     const auto pos = cursors[ibin]++;
                     xcol_idxs[ibin][pos] = ocolidxs[j];
@@ -225,13 +229,15 @@ void generate_ell_scatter_bins(
 
             for (int j = 0; j < omax_nnz; j++) {
                 const ptrdiff_t oloc = j * ostride + irow;
+                const auto jcol = ocolidxs[oloc];
                 const int ibin = get_adjusted_bin<d_real_type>(
-                    min_bin, min_repr, abs(ovals[oloc]));
+                    min_bin, min_repr, abs(ovals[oloc]),
+                    jcol == static_cast<IndexType>(irow));
                 if (ibin >= 0) {
                     const auto nzloc =
                         ixj[ibin] * static_cast<ptrdiff_t>(bin_strides[ibin]) +
                         irow;
-                    xcol_idxs[ibin][nzloc] = ocolidxs[oloc];
+                    xcol_idxs[ibin][nzloc] = jcol;
                     assign_value_to_array_tuple<0>(xvalues, ovals[oloc], ibin,
                                                    nzloc);
                     ixj[ibin]++;
