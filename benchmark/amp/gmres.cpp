@@ -45,12 +45,12 @@ struct GmresStats {
     double final_res_norm;
 };
 
-using local_idx_t = int;
-using global_idx_t = long;
+using local_idx_t = gko::int32;
+using global_idx_t = gko::int64;
 template <typename scalar_t>
 using dist_vec_t = gko::experimental::distributed::Vector<scalar_t>;
 template <typename scalar_t>
-using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, int, long>;
+using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, gko::int32, gko::int64>;
 using Schwarz =
     gko::experimental::distributed::preconditioner::Schwarz<double, local_idx_t,
                                                             global_idx_t>;
@@ -276,7 +276,7 @@ int main(int argc, char* argv[])
         std::cout.flush();
     }
     OffdiagFn fn(42 + rank, cfg);
-    const std::array<int, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
+    const std::array<gko::int32, 3> local_grid_dims{cfg.nx, cfg.ny, cfg.nz};
     const auto data =
         generate_problem_data<double, global_idx_t>(comm, local_grid_dims, fn);
 
@@ -296,8 +296,8 @@ int main(int argc, char* argv[])
         exec, num_procs, static_cast<global_idx_t>(global_n)));
 
     // Gather global nnz
-    const int64_t local_nnz = static_cast<int64_t>(mat_data.nonzeros.size());
-    int64_t global_nnz = 0;
+    const gko::int64 local_nnz = static_cast<gko::int64>(mat_data.nonzeros.size());
+    gko::int64 global_nnz = 0;
     MPI_Allreduce(&local_nnz, &global_nnz, 1, MPI_INT64_T, MPI_SUM, comm.get());
 
     // ---- Generate RHS and reference solution ----
