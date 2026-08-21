@@ -78,8 +78,10 @@ void compute_permutation_csr(std::shared_ptr<const ReferenceExecutor> exec,
         // map is sorted, so this should be stable.
         const auto color_size = static_cast<int>(color_points[ic].size());
         for (int i = 0; i < color_size; i++) {
-            permutation[color_points[ic][i]] = color_ptrs[ic] + i;
-            inv_permutation[color_ptrs[ic] + i] = color_points[ic][i];
+            // The permutation maps a new index to the old
+            // index, so that it can be used directly with LinOp::permute.
+            permutation[color_ptrs[ic] + i] = color_points[ic][i];
+            inv_permutation[color_points[ic][i]] = color_ptrs[ic] + i;
         }
         color_ptrs[ic + 1] = color_ptrs[ic] + color_size;
     }

@@ -51,16 +51,16 @@ protected:
 
     // Returns true iff no two adjacent nodes share the same color.
     // color_ptrs[c] .. color_ptrs[c+1]-1 are the new indices of color c;
-    // perm maps old indices to new indices.
+    // invperm maps old indices to new indices.
     static bool is_independent_set(const index_type nrows,
                                    const index_type* row_ptrs,
                                    const index_type* col_idxs,
                                    const std::vector<index_type>& color_ptrs,
-                                   const index_type* perm)
+                                   const index_type* invperm)
     {
         std::vector<int> node_color(nrows);
         for (index_type old_i = 0; old_i < nrows; old_i++) {
-            const index_type new_i = perm[old_i];
+            const index_type new_i = invperm[old_i];
             const auto it =
                 std::upper_bound(color_ptrs.begin(), color_ptrs.end(), new_i);
             node_color[old_i] =
@@ -113,10 +113,12 @@ TEST_F(Multicolor, ColorsAreIndependentSets2d5p)
         laplace2d5->get_const_col_idxs(), color_ptrs, perm.get_data(),
         invperm.get_data());
 
-    const gko::array<index_type> perm_host{ref, perm};
+    // is_independent_set expects old-to-new indices, i.e. the inverse of the
+    // permutation Multicolor returns
+    const gko::array<index_type> invperm_host{ref, invperm};
     EXPECT_TRUE(is_independent_set(nrows, laplace2d5_ref->get_const_row_ptrs(),
                                    laplace2d5_ref->get_const_col_idxs(),
-                                   color_ptrs, perm_host.get_const_data()));
+                                   color_ptrs, invperm_host.get_const_data()));
 }
 
 TEST_F(Multicolor, HasUpToTwiceOptimalColorCount3d27p)
@@ -147,10 +149,12 @@ TEST_F(Multicolor, ColorsAreIndependentSets3d27p)
         laplace3d27->get_const_col_idxs(), color_ptrs, perm.get_data(),
         invperm.get_data());
 
-    const gko::array<index_type> perm_host{ref, perm};
+    // is_independent_set expects old-to-new indices, i.e. the inverse of the
+    // permutation Multicolor returns
+    const gko::array<index_type> invperm_host{ref, invperm};
     EXPECT_TRUE(is_independent_set(nrows, laplace3d27_ref->get_const_row_ptrs(),
                                    laplace3d27_ref->get_const_col_idxs(),
-                                   color_ptrs, perm_host.get_const_data()));
+                                   color_ptrs, invperm_host.get_const_data()));
 }
 
 

@@ -225,8 +225,11 @@ void compute_permutation_csr(std::shared_ptr<const OmpExecutor> exec,
         num_vertices, 1, rand_mult * num_vertices - 1);
     const auto coloring =
         compute_coloring<IndexType>(num_vertices, row_ptrs, col_idxs, randvec);
+    // The permutation maps a new index to the old index,
+    // so that it can be used directly with LinOp::permute. That is what
+    // compute_color_ptrs calls new_to_old.
     compute_color_ptrs<IndexType>(exec, coloring, num_vertices, color_ptrs,
-                                  permutation, inv_permutation);
+                                  inv_permutation, permutation);
 }
 
 GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(

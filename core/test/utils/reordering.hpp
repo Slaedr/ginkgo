@@ -6,7 +6,9 @@
 #define GKO_CORE_TEST_UTILS_REORDERING_HPP_
 
 
+#include <algorithm>
 #include <array>
+#include <iterator>
 #include <vector>
 
 #include <ginkgo/core/base/dim.hpp>
@@ -21,6 +23,54 @@ inline T get_natural_flat_index_from_3d(const std::array<T, 3>& dims,
                                         const std::array<T, 3>& idx)
 {
     return idx[2] * dims[1] * dims[0] + idx[1] * dims[0] + idx[0];
+}
+
+/**
+ * Checks that every color of an already-reordered matrix is an independent set.
+ *
+ * The matrix is expected to be in the multicolor ordering, so that the rows of
+ * color `c` are exactly `[color_ptrs[c], color_ptrs[c+1])`. The coloring is
+ * usable by a multicolor Gauss-Seidel sweep only if no row of a color has an
+ * off-diagonal entry in a column belonging to the same color; otherwise the
+ * rows of that color cannot be updated in parallel.
+ *
+ * Unlike @ref compute_multicolor_ordering_regular_box and its 2d counterpart,
+ * this works for an arbitrary sparsity pattern.
+ *
+ * @param num_rows  Number of rows of the reordered matrix.
+ * @param row_ptrs  Row pointers of the reordered matrix (CSR).
+ * @param col_idxs  Column indices of the reordered matrix (CSR).
+ * @param color_ptrs  Row at which each color starts, @see
+ *                    gko::reorder::Multicolor::get_color_pointers.
+ */
+template <typename IndexType>
+inline bool colors_are_independent(const IndexType num_rows,
+                                   const IndexType* const row_ptrs,
+                                   const IndexType* const col_idxs,
+                                   const std::vector<IndexType>& color_ptrs)
+{
+    if (color_ptrs.size() < 2) {
+        return false;
+    }
+    for (IndexType row = 0; row < num_rows; row++) {
+        const auto it =
+            std::upper_bound(color_ptrs.begin(), color_ptrs.end(), row);
+        if (it == color_ptrs.begin()) {
+            // row lies before the first color
+            return false;
+        }
+        const auto color =
+            static_cast<int>(std::distance(color_ptrs.begin(), it)) - 1;
+        const auto color_begin = color_ptrs[color];
+        const auto color_end = color_ptrs[color + 1];
+        for (auto jz = row_ptrs[row]; jz < row_ptrs[row + 1]; jz++) {
+            const auto col = col_idxs[jz];
+            if (col != row && col >= color_begin && col < color_end) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 template <typename itype>

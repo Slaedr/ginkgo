@@ -4,19 +4,26 @@
 
 #include "core/solver/gauss_seidel_kernels.hpp"
 
+#include <cmath>
+#include <fstream>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/executor.hpp>
+#include <ginkgo/core/base/mtx_io.hpp>
 #include <ginkgo/core/matrix/amp.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
+#include <ginkgo/core/reorder/multicolor.hpp>
+#include <ginkgo/core/solver/gauss_seidel.hpp>
+#include <ginkgo/core/stop/iteration.hpp>
 #include <ginkgo/core/stop/stopping_status.hpp>
 
 #include "core/test/utils.hpp"
+#include "matrices/config.hpp"
 
 
 namespace {
@@ -982,6 +989,232 @@ TYPED_TEST(FwdGaussSeidelAMPCSR, EmptyColorPtrsDoesNothing)
         this->exec, empty_ptrs, this->mtx.get(), b.get(), x.get(), true, &stop);
 
     GKO_ASSERT_MTX_NEAR(x, l({5.0, 6.0, 7.0, 8.0}), 0.0);
+}
+
+
+/*
+ * End-to-end test of the path the solver benchmark uses: reorder a SuiteSparse
+ * matrix with Multicolor, then run FwdGaussSeidel on the reordered matrix with
+ * the color pointers of that reordering.
+ *
+ * A coloring is valid exactly when the rows of a color have no couplings among
+ * themselves. When that holds, updating a color's rows in parallel has to
+ * give the same result as updating them one after the other, so a multicolor
+ * sweep must reproduce a plain sequential forward Gauss-Seidel sweep over the
+ * reordered matrix.  That equality is what these tests check; it fails if
+ * the color pointers do not describe the reordered matrix.
+ */
+class FwdGaussSeidelMulticolor : public ::testing::Test {
+protected:
+    using v_type = double;
+    using i_type = int;
+    using CsrMtx = gko::matrix::Csr<v_type, i_type>;
+    using EllMtx = gko::matrix::Ell<v_type, i_type>;
+    using AMPMtx = gko::matrix::AMP<v_type, i_type>;
+    using Vec = gko::matrix::Dense<v_type>;
+    using Solver = gko::solver::FwdGaussSeidel<v_type, i_type>;
+    using reorder_type = gko::reorder::Multicolor<v_type, i_type>;
+
+    FwdGaussSeidelMulticolor()
+        : exec(gko::ReferenceExecutor::create()), amp_tol(1e-10f)
+    {
+        auto orig = gko::share(gko::read<CsrMtx>(
+            std::ifstream(gko::matrices::location_1138_bus_mtx, std::ios::in),
+            exec));
+        auto mc_base = reorder_type::build().on(exec)->generate(orig);
+        const auto* mc = gko::as<reorder_type>(mc_base.get());
+        color_ptrs = mc->get_color_pointers();
+        // Ginkgo's permute() expects new-to-old indices, see
+        // matrix::Permutation
+        mtx = gko::share(orig->permute(mc->get_permutation()));
+        assert_diagonal_is_nonzero();
+        nrows = static_cast<i_type>(mtx->get_size()[0]);
+
+        b = Vec::create(exec,
+                        gko::dim<2>{static_cast<gko::size_type>(nrows), 1});
+        b->fill(1.0);
+    }
+
+    /*
+     * A row whose diagonal is zero or missing is skipped by the Gauss-Seidel
+     * kernels, which would make the comparison below vacuous for that row.
+     */
+    void assert_diagonal_is_nonzero() const
+    {
+        const auto* row_ptrs = mtx->get_const_row_ptrs();
+        const auto* col_idxs = mtx->get_const_col_idxs();
+        const auto* values = mtx->get_const_values();
+        for (i_type row = 0; row < nrows; row++) {
+            bool found = false;
+            for (auto jz = row_ptrs[row]; jz < row_ptrs[row + 1]; jz++) {
+                if (col_idxs[jz] == row && values[jz] != 0.0) {
+                    found = true;
+                }
+            }
+            ASSERT_TRUE(found) << "Row " << row << " has no nonzero diagonal";
+        }
+    }
+
+    /*
+     * One multicolor forward Gauss-Seidel sweep that simulates a parallel
+     * backend implementation: the rows of a color run concurrently, so each
+     * of them reads the x values as they were when that color started.
+     *
+     * This agrees with sequential_forward_gs exactly when every color is
+     * an independent set, which is the property the color pointers are supposed
+     * to guarantee.  The reference kernel cannot show the difference by itself,
+     * since it walks colors and rows strictly in order and therefore matches
+     * the sequential sweep whether or not the coloring is valid.
+     */
+    void parallel_forward_gs(const Vec* rhs, Vec* x) const
+    {
+        const auto* row_ptrs = mtx->get_const_row_ptrs();
+        const auto* col_idxs = mtx->get_const_col_idxs();
+        const auto* values = mtx->get_const_values();
+        const auto* b_vals = rhs->get_const_values();
+        auto* x_vals = x->get_values();
+        for (std::size_t color = 0; color + 1 < color_ptrs.size(); color++) {
+            // every row of this color reads the state x had before the color
+            const std::vector<v_type> x_frozen(x_vals, x_vals + nrows);
+            for (auto row = color_ptrs[color]; row < color_ptrs[color + 1];
+                 row++) {
+                auto sum = b_vals[row];
+                auto diag = gko::zero<v_type>();
+                for (auto jz = row_ptrs[row]; jz < row_ptrs[row + 1]; jz++) {
+                    const auto col = col_idxs[jz];
+                    const auto val = values[jz];
+                    if (col == row) {
+                        diag = val;
+                    } else {
+                        sum -= val * x_frozen[col];
+                    }
+                }
+                if (diag != gko::zero<v_type>()) {
+                    x_vals[row] = sum / diag;
+                }
+            }
+        }
+    }
+
+    // One forward Gauss-Seidel sweep over rows 0..n-1, updating x in place.
+    void sequential_forward_gs(const Vec* rhs, Vec* x) const
+    {
+        const auto* row_ptrs = mtx->get_const_row_ptrs();
+        const auto* col_idxs = mtx->get_const_col_idxs();
+        const auto* values = mtx->get_const_values();
+        const auto* b_vals = rhs->get_const_values();
+        auto* x_vals = x->get_values();
+        for (i_type row = 0; row < nrows; row++) {
+            auto sum = b_vals[row];
+            auto diag = gko::zero<v_type>();
+            for (auto jz = row_ptrs[row]; jz < row_ptrs[row + 1]; jz++) {
+                const auto col = col_idxs[jz];
+                const auto val = values[jz];
+                if (col == row) {
+                    diag = val;
+                } else {
+                    sum -= val * x_vals[col];
+                }
+            }
+            if (diag != gko::zero<v_type>()) {
+                x_vals[row] = sum / diag;
+            }
+        }
+    }
+
+    // Applies a single multicolor forward Gauss-Seidel sweep from x = 0.
+    std::unique_ptr<Vec> single_sweep(std::shared_ptr<const gko::LinOp> a) const
+    {
+        auto x = Vec::create(
+            exec, gko::dim<2>{static_cast<gko::size_type>(nrows), 1});
+        x->fill(0.0);
+        auto solver =
+            Solver::build()
+                .with_criteria(gko::stop::Iteration::build().with_max_iters(1u))
+                .with_color_ptrs(color_ptrs)
+                .on(exec)
+                ->generate(std::move(a));
+        solver->apply(b, x);
+        return x;
+    }
+
+    /// A sweep from x = 0 with the sequential reference semantics.
+    std::unique_ptr<Vec> sequential_sweep_from_zero() const
+    {
+        auto x = Vec::create(exec, b->get_size());
+        x->fill(0.0);
+        sequential_forward_gs(b.get(), x.get());
+        return x;
+    }
+
+    std::shared_ptr<const gko::ReferenceExecutor> exec;
+    const float amp_tol;
+    std::shared_ptr<CsrMtx> mtx;
+    std::unique_ptr<Vec> b;
+    std::vector<i_type> color_ptrs;
+    i_type nrows{};
+};
+
+
+// This is the test that catches an ordering whose color pointers do not match
+// the reordered matrix: it holds iff every color really is an independent set.
+TEST_F(FwdGaussSeidelMulticolor, ColorBlocksCanBeUpdatedInParallel)
+{
+    auto x_seq = sequential_sweep_from_zero();
+    auto x_par = Vec::create(exec, b->get_size());
+    x_par->fill(0.0);
+
+    parallel_forward_gs(b.get(), x_par.get());
+
+    GKO_ASSERT_MTX_NEAR(x_par, x_seq, 0.0);
+}
+
+
+TEST_F(FwdGaussSeidelMulticolor, SweepMatchesSequentialSweepCsr)
+{
+    auto x_seq = sequential_sweep_from_zero();
+
+    auto x_mc = single_sweep(mtx);
+
+    GKO_ASSERT_MTX_NEAR(x_mc, x_seq, 0.0);
+}
+
+
+TEST_F(FwdGaussSeidelMulticolor, SweepMatchesSequentialSweepEll)
+{
+    auto x_seq = sequential_sweep_from_zero();
+    auto ell = gko::share(EllMtx::create(exec));
+    mtx->convert_to(ell);
+
+    auto x_mc = single_sweep(ell);
+
+    GKO_ASSERT_MTX_NEAR(x_mc, x_seq, 0.0);
+}
+
+
+TEST_F(FwdGaussSeidelMulticolor, SweepMatchesSequentialSweepWithinTolAMPCsr)
+{
+    auto x_seq = sequential_sweep_from_zero();
+    auto amp = gko::share(
+        AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(mtx));
+
+    auto x_mc = single_sweep(amp);
+
+    GKO_ASSERT_MTX_NEAR(x_mc, x_seq, amp_tol);
+}
+
+
+TEST_F(FwdGaussSeidelMulticolor, SweepMatchesSequentialSweepWithinTolAMPEll)
+{
+    auto x_seq = sequential_sweep_from_zero();
+    auto ell = gko::share(EllMtx::create(exec));
+    mtx->convert_to(ell);
+    auto amp = gko::share(
+        AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(ell));
+
+    auto x_mc = single_sweep(amp);
+
+    GKO_ASSERT_MTX_NEAR(x_mc, x_seq, amp_tol);
 }
 
 

@@ -60,8 +60,8 @@ TYPED_TEST(Multicolor, GeneratesCorrectOrderingWithCsrInput)
     auto permv = std::vector<i_type>(perm, perm + size);
     auto ipermv = std::vector<i_type>(iperm, iperm + size);
     EXPECT_EQ(color_ptrs, expected.color_ptrs);
-    EXPECT_EQ(permv, expected.old_to_new);
-    EXPECT_EQ(ipermv, expected.new_to_old);
+    EXPECT_EQ(permv, expected.new_to_old);
+    EXPECT_EQ(ipermv, expected.old_to_new);
 }
 
 TYPED_TEST(Multicolor, GeneratesCorrectOrderingWithSparsityCsrInput)
@@ -89,6 +89,6 @@ TYPED_TEST(Multicolor, GeneratesCorrectOrderingWithSparsityCsrInput)
     const auto permv = std::vector<i_type>(perm, perm + size);
     const auto ipermv = std::vector<i_type>(iperm, iperm + size);
     EXPECT_EQ(color_ptrs, expected.color_ptrs);
-    EXPECT_EQ(permv, expected.old_to_new);
-    EXPECT_EQ(ipermv, expected.new_to_old);
+    EXPECT_EQ(permv, expected.new_to_old);
+    EXPECT_EQ(ipermv, expected.old_to_new);
 }

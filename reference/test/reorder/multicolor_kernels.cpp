@@ -4,10 +4,13 @@
 
 #include "core/reorder/multicolor_kernels.hpp"
 
+#include <fstream>
+
 #include <gtest/gtest.h>
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/executor.hpp>
+#include <ginkgo/core/base/mtx_io.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/permutation.hpp>
 #include <ginkgo/core/reorder/multicolor.hpp>
@@ -15,6 +18,7 @@
 #include "core/test/utils/assertions.hpp"
 #include "core/test/utils/matrix_generator.hpp"
 #include "core/test/utils/reordering.hpp"
+#include "matrices/config.hpp"
 
 
 class Multicolor : public ::testing::Test {
@@ -92,8 +96,8 @@ TEST_F(Multicolor, CreatesCorrectPermutations2d5p)
         laplace2d5->get_const_col_idxs(), color_ptrs, perm.data(),
         invperm.data());
 
-    EXPECT_EQ(expected_ordering.old_to_new, perm);
-    EXPECT_EQ(expected_ordering.new_to_old, invperm);
+    EXPECT_EQ(expected_ordering.new_to_old, perm);
+    EXPECT_EQ(expected_ordering.old_to_new, invperm);
 }
 
 TEST_F(Multicolor, CreatesCorrectColorPtrs3d27p)
@@ -129,6 +133,72 @@ TEST_F(Multicolor, CreatesCorrectPermutations3d27p)
         laplace3d27->get_const_col_idxs(), color_ptrs, perm.data(),
         invperm.data());
 
-    EXPECT_EQ(expected_ordering.old_to_new, perm);
-    EXPECT_EQ(expected_ordering.new_to_old, invperm);
+    EXPECT_EQ(expected_ordering.new_to_old, perm);
+    EXPECT_EQ(expected_ordering.old_to_new, invperm);
+}
+
+
+/**
+ * Tests that reordering a matrix with the permutation returned by Multicolor
+ * has to produce a matrix whose rows are grouped into the independent sets
+ * described by the color pointers.
+ *
+ * Uses a real SuiteSparse matrix rather than a structured stencil, since the
+ * benchmarks are run on SuiteSparse matrices and an irregular sparsity pattern
+ * is what makes this non-trivial.
+ */
+class MulticolorSuiteSparse : public ::testing::Test {
+protected:
+    using v_type = double;
+    using i_type = int;
+    using CsrMtx = gko::matrix::Csr<v_type, i_type>;
+    using reorder_type = gko::reorder::Multicolor<v_type, i_type>;
+
+    MulticolorSuiteSparse()
+        : exec(gko::ReferenceExecutor::create()),
+          // 1138 x 1138, symmetric (hence structurally symmetric once read)
+          mtx(gko::share(gko::read<CsrMtx>(
+              std::ifstream(gko::matrices::location_1138_bus_mtx, std::ios::in),
+              exec)))
+    {}
+
+    std::shared_ptr<const gko::ReferenceExecutor> exec;
+    std::shared_ptr<CsrMtx> mtx;
+};
+
+
+TEST_F(MulticolorSuiteSparse, PermutedMatrixHasIndependentColorBlocks)
+{
+    const auto nrows = static_cast<i_type>(mtx->get_size()[0]);
+    auto mc_base = reorder_type::build().on(exec)->generate(mtx);
+    const auto* mc = gko::as<reorder_type>(mc_base.get());
+    const auto color_ptrs = mc->get_color_pointers();
+
+    // permute() expects new-to-old indices, see matrix::Permutation
+    auto permuted = mtx->permute(mc->get_permutation());
+
+    ASSERT_GE(color_ptrs.size(), 2);
+    EXPECT_EQ(color_ptrs.front(), 0);
+    EXPECT_EQ(color_ptrs.back(), nrows);
+    EXPECT_TRUE(gko::test::colors_are_independent(
+        nrows, permuted->get_const_row_ptrs(), permuted->get_const_col_idxs(),
+        color_ptrs));
+}
+
+
+TEST_F(MulticolorSuiteSparse, PermutationAndInversePermutationAreInverses)
+{
+    const auto nrows = static_cast<i_type>(mtx->get_size()[0]);
+    auto mc_base = reorder_type::build().on(exec)->generate(mtx);
+    const auto* mc = gko::as<reorder_type>(mc_base.get());
+
+    const auto* perm = mc->get_permutation()->get_const_permutation();
+    const auto* invperm =
+        mc->get_inverse_permutation()->get_const_permutation();
+
+    for (i_type new_i = 0; new_i < nrows; new_i++) {
+        ASSERT_GE(perm[new_i], 0);
+        ASSERT_LT(perm[new_i], nrows);
+        EXPECT_EQ(invperm[perm[new_i]], new_i) << "at new index " << new_i;
+    }
 }

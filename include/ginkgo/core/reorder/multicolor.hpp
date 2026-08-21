@@ -67,6 +67,13 @@ public:
      * Gets the permutation (permutation matrix, output of the algorithm) of the
      * linear operator.
      *
+     * Following the convention of matrix::Permutation, entry `i` of this
+     * permutation is the index the row now at position `i` had in the original
+     * matrix. It is therefore the permutation to hand to LinOp::permute in
+     * order to bring a matrix into the multicolor ordering:
+     * `A_reordered = A->permute(mc->get_permutation())` has the rows of color
+     * `c` at positions `[color_ptrs[c], color_ptrs[c + 1])`.
+     *
      * @return the permutation (permutation matrix)
      */
     std::shared_ptr<const PermutationMatrix> get_permutation() const
@@ -77,6 +84,10 @@ public:
     /**
      * Gets the inverse permutation (permutation matrix, output of the
      * algorithm) of the linear operator.
+     *
+     * Entry `i` of this permutation is the position that row `i` of the
+     * original matrix takes in the multicolor ordering. It is the inverse of
+     * @ref get_permutation.
      *
      * @return the inverse permutation (permutation matrix)
      */
@@ -122,4 +133,4 @@ private:
 }  // namespace gko
 
 
-#endif  // GKO_PUBLIC_CORE_REORDER_RCM_HPP_
+#endif  // GKO_PUBLIC_CORE_REORDER_MULTICOLOR_HPP_
