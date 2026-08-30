@@ -33,6 +33,8 @@ namespace amp {
 
 constexpr uint32 default_block_size = 512;
 constexpr uint32 num_thread_blocks_per_cu = 4;
+constexpr uint32 classical_oversubscription = 32;
+
 namespace gkerd = gko::kernels::GKO_DEVICE_NAMESPACE;
 
 // Tuple of device const pointers to relevant scalar types
@@ -267,37 +269,38 @@ __global__ __launch_bounds__(default_block_size) void csr_amp_basic_spmv(
     auto warp_tile =
         group::tiled_partition<warp_size>(group::this_thread_block());
     const auto warp_id = thread::get_subwarp_id_flat<warp_size>();
+    const auto num_warps = thread::get_subwarp_num_flat<warp_size>();
     const auto lane = warp_tile.thread_rank();
     const auto irhs = blockIdx.y;
-    if (warp_id >= nrows || irhs >= nrhs) {
+    if (irhs >= nrhs) {
         return;
     }
-    const auto irow = warp_id;
+    for (auto irow = warp_id; irow < nrows; irow += num_warps) {
+        using highest_type =
+            gko::highest_precision<IValueType, MValueType, OValueType>;
+        auto sum = zero<highest_type>();
 
-    using highest_type =
-        gko::highest_precision<IValueType, MValueType, OValueType>;
-    auto sum = zero<highest_type>();
+        gko::constexpr_for<0, q, 1>([&](auto k) {
+            using value_type = typename std::tuple_element<
+                k, typename narrow_types<MValueType>::type>::type;
+            using mult_type = gko::highest_precision<value_type, IValueType>;
+            const auto row_start = bin_row_ptrs[k][irow];
+            const auto row_end = bin_row_ptrs[k][irow + 1];
+            auto avals = std::get<k>(bin_values);
+            auto acols = bin_col_idxs[k];
+            for (auto iz = row_start + lane; iz < row_end; iz += warp_size) {
+                sum += static_cast<highest_type>(
+                    static_cast<mult_type>(avals[iz]) *
+                    static_cast<mult_type>(x[acols[iz] * x_stride + irhs]));
+            }
+        });
 
-    gko::constexpr_for<0, q, 1>([&](auto k) {
-        using value_type = typename std::tuple_element<
-            k, typename narrow_types<MValueType>::type>::type;
-        using mult_type = gko::highest_precision<value_type, IValueType>;
-        const auto row_start = bin_row_ptrs[k][irow];
-        const auto row_end = bin_row_ptrs[k][irow + 1];
-        auto avals = std::get<k>(bin_values);
-        auto acols = bin_col_idxs[k];
-        for (auto iz = row_start + lane; iz < row_end; iz += warp_size) {
-            sum += static_cast<highest_type>(
-                static_cast<mult_type>(avals[iz]) *
-                static_cast<mult_type>(x[acols[iz] * x_stride + irhs]));
+        auto warp_result = reduce(
+            warp_tile, sum,
+            [](const highest_type& a, const highest_type& b) { return a + b; });
+        if (lane == 0) {
+            y[irow * y_stride + irhs] = static_cast<OValueType>(warp_result);
         }
-    });
-
-    auto warp_result = reduce(
-        warp_tile, sum,
-        [](const highest_type& a, const highest_type& b) { return a + b; });
-    if (lane == 0) {
-        y[irow * y_stride + irhs] = static_cast<OValueType>(warp_result);
     }
 }
 
@@ -318,40 +321,41 @@ __global__ __launch_bounds__(default_block_size) void csr_amp_adv_spmv(
     auto warp_tile =
         group::tiled_partition<warp_size>(group::this_thread_block());
     const auto warp_id = thread::get_subwarp_id_flat<warp_size>();
+    const auto num_warps = thread::get_subwarp_num_flat<warp_size>();
     const auto lane = warp_tile.thread_rank();
     const auto irhs = blockIdx.y;
-    if (warp_id >= nrows || irhs >= nrhs) {
+    if (irhs >= nrhs) {
         return;
     }
-    const auto irow = warp_id;
+    for (auto irow = warp_id; irow < nrows; irow += num_warps) {
+        using highest_type =
+            gko::highest_precision<IValueType, MValueType, OValueType>;
+        auto sum = zero<highest_type>();
+        const auto alval = static_cast<highest_type>(alpha[0]);
 
-    using highest_type =
-        gko::highest_precision<IValueType, MValueType, OValueType>;
-    auto sum = zero<highest_type>();
-    const auto alval = static_cast<highest_type>(alpha[0]);
+        gko::constexpr_for<0, q, 1>([&](auto k) {
+            using value_type = typename std::tuple_element<
+                k, typename narrow_types<MValueType>::type>::type;
+            using mult_type = gko::highest_precision<value_type, IValueType>;
+            const auto row_start = bin_row_ptrs[k][irow];
+            const auto row_end = bin_row_ptrs[k][irow + 1];
+            auto avals = std::get<k>(bin_values);
+            auto acols = bin_col_idxs[k];
+            for (auto iz = row_start + lane; iz < row_end; iz += warp_size) {
+                sum += static_cast<highest_type>(
+                    static_cast<mult_type>(avals[iz]) *
+                    static_cast<mult_type>(x[acols[iz] * x_stride + irhs]));
+            }
+        });
 
-    gko::constexpr_for<0, q, 1>([&](auto k) {
-        using value_type = typename std::tuple_element<
-            k, typename narrow_types<MValueType>::type>::type;
-        using mult_type = gko::highest_precision<value_type, IValueType>;
-        const auto row_start = bin_row_ptrs[k][irow];
-        const auto row_end = bin_row_ptrs[k][irow + 1];
-        auto avals = std::get<k>(bin_values);
-        auto acols = bin_col_idxs[k];
-        for (auto iz = row_start + lane; iz < row_end; iz += warp_size) {
-            sum += static_cast<highest_type>(
-                static_cast<mult_type>(avals[iz]) *
-                static_cast<mult_type>(x[acols[iz] * x_stride + irhs]));
+        auto warp_result = reduce(
+            warp_tile, sum,
+            [](const highest_type& a, const highest_type& b) { return a + b; });
+        if (lane == 0) {
+            y[irow * y_stride + irhs] =
+                beta[0] * y[irow * y_stride + irhs] +
+                static_cast<OValueType>(alval * warp_result);
         }
-    });
-
-    auto warp_result = reduce(
-        warp_tile, sum,
-        [](const highest_type& a, const highest_type& b) { return a + b; });
-    if (lane == 0) {
-        y[irow * y_stride + irhs] =
-            beta[0] * y[irow * y_stride + irhs] +
-            static_cast<OValueType>(alval * warp_result);
     }
 }
 
@@ -393,11 +397,15 @@ void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
         std::get<k>(xvalues) = as_device_type(cmatk->get_const_values());
     });
 
-    constexpr auto block_size = default_block_size;
-    constexpr auto warps_per_block = block_size / config::warp_size;
-    const auto num_blocks =
-        static_cast<uint32>(ceildiv(nrows, warps_per_block));
-    const dim3 grid{num_blocks, nrhs, 1};
+    constexpr uint32 block_size = default_block_size;
+    constexpr uint32 warps_per_block = block_size / config::warp_size;
+    const auto nwarps = static_cast<uint32>(exec->get_num_warps_per_sm() *
+                                            exec->get_num_multiprocessor()) *
+                        classical_oversubscription;
+    const auto num_blocks = std::min(
+        static_cast<uint32>(ceildiv(nrows, block_size / config::warp_size)),
+        nwarps / warps_per_block);
+    const dim3 grid{num_blocks, nrhs};
     csr_amp_basic_spmv<DIValueType, DMValueType, DOValueType, IndexType>
         <<<grid, block_size, 0, exec->get_stream()>>>(
             nrows, nrhs, xrow_ptrs, xcol_idxs, xvalues,
@@ -451,11 +459,17 @@ void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
         std::get<k>(xvalues) = as_device_type(cmatk->get_const_values());
     });
 
-    constexpr auto block_size = default_block_size;
-    constexpr auto warps_per_block = block_size / config::warp_size;
-    const auto num_blocks =
-        static_cast<uint32>(ceildiv(nrows, warps_per_block));
-    const dim3 grid{num_blocks, nrhs, 1};
+    constexpr uint32 block_size = default_block_size;
+    constexpr uint32 warps_per_block = block_size / config::warp_size;
+    const auto nwarps = static_cast<uint32>(exec->get_num_warps_per_sm() *
+                                            exec->get_num_multiprocessor()) *
+                        classical_oversubscription;
+    const uint32 num_blocks =
+        // static_cast<uint32>(ceildiv(nrows, warps_per_block));
+        std::min(static_cast<uint32>(
+                     ceildiv(a->get_size()[0], block_size / config::warp_size)),
+                 nwarps / warps_per_block);
+    const dim3 grid{num_blocks, nrhs};
     csr_amp_adv_spmv<DIValueType, DMValueType, DOValueType, IndexType>
         <<<grid, block_size, 0, exec->get_stream()>>>(
             nrows, nrhs, alpha_ptr, xrow_ptrs, xcol_idxs, xvalues,
