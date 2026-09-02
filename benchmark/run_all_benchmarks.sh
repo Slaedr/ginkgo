@@ -62,9 +62,9 @@ if [ ! "${AMP_BASE_TYPE}" ]; then
     print_default AMP_BASE_TYPE
 fi
 
-if [ "${AMP_BASE_TYPE}" != "ell" ] && [ "${AMP_BASE_TYPE}" != "csr" ]; then
+if [ "${AMP_BASE_TYPE}" != "ell" ] && [ "${AMP_BASE_TYPE}" != "csrc" ]; then
     echo "AMP_BASE_TYPE is set to the unsupported \"${AMP_BASE_TYPE}\"." 1>&2
-    echo "Currently supported values: \"ell\" and \"csr\"" 1>&2
+    echo "Currently supported values: \"ell\" and \"csrc\"" 1>&2
     exit 1
 fi
 

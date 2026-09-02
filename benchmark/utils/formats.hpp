@@ -296,7 +296,7 @@ std::unique_ptr<gko::LinOp> matrix_factory(
                                   ? amp_type::tolerance_type::normwise
                                   : amp_type::tolerance_type::componentwise;
         std::shared_ptr<gko::LinOp> base_mat;
-        if (FLAGS_amp_base_type == "csr") {
+        if (FLAGS_amp_base_type == "csr" || FLAGS_amp_base_type == "csrc") {
             auto csr_mat = csr::create(exec);
             csr_mat->read(data);
             base_mat = std::move(csr_mat);
