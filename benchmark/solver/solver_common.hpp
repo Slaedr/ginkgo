@@ -311,28 +311,61 @@ void write_precond_info(const gko::LinOp* precond, json& precond_info)
 struct SolverGenerator : DefaultSystemGenerator<> {
     using Vec = typename DefaultSystemGenerator::Vec;
 
-    std::unique_ptr<Vec> generate_rhs(std::shared_ptr<const gko::Executor> exec,
-                                      const gko::LinOp* system_matrix,
-                                      json& config) const
+    /**
+     * Generates the right-hand side for `system_matrix`.
+     *
+     * @param permutation  if non-null, the symmetric permutation P that
+     *                     `reorder()` already applied to `system_matrix`, so
+     *                     that the caller passes P A P^T here. The returned
+     *                     vector is then P b, where b is the right-hand side
+     *                     that would have been generated for the unpermuted
+     *                     system A -- i.e. both orderings describe the same
+     *                     linear system, just in different coordinates.
+     *
+     *                     This has to be handled per generation mode rather
+     *                     than by permuting the result afterwards: the "sinus"
+     *                     mode manufactures b = A * s from a vector s indexed
+     *                     by *row position*, so it produces a vector that
+     *                     already lives in the permuted space. Permuting s
+     *                     instead gives the right answer without needing the
+     *                     unpermuted matrix, since (P A P^T)(P s) = P (A s).
+     *                     A right-hand side read from a file, by contrast, is
+     *                     given in the original ordering and does need to be
+     *                     permuted.
+     */
+    std::unique_ptr<Vec> generate_rhs(
+        std::shared_ptr<const gko::Executor> exec,
+        const gko::LinOp* system_matrix, json& config,
+        gko::matrix::Permutation<index_type>* permutation = nullptr) const
     {
         if (config.contains("rhs")) {
             std::ifstream rhs_fd{config["rhs"].get<std::string>()};
-            return gko::read_generic<Vec>(rhs_fd, std::move(exec));
+            auto rhs = gko::read_generic<Vec>(rhs_fd, std::move(exec));
+            // a right-hand side from a file is in the original ordering
+            if (permutation) {
+                permute(rhs, permutation);
+            }
+            return rhs;
         } else {
             gko::dim<2> vec_size{system_matrix->get_size()[0], FLAGS_nrhs};
             gko::dim<2> local_vec_size{
                 gko::detail::get_local(system_matrix)->get_size()[1],
                 FLAGS_nrhs};
             if (FLAGS_rhs_generation == "1") {
+                // invariant under permutation
                 return create_multi_vector(exec, vec_size, local_vec_size,
                                            gko::one<etype>());
             } else if (FLAGS_rhs_generation == "random") {
+                // a permuted random vector is still a random vector
                 return create_multi_vector_random(exec, vec_size,
                                                   local_vec_size);
             } else if (FLAGS_rhs_generation == "sinus") {
-                return create_normalized_manufactured_rhs(
-                    exec, system_matrix,
-                    create_matrix_sin<etype>(exec, vec_size).get());
+                auto solution = create_matrix_sin<etype>(exec, vec_size);
+                if (permutation) {
+                    permute(solution, permutation);
+                }
+                return create_normalized_manufactured_rhs(exec, system_matrix,
+                                                          solution.get());
             }
             throw std::invalid_argument(std::string("\"rhs_generation\" = ") +
                                         FLAGS_rhs_generation +
@@ -455,11 +488,14 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                                          itype>) {
                 state.color_ptrs = std::move(reorder_result.color_ptrs);
             }
+            // The permutation is handed to generate_rhs rather than applied to
+            // its result: the RHS is generated from the already-permuted
+            // matrix, so for the manufactured "sinus" mode the generated
+            // vector is in the permuted space already and permuting it again
+            // would change the system being solved.
             state.b = generator.generate_rhs(exec, state.system_matrix.get(),
-                                             test_case);
-            if (reorder_result.permutation) {
-                permute(state.b, reorder_result.permutation.get());
-            }
+                                             test_case,
+                                             reorder_result.permutation.get());
             state.x = generator.generate_initial_guess(
                 exec, state.system_matrix.get(), state.b.get());
         }
