@@ -23,7 +23,8 @@ namespace formats {
 
 
 std::string available_format =
-    "coo, csr, ell, ell_mixed, sellp, hybrid, hybrid0, hybrid25, hybrid33, "
+    "coo, csr, csrc, csri, csrm, csrs, ell, ell_mixed, sellp, hybrid, "
+    "hybrid0, hybrid25, hybrid33, "
     "hybrid40, "
     "hybrid60, hybrid80, hybridlimit0, hybridlimit25, hybridlimit33, "
     "hybridminstorage, amp"
@@ -48,8 +49,9 @@ std::string format_description =
     "     Irregular Sparse Matrices.\n"
     "csr: Compressed Sparse Row storage. Ginkgo implementation with\n"
     "     automatic strategy.\n"
-    "csrc: Ginkgo's CSR implementation with automatic strategy.\n"
-    "csri: Ginkgo's CSR implementation with imbalance strategy.\n"
+    "csrc: Ginkgo's CSR implementation with classical strategy.\n"
+    "csri: Ginkgo's CSR implementation with load_balance (imbalance) "
+    "strategy.\n"
     "csrm: Ginkgo's CSR implementation with merge_path strategy.\n"
     "csrs: Ginkgo's CSR implementation with sparselib strategy.\n"
     "ell: Ellpack format according to Bell and Garland: Efficient Sparse\n"
@@ -69,7 +71,10 @@ std::string format_description =
     "     different precisions (FP64/FP32/BF16/FP16). Base format is\n"
     "     controlled by --amp_base_type (ell or csr), tolerance type by\n"
     "     --amp_tolerance_type (componentwise or normwise), and tolerance\n"
-    "     value by --amp_tolerance."
+    "     value by --amp_tolerance.\n"
+    "     Note: AMP[CSR] uses a classical-style SpMV kernel internally, so\n"
+    "     compare against csrc (classical) rather than csr (automatical)\n"
+    "     for a like-for-like fixed-precision baseline."
 #ifdef HAS_CUDA
     "\n"
     "cusparse_coo: cuSPARSE COO SpMV, using cusparseXhybmv with \n"
@@ -291,7 +296,7 @@ std::unique_ptr<gko::LinOp> matrix_factory(
                                   ? amp_type::tolerance_type::normwise
                                   : amp_type::tolerance_type::componentwise;
         std::shared_ptr<gko::LinOp> base_mat;
-        if (FLAGS_amp_base_type == "csr") {
+        if (FLAGS_amp_base_type == "csr" || FLAGS_amp_base_type == "csrc") {
             auto csr_mat = csr::create(exec);
             csr_mat->read(data);
             base_mat = std::move(csr_mat);

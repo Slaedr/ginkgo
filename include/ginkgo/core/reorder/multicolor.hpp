@@ -34,9 +34,14 @@ namespace reorder {
 /**
  * A multicolor reordering, also known as independent set reordering.
  *
- * This is intended for reordering an arbitrary sparse matrix with symmetric
- * structure so that preconditioners/smoothers such as Gauss-Seidel and ILU
- * can be applied in parallel.
+ * This reorders a sparse matrix so that preconditioners/smoothers such as
+ * Gauss-Seidel and ILU can be applied in parallel. Unless @ref
+ * parameters_type::skip_symmetrize "skip_symmetrize" is set, the matrix does
+ * not need to be structurally symmetric: the coloring is computed on the
+ * pattern of `A + A^T`, so that no independent set has an entry of `A` in
+ * either direction between two of its rows. The permutation returned by @ref
+ * get_permutation is still meant to be applied symmetrically to `A` (i.e.
+ * `P A P^T`), which is what solver::FwdGaussSeidel expects.
  *
  * The reference implementation is based on a simple greedy approach, while
  * the parallel implementations use the Jones-Plassman-Luby (JPL) algorithm
@@ -113,6 +118,21 @@ public:
          * constructed along with the normal permutation matrix.
          */
         bool GKO_FACTORY_PARAMETER_SCALAR(construct_inverse_permutation, true);
+
+        /**
+         * If set to false, computes the multicolor ordering of A + A^T,
+         * otherwise assumes that A is structurally symmetric and colors it
+         * directly.
+         */
+        bool GKO_FACTORY_PARAMETER_SCALAR(skip_symmetrize, false);
+
+        /**
+         * If set to false, sorts the input matrix's pattern by column index
+         * before symmetrizing it. Symmetrization is a sorted merge and may
+         * fail silently or crash if the input matrix is not sorted by column
+         * index. Has no effect if skip_symmetrize is true.
+         */
+        bool GKO_FACTORY_PARAMETER_SCALAR(skip_sorting, false);
     };
     GKO_ENABLE_REORDERING_BASE_FACTORY(Multicolor, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);

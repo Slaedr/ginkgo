@@ -202,3 +202,89 @@ TEST_F(MulticolorSuiteSparse, PermutationAndInversePermutationAreInverses)
         EXPECT_EQ(invperm[perm[new_i]], new_i) << "at new index " << new_i;
     }
 }
+
+
+/**
+ * Tests that Multicolor produces a valid (independent-set) coloring on a
+ * structurally nonsymmetric matrix, by default coloring the pattern of
+ * A + A^T rather than A itself.
+ *
+ * ani1_nonsymm has 164 of its 238 entries structurally asymmetric, which is
+ * enough for the naive (row-only) greedy coloring to place several coupled
+ * rows in the same color: colors_are_independent is false without
+ * symmetrization, and true with it.
+ */
+class MulticolorNonsymmetric : public ::testing::Test {
+protected:
+    using v_type = double;
+    using i_type = int;
+    using CsrMtx = gko::matrix::Csr<v_type, i_type>;
+    using reorder_type = gko::reorder::Multicolor<v_type, i_type>;
+
+    MulticolorNonsymmetric()
+        : exec(gko::ReferenceExecutor::create()),
+          mtx(gko::share(gko::read<CsrMtx>(
+              std::ifstream(gko::matrices::location_ani1_nonsymm_mtx,
+                            std::ios::in),
+              exec)))
+    {}
+
+    std::shared_ptr<const gko::ReferenceExecutor> exec;
+    std::shared_ptr<CsrMtx> mtx;
+};
+
+
+TEST_F(MulticolorNonsymmetric, ColorsAreIndependentByDefault)
+{
+    const auto nrows = static_cast<i_type>(mtx->get_size()[0]);
+    auto mc_base = reorder_type::build().on(exec)->generate(mtx);
+    const auto* mc = gko::as<reorder_type>(mc_base.get());
+    const auto color_ptrs = mc->get_color_pointers();
+
+    auto permuted = mtx->permute(mc->get_permutation());
+
+    ASSERT_GE(color_ptrs.size(), 2);
+    EXPECT_EQ(color_ptrs.front(), 0);
+    EXPECT_EQ(color_ptrs.back(), nrows);
+    EXPECT_TRUE(gko::test::colors_are_independent(
+        nrows, permuted->get_const_row_ptrs(), permuted->get_const_col_idxs(),
+        color_ptrs));
+}
+
+
+TEST_F(MulticolorNonsymmetric, SkipSymmetrizeColorsTheUnsymmetrizedPattern)
+{
+    const auto nrows = static_cast<i_type>(mtx->get_size()[0]);
+    auto mc_base =
+        reorder_type::build().with_skip_symmetrize(true).on(exec)->generate(
+            mtx);
+    const auto* mc = gko::as<reorder_type>(mc_base.get());
+    const auto color_ptrs = mc->get_color_pointers();
+
+    auto permuted = mtx->permute(mc->get_permutation());
+
+    // Document the opt-out's contract: without symmetrization, the naive
+    // greedy coloring of this matrix is not a valid independent-set
+    // coloring.
+    EXPECT_FALSE(gko::test::colors_are_independent(
+        nrows, permuted->get_const_row_ptrs(), permuted->get_const_col_idxs(),
+        color_ptrs));
+}
+
+
+TEST_F(MulticolorNonsymmetric, PermutationAndInversePermutationAreInverses)
+{
+    const auto nrows = static_cast<i_type>(mtx->get_size()[0]);
+    auto mc_base = reorder_type::build().on(exec)->generate(mtx);
+    const auto* mc = gko::as<reorder_type>(mc_base.get());
+
+    const auto* perm = mc->get_permutation()->get_const_permutation();
+    const auto* invperm =
+        mc->get_inverse_permutation()->get_const_permutation();
+
+    for (i_type new_i = 0; new_i < nrows; new_i++) {
+        ASSERT_GE(perm[new_i], 0);
+        ASSERT_LT(perm[new_i], nrows);
+        EXPECT_EQ(invperm[perm[new_i]], new_i) << "at new index " << new_i;
+    }
+}

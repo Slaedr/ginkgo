@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -24,10 +24,14 @@ struct Generator : public DistributedDefaultSystemGenerator<SolverGenerator> {
                                                              {}}
     {}
 
-    std::unique_ptr<Vec> generate_rhs(std::shared_ptr<const gko::Executor> exec,
-                                      const gko::LinOp* system_matrix,
-                                      json& config) const
+    std::unique_ptr<Vec> generate_rhs(
+        std::shared_ptr<const gko::Executor> exec,
+        const gko::LinOp* system_matrix, json& config,
+        [[maybe_unused]] gko::matrix::Permutation<index_type>* permutation =
+            nullptr) const
     {
+        // reorder() is a no-op for distributed benchmarks (--reorder is not
+        // even defined there), so the permutation is always empty here
         if (FLAGS_rhs_generation == "sinus") {
             gko::dim<2> vec_size{system_matrix->get_size()[0], FLAGS_nrhs};
             gko::dim<2> local_vec_size{
