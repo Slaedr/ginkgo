@@ -198,6 +198,11 @@ struct ConfigResult {
     // quantized) operator; should match residual_norm closely whenever the
     // format is exact.
     double residual_norm_in_format = 0.0;
+    // The absolute residual the stopping criterion was aiming for, i.e.
+    // rel_res_goal times ||b|| (or times the initial residual norm under
+    // --rel_residual), and whether residual_norm actually reached it.
+    double residual_goal = 0.0;
+    bool residual_goal_met = false;
     double generate_time = 0.0;
     double apply_time = 0.0;
     unsigned repetitions = 0;
@@ -227,6 +232,8 @@ struct ConfigResult {
         j["direct"] = is_direct;
         j["residual_norm"] = residual_norm;
         j["residual_norm_in_format"] = residual_norm_in_format;
+        j["residual_goal"] = residual_goal;
+        j["residual_goal_met"] = residual_goal_met;
         j["generate_time"] = generate_time;
         j["apply_time"] = apply_time;
         j["solve_time"] = solve_time();
@@ -370,6 +377,21 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     }
     r.residual_norm = compute_residual_norm(A_orig, b_orig, r.solution.get());
 
+    // The stopping criterion built by create_criterion() tests the solver's
+    // *recurrent* residual, which for GMRES can keep descending long after the
+    // true residual has stagnated. A solver can therefore report convergence
+    // while the residual recomputed above is still orders of magnitude above
+    // the requested goal -- which is easy to mistake for a bug in whatever the
+    // two configurations differ by. Record the goal the criterion was actually
+    // aiming for so that case can be flagged. Both candidate baselines are
+    // permutation-invariant, so evaluating them on the original system matches
+    // what the (possibly permuted) criterion saw.
+    const auto baseline_norm =
+        FLAGS_rel_residual ? compute_residual_norm(A_orig, b_orig, x0_orig)
+                           : compute_norm2(b_orig);
+    r.residual_goal = FLAGS_rel_res_goal * baseline_norm;
+    r.residual_goal_met = r.residual_norm <= r.residual_goal;
+
     r.generate_time = generate_timer->compute_time(FLAGS_timer_method);
     r.apply_time = apply_timer->compute_time(FLAGS_timer_method);
     r.repetitions = apply_timer->get_num_repetitions();
@@ -402,6 +424,22 @@ std::string fmt_iters(const json& c)
 }
 
 
+// Formats a config's true residual, appending "!" when the solver reported
+// convergence even though this recomputed residual never reached the goal the
+// stopping criterion was asking for -- see the comment in run_config().
+std::string fmt_residual(const json& c)
+{
+    if (!c.value("completed", false)) {
+        return "---";
+    }
+    auto s = fmt_num(c.value("residual_norm", 0.0));
+    if (c.value("converged", false) && !c.value("residual_goal_met", true)) {
+        s += "!";
+    }
+    return s;
+}
+
+
 void print_header(const std::string& label_a, const json& cfg_a,
                   const std::string& label_b, const json& cfg_b,
                   std::shared_ptr<const gko::Executor> exec)
@@ -421,9 +459,9 @@ void print_table_header()
 {
     std::cout << std::left << std::setw(kMatrixWidth) << "matrix" << std::right
               << std::setw(kNumWidth) << "rows" << std::setw(kNumWidth) << "nnz"
-              << std::setw(kValWidth) << "||b||" << std::setw(6) << "itA"
-              << std::setw(6) << "itB" << std::setw(kValWidth) << "resA"
-              << std::setw(kValWidth) << "resB" << std::setw(kValWidth)
+              << std::setw(kValWidth) << "||b||" << std::setw(kValWidth)
+              << "resA" << std::setw(kValWidth) << "resB" << std::setw(6)
+              << "itA" << std::setw(6) << "itB" << std::setw(kValWidth)
               << "timeA(s)" << std::setw(kValWidth) << "timeB(s)"
               << std::setw(kValWidth) << "rel.diff"
               << "\n";
@@ -444,24 +482,23 @@ void print_table_row(const json& row)
     const auto& b = row["b"];
     const bool a_ok = a.value("completed", false);
     const bool b_ok = b.value("completed", false);
-    std::cout
-        << std::right << std::setw(kNumWidth) << row.value("rows", 0)
-        << std::setw(kNumWidth) << row.value("nnz", 0) << std::setw(kValWidth)
-        << fmt_num(row.value("rhs_norm", 0.0)) << std::setw(6) << fmt_iters(a)
-        << std::setw(6) << fmt_iters(b) << std::setw(kValWidth)
-        << (a_ok ? fmt_num(a.value("residual_norm", 0.0)) : std::string{"---"})
-        << std::setw(kValWidth)
-        << (b_ok ? fmt_num(b.value("residual_norm", 0.0)) : std::string{"---"})
-        << std::setw(kValWidth)
-        << (a_ok ? fmt_num(a.value("solve_time", 0.0)) : std::string{"---"})
-        << std::setw(kValWidth)
-        << (b_ok ? fmt_num(b.value("solve_time", 0.0)) : std::string{"---"})
-        << std::setw(kValWidth)
-        << (row.contains("rel_solution_diff") &&
-                    !row["rel_solution_diff"].is_null()
-                ? fmt_num(row["rel_solution_diff"].get<double>())
-                : std::string{"---"})
-        << "\n";
+    std::cout << std::right << std::setw(kNumWidth) << row.value("rows", 0)
+              << std::setw(kNumWidth) << row.value("nnz", 0)
+              << std::setw(kValWidth) << fmt_num(row.value("rhs_norm", 0.0))
+              << std::setw(kValWidth) << fmt_residual(a) << std::setw(kValWidth)
+              << fmt_residual(b) << std::setw(6) << fmt_iters(a) << std::setw(6)
+              << fmt_iters(b) << std::setw(kValWidth)
+              << (a_ok ? fmt_num(a.value("solve_time", 0.0))
+                       : std::string{"---"})
+              << std::setw(kValWidth)
+              << (b_ok ? fmt_num(b.value("solve_time", 0.0))
+                       : std::string{"---"})
+              << std::setw(kValWidth)
+              << (row.contains("rel_solution_diff") &&
+                          !row["rel_solution_diff"].is_null()
+                      ? fmt_num(row["rel_solution_diff"].get<double>())
+                      : std::string{"---"})
+              << "\n";
     if (!a_ok) {
         std::cout << "    [A] " << a.value("error", std::string{}) << "\n";
     }
@@ -623,8 +660,14 @@ int main(int argc, char* argv[])
 
     std::cout << std::string(kMatrixWidth + 2 * kNumWidth + 6 * kValWidth, '-')
               << "\n"
-              << "* = did not reach the residual goal, D = direct solver "
-                 "(0 iterations)\n";
+              << "* = solver stopped without reporting convergence, "
+                 "D = direct solver (0 iterations)\n"
+              << "! = reported converged, but this recomputed residual is "
+                 "still above rel_res_goal;\n"
+              << "    the stopping criterion tests the solver's recurrent "
+                 "residual, not this one, so\n"
+              << "    a goal below the attainable floor is reached only on "
+                 "paper\n";
     std::cerr << "\nResults written to " << output_path << std::endl;
     return 0;
 }
