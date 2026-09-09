@@ -1,0 +1,32 @@
+{
+  "label_a": "gmres+jacobi",
+  "label_b": "gmres+fgs(multicolor)",
+  "output_file": "solver_compare_results.json",
+  "common": {
+    "executor": "reference",
+    "solvers": "gmres",
+    "formats": "csr",
+    "gmres_restart": 100,
+    "max_iters": 500,
+    "rel_res_goal": 1e-8,
+    "rhs_generation": "1",
+    "initial_guess_generation": "0",
+    "repetitions": "1",
+    "warmup": 0
+  },
+  "config_a": {
+    "preconditioners": "jacobi",
+    "reorder": "none"
+  },
+  "config_b": {
+    "preconditioners": "fgs",
+    "reorder": "multicolor",
+    "fgs_sweeps": 1
+  },
+  "matrices": [
+    "matrices/test/ani1.mtx",
+    "matrices/test/isai_spd.mtx",
+    "matrices/test/ani4.mtx",
+    {"stencil": "7pt", "size": 1000}
+  ]
+}
