@@ -212,7 +212,7 @@ int main(int argc, char* argv[])
         auto mat =
             gko::share(Amp::build()
                            .with_tolerance(cfg.amp_tolerance)
-                           .with_strategy(Amp::tolerance_type::componentwise)
+                           .with_criterion(Amp::criterion_type::componentwise)
                            .on(exec)
                            ->generate(base_mat));
         exec->synchronize();

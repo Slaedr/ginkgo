@@ -478,7 +478,7 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 test_case["optimal"]["spmv"].get<std::string>();
             state.system_matrix = generator.generate_matrix_with_format(
                 exec, spmv_format, data, size);
-            if (spmv_format == "amp") {
+            if (formats::is_amp_format(spmv_format)) {
                 formats::write_amp_bin_info(state.system_matrix.get(),
                                             test_case);
             }

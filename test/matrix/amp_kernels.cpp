@@ -252,6 +252,60 @@ TEST_F(Amp, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
 }
 
 
+TEST_F(Amp, IndependentBucketsSpmvIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto ell = gen_mtx(532, 231);
+    auto amp_ref =
+        AmpMtx::build()
+            .with_tolerance(tol)
+            .with_strategy(AmpMtx::strategy_type::independent_buckets)
+            .on(ref)
+            ->generate(gko::share(std::move(ell)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 1});
+    auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 1});
+
+    amp_ref->apply(b_ref, c_ref);
+    amp_d->apply(b_d, c_d);
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(Amp, IndependentBucketsAdvancedSpmvIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto ell = gen_mtx(532, 231);
+    auto amp_ref =
+        AmpMtx::build()
+            .with_tolerance(tol)
+            .with_strategy(AmpMtx::strategy_type::independent_buckets)
+            .on(ref)
+            ->generate(gko::share(std::move(ell)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = gen_vec(amp_ref->get_size()[0], 1);
+    auto c_d = gko::clone(exec, c_ref);
+    auto alpha_ref = gko::initialize<Vec>({2.0}, ref);
+    auto alpha_d = gko::clone(exec, alpha_ref);
+    auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
+    auto beta_d = gko::clone(exec, beta_ref);
+
+    amp_ref->apply(alpha_ref, b_ref, beta_ref, c_ref);
+    amp_d->apply(alpha_d, b_d, beta_d, c_d);
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
 TEST_F(Amp, FillInDenseIsEquivalentToRef)
 {
     SKIP_IF_SINGLE_MODE;
@@ -674,6 +728,60 @@ TEST_F(AmpCsr, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
 }
 
 
+TEST_F(AmpCsr, IndependentBucketsSpmvIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref =
+        AmpMtx::build()
+            .with_tolerance(tol)
+            .with_strategy(AmpMtx::strategy_type::independent_buckets)
+            .on(ref)
+            ->generate(gko::share(std::move(csr)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = Vec::create(ref, gko::dim<2>{amp_ref->get_size()[0], 1});
+    auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 1});
+
+    amp_ref->apply(b_ref, c_ref);
+    amp_d->apply(b_d, c_d);
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
+TEST_F(AmpCsr, IndependentBucketsAdvancedSpmvIsEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto amp_ref =
+        AmpMtx::build()
+            .with_tolerance(tol)
+            .with_strategy(AmpMtx::strategy_type::independent_buckets)
+            .on(ref)
+            ->generate(gko::share(std::move(csr)));
+    auto amp_d = gko::clone(exec, amp_ref);
+    auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
+    auto b_d = gko::clone(exec, b_ref);
+    auto c_ref = gen_vec(amp_ref->get_size()[0], 1);
+    auto c_d = gko::clone(exec, c_ref);
+    auto alpha_ref = gko::initialize<Vec>({2.0}, ref);
+    auto alpha_d = gko::clone(exec, alpha_ref);
+    auto beta_ref = gko::initialize<Vec>({-1.0}, ref);
+    auto beta_d = gko::clone(exec, beta_ref);
+
+    amp_ref->apply(alpha_ref, b_ref, beta_ref, c_ref);
+    amp_d->apply(alpha_d, b_d, beta_d, c_d);
+
+    GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+
 TEST_F(AmpCsr, FillInDenseIsEquivalentToRef)
 {
     SKIP_IF_SINGLE_MODE;
@@ -743,8 +851,7 @@ TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
     // Verify bin 0 contains only the diagonals (n entries).
     auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
-    ASSERT_EQ(bin0->get_num_stored_elements(),
-              static_cast<gko::size_type>(n));
+    ASSERT_EQ(bin0->get_num_stored_elements(), static_cast<gko::size_type>(n));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(n, 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -779,8 +886,7 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
     // Verify bin 0 contains only the diagonals (n entries).
     auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
-    ASSERT_EQ(bin0->get_num_stored_elements(),
-              static_cast<gko::size_type>(n));
+    ASSERT_EQ(bin0->get_num_stored_elements(), static_cast<gko::size_type>(n));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(n, 1);
     auto b_d = gko::clone(exec, b_ref);

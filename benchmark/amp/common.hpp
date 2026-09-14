@@ -379,7 +379,7 @@ create_amp_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
     }
     auto amp_template = Amp::build()
                             .with_tolerance(cfg.amp_tolerance)
-                            .with_strategy(Amp::tolerance_type::componentwise)
+                            .with_criterion(Amp::criterion_type::componentwise)
                             .on(exec)
                             ->generate(base_empty);
     auto csr_template = Csr::create(exec);

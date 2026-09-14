@@ -27,7 +27,7 @@ std::string available_format =
     "hybrid0, hybrid25, hybrid33, "
     "hybrid40, "
     "hybrid60, hybrid80, hybridlimit0, hybridlimit25, hybridlimit33, "
-    "hybridminstorage, amp"
+    "hybridminstorage, amp, ampib"
 #ifdef HAS_CUDA
     ", cusparse_csr, cusparse_csrex, cusparse_coo"
     ", cusparse_csrmp, cusparse_csrmm, cusparse_ell, cusparse_hybrid"
@@ -71,10 +71,15 @@ std::string format_description =
     "     different precisions (FP64/FP32/BF16/FP16). Base format is\n"
     "     controlled by --amp_base_type (ell or csr), tolerance type by\n"
     "     --amp_tolerance_type (componentwise or normwise), and tolerance\n"
-    "     value by --amp_tolerance.\n"
+    "     value by --amp_tolerance. Uses the monolithic_classical SpMV\n"
+    "     strategy: a single kernel reads all precision buckets and\n"
+    "     accumulates each row.\n"
     "     Note: AMP[CSR] uses a classical-style SpMV kernel internally, so\n"
     "     compare against csrc (classical) rather than csr (automatical)\n"
-    "     for a like-for-like fixed-precision baseline."
+    "     for a like-for-like fixed-precision baseline.\n"
+    "ampib: AMP with the independent_buckets SpMV strategy -- one SpMV per\n"
+    "       precision bucket, accumulated into the output vector. Same\n"
+    "       storage (and --amp_* flags) as amp; differs only in the apply."
 #ifdef HAS_CUDA
     "\n"
     "cusparse_coo: cuSPARSE COO SpMV, using cusparseXhybmv with \n"
@@ -287,14 +292,27 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOp>(
 // clang-format on
 
 
+/**
+ * Returns true if the given format string names one of the AMP formats
+ * ("amp": monolithic_classical, "ampib": independent_buckets).
+ */
+bool is_amp_format(const std::string& format)
+{
+    return format == "amp" || format == "ampib";
+}
+
+
 std::unique_ptr<gko::LinOp> matrix_factory(
     const std::string& format, std::shared_ptr<const gko::Executor> exec,
     const gko::matrix_data<etype, itype>& data)
 {
-    if (format == "amp") {
-        const auto strategy = (FLAGS_amp_tolerance_type == "normwise")
-                                  ? amp_type::tolerance_type::normwise
-                                  : amp_type::tolerance_type::componentwise;
+    if (is_amp_format(format)) {
+        const auto criterion = (FLAGS_amp_tolerance_type == "normwise")
+                                   ? amp_type::criterion_type::normwise
+                                   : amp_type::criterion_type::componentwise;
+        const auto strategy =
+            (format == "ampib") ? amp_type::strategy_type::independent_buckets
+                                : amp_type::strategy_type::monolithic_classical;
         std::shared_ptr<gko::LinOp> base_mat;
         if (FLAGS_amp_base_type == "csr" || FLAGS_amp_base_type == "csrc") {
             auto csr_mat = csr::create(exec);
@@ -307,6 +325,7 @@ std::unique_ptr<gko::LinOp> matrix_factory(
             base_mat = std::move(ell_mat);
         }
         return amp_type::build()
+            .with_criterion(criterion)
             .with_strategy(strategy)
             .with_tolerance(static_cast<float>(FLAGS_amp_tolerance))
             .on(exec)
