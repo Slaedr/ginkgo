@@ -4,6 +4,7 @@
     "nz": 64,
     "executor": "omp",
     "amp_base_format": "ell",
+    "amp_spmv_strategy": "monolithic_classical",
     "warmup_reps": 2,
     "bench_reps": 10,
     "amp_tolerance": 0.01,

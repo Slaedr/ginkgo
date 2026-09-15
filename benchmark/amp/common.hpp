@@ -37,6 +37,18 @@ namespace gkodist = gko::experimental::distributed;
 
 enum class mat_offdiag_t { hpcg, random_diag_dominant, random_general };
 
+// Every AMP built in benchmark/amp/ is concretely AMP<double, int>
+// (spmv.cpp/gmres.cpp hardcode local_idx_t = gko::int32 == int; fgs.cpp
+// hardcodes AMP<double, int> directly), so Config can store the real
+// factory enum instead of a decoupled local one.
+using amp_strategy_t = gko::matrix::AMP<double, int>::strategy_type;
+
+inline std::string to_string(amp_strategy_t s)
+{
+    return s == amp_strategy_t::independent_buckets ? "independent_buckets"
+                                                    : "monolithic_classical";
+}
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -56,7 +68,21 @@ struct Config {
     mat_offdiag_t offdiag_type = mat_offdiag_t::hpcg;
     std::string output_file_prefix = "";
     std::string amp_base_format = "ell";
+    amp_strategy_t amp_spmv_strategy = amp_strategy_t::monolithic_classical;
 };
+
+/**
+ * Short filename suffix distinguishing a non-default SpMV strategy, so that
+ * running the same benchmark with a different amp_spmv_strategy does not
+ * silently overwrite the previous run's
+ * <bench>_<format>_<executor>_results.json. Empty for the default strategy, so
+ * existing filenames are unaffected.
+ */
+inline std::string strategy_suffix(const Config& cfg)
+{
+    return cfg.amp_spmv_strategy == amp_strategy_t::independent_buckets ? "_ib"
+                                                                        : "";
+}
 
 inline Config load_config(const std::string& path)
 {
@@ -111,6 +137,17 @@ inline Config load_config(const std::string& path)
         } else {
             throw std::runtime_error("Invalid amp_base_format '" + fmt +
                                      "': supported values are 'ell' and 'csr'");
+        }
+    }
+    if (j.contains("amp_spmv_strategy")) {
+        std::string s = j["amp_spmv_strategy"];
+        if (s == "monolithic_classical") {
+            cfg.amp_spmv_strategy = amp_strategy_t::monolithic_classical;
+        } else if (s == "independent_buckets") {
+            cfg.amp_spmv_strategy = amp_strategy_t::independent_buckets;
+        } else {
+            std::cerr << "Invalid amp_spmv_strategy " << s << std::endl;
+            throw std::runtime_error("Invalid amp_spmv_strategy " + s);
         }
     }
     return cfg;
@@ -379,7 +416,8 @@ create_amp_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
     }
     auto amp_template = Amp::build()
                             .with_tolerance(cfg.amp_tolerance)
-                            .with_strategy(Amp::tolerance_type::componentwise)
+                            .with_criterion(Amp::criterion_type::componentwise)
+                            .with_strategy(cfg.amp_spmv_strategy)
                             .on(exec)
                             ->generate(base_empty);
     auto csr_template = Csr::create(exec);
@@ -393,6 +431,7 @@ inline void print_config(const Config& cfg)
               << "  Matrix values: " << static_cast<int>(cfg.offdiag_type)
               << "\n"
               << "  Base format: " << cfg.amp_base_format << "\n"
+              << "  SpMV strategy: " << to_string(cfg.amp_spmv_strategy) << "\n"
               << "  AMP tolerance: " << cfg.amp_tolerance << "\n"
               << "  Warmup / bench reps: " << cfg.warmup_reps << " / "
               << cfg.bench_reps << "\n";

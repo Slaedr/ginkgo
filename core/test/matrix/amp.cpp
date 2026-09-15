@@ -239,13 +239,15 @@ protected:
 #endif
     }
 
-    std::unique_ptr<Mtx> create_amp_from_one_dense(gko::dim<2> size)
+    std::unique_ptr<Mtx> create_amp_from_one_dense(
+        gko::dim<2> size, typename Mtx::strategy_type strat =
+                              Mtx::strategy_type::monolithic_classical)
     {
         auto input = gko::share(Dense::create(exec, size));
         input->fill(gko::one<value_type>());
         auto inell = gko::share(Ell::create(exec));
         input->convert_to(inell.get());
-        auto factory = Mtx::build().on(exec);
+        auto factory = Mtx::build().with_strategy(strat).on(exec);
         return factory->generate(inell);
     }
 
@@ -312,29 +314,53 @@ TYPED_TEST(Amp, FactoryCanBeCreatedWithCustomTolerance)
 }
 
 
-TYPED_TEST(Amp, FactoryCanBeCreatedWithNormwiseStrategy)
+TYPED_TEST(Amp, FactoryCanBeCreatedWithNormwiseCriterion)
 {
     using Mtx = typename TestFixture::Mtx;
 
     auto factory = Mtx::build()
-                       .with_strategy(Mtx::tolerance_type::normwise)
+                       .with_criterion(Mtx::criterion_type::normwise)
                        .on(this->exec);
 
-    EXPECT_EQ(factory->get_parameters().strategy,
-              Mtx::tolerance_type::normwise);
+    EXPECT_EQ(factory->get_parameters().criterion,
+              Mtx::criterion_type::normwise);
 }
 
 
-TYPED_TEST(Amp, FactoryCanBeCreatedWithComponentwiseStrategy)
+TYPED_TEST(Amp, FactoryCanBeCreatedWithComponentwiseCriterion)
 {
     using Mtx = typename TestFixture::Mtx;
 
     auto factory = Mtx::build()
-                       .with_strategy(Mtx::tolerance_type::componentwise)
+                       .with_criterion(Mtx::criterion_type::componentwise)
+                       .on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().criterion,
+              Mtx::criterion_type::componentwise);
+}
+
+
+TYPED_TEST(Amp, FactoryDefaultsToMonolithicClassicalStrategy)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build().on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().strategy,
+              Mtx::strategy_type::monolithic_classical);
+}
+
+
+TYPED_TEST(Amp, FactoryCanBeCreatedWithIndependentBucketsStrategy)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build()
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec);
 
     EXPECT_EQ(factory->get_parameters().strategy,
-              Mtx::tolerance_type::componentwise);
+              Mtx::strategy_type::independent_buckets);
 }
 
 
@@ -458,12 +484,45 @@ TYPED_TEST(Amp, ApplyCompletesWithoutError)
 }
 
 
+TYPED_TEST(Amp, ApplyCompletesWithoutErrorIndependentBuckets)
+{
+    using value_type = typename TestFixture::value_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Dense = typename TestFixture::Dense;
+    auto mtx = this->create_amp_from_one_dense(
+        gko::dim<2>{3, 4}, Mtx::strategy_type::independent_buckets);
+    auto x = Dense::create(this->exec, gko::dim<2>{4, 1});
+    x->fill(gko::one<value_type>());
+    auto y = Dense::create(this->exec, gko::dim<2>{3, 1});
+
+    ASSERT_NO_THROW(mtx->apply(x, y));
+}
+
+
 TYPED_TEST(Amp, AdvancedApplyCompletesWithoutError)
 {
     using value_type = typename TestFixture::value_type;
     using Mtx = typename TestFixture::Mtx;
     using Dense = typename TestFixture::Dense;
     auto mtx = this->create_amp_from_one_dense(gko::dim<2>{3, 4});
+    auto alpha = gko::initialize<Dense>({2.0}, this->exec);
+    auto beta = gko::initialize<Dense>({-1.0}, this->exec);
+    auto x = Dense::create(this->exec, gko::dim<2>{4, 1});
+    x->fill(gko::one<value_type>());
+    auto y = Dense::create(this->exec, gko::dim<2>{3, 1});
+    y->fill(gko::one<value_type>());
+
+    ASSERT_NO_THROW(mtx->apply(alpha, x, beta, y));
+}
+
+
+TYPED_TEST(Amp, AdvancedApplyCompletesWithoutErrorIndependentBuckets)
+{
+    using value_type = typename TestFixture::value_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Dense = typename TestFixture::Dense;
+    auto mtx = this->create_amp_from_one_dense(
+        gko::dim<2>{3, 4}, Mtx::strategy_type::independent_buckets);
     auto alpha = gko::initialize<Dense>({2.0}, this->exec);
     auto beta = gko::initialize<Dense>({-1.0}, this->exec);
     auto x = Dense::create(this->exec, gko::dim<2>{4, 1});
@@ -492,6 +551,24 @@ TYPED_TEST(Amp, ApplySupportsVectorsOfDifferentPrecision)
 }
 
 
+TYPED_TEST(Amp, ApplySupportsVectorsOfDifferentPrecisionIndependentBuckets)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherDense = gko::matrix::Dense<other_type>;
+    auto mtx = this->create_amp_from_one_dense(
+        gko::dim<2>{3, 4}, Mtx::strategy_type::independent_buckets);
+    auto x = OtherDense::create(this->exec, gko::dim<2>{4, 1});
+    x->fill(gko::one<other_type>());
+    auto y = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+
+    ASSERT_NO_THROW(mtx->apply(x, y));
+}
+
+
 TYPED_TEST(Amp, AdvancedApplySupportsVectorsOfDifferentPrecision)
 {
     using value_type = typename TestFixture::value_type;
@@ -501,6 +578,28 @@ TYPED_TEST(Amp, AdvancedApplySupportsVectorsOfDifferentPrecision)
         typename gko::detail::next_precision_base_impl<value_type>::type;
     using OtherDense = gko::matrix::Dense<other_type>;
     auto mtx = this->create_amp_from_one_dense(gko::dim<2>{3, 4});
+    auto alpha = gko::initialize<OtherDense>({2.0}, this->exec);
+    auto beta = gko::initialize<OtherDense>({-1.0}, this->exec);
+    auto x = OtherDense::create(this->exec, gko::dim<2>{4, 1});
+    x->fill(gko::one<other_type>());
+    auto y = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+    y->fill(gko::one<other_type>());
+
+    ASSERT_NO_THROW(mtx->apply(alpha, x, beta, y));
+}
+
+
+TYPED_TEST(Amp,
+           AdvancedApplySupportsVectorsOfDifferentPrecisionIndependentBuckets)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherDense = gko::matrix::Dense<other_type>;
+    auto mtx = this->create_amp_from_one_dense(
+        gko::dim<2>{3, 4}, Mtx::strategy_type::independent_buckets);
     auto alpha = gko::initialize<OtherDense>({2.0}, this->exec);
     auto beta = gko::initialize<OtherDense>({-1.0}, this->exec);
     auto x = OtherDense::create(this->exec, gko::dim<2>{4, 1});
@@ -542,6 +641,63 @@ TYPED_TEST(Amp, ApplyWithMixedPrecisionVectorsProducesCorrectResult)
     y_same->convert_to(y_same_dense.get());
     // y_other should have the same result (3.0 in each entry for all-ones 3x3)
     GKO_ASSERT_MTX_NEAR(y_same_dense, y_other, 1e-5);
+}
+
+
+TYPED_TEST(
+    Amp, ApplyWithMixedPrecisionVectorsProducesCorrectResultIndependentBuckets)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Dense = typename TestFixture::Dense;
+    using other_type =
+        typename gko::detail::next_precision_base_impl<value_type>::type;
+    using OtherDense = gko::matrix::Dense<other_type>;
+
+    // Create a known 3x3 matrix: all ones
+    auto mtx = this->create_amp_from_one_dense(
+        gko::dim<2>{3, 3}, Mtx::strategy_type::independent_buckets);
+
+    // Apply with same-precision vectors
+    auto x_same = Dense::create(this->exec, gko::dim<2>{3, 1});
+    x_same->fill(gko::one<value_type>());
+    auto y_same = Dense::create(this->exec, gko::dim<2>{3, 1});
+    mtx->apply(x_same, y_same);
+
+    // Apply with different-precision vectors
+    auto x_other = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+    x_other->fill(gko::one<other_type>());
+    auto y_other = OtherDense::create(this->exec, gko::dim<2>{3, 1});
+    mtx->apply(x_other, y_other);
+
+    // Convert both results to same type and compare
+    auto y_same_dense = Dense::create(this->exec);
+    y_same->convert_to(y_same_dense.get());
+    // y_other should have the same result (3.0 in each entry for all-ones 3x3)
+    GKO_ASSERT_MTX_NEAR(y_same_dense, y_other, 1e-5);
+}
+
+
+TYPED_TEST(Amp, BothStrategiesProduceSameResult)
+{
+    using value_type = typename TestFixture::value_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Dense = typename TestFixture::Dense;
+
+    auto mtx_monolithic = this->create_amp_from_one_dense(
+        gko::dim<2>{3, 4}, Mtx::strategy_type::monolithic_classical);
+    auto mtx_independent = this->create_amp_from_one_dense(
+        gko::dim<2>{3, 4}, Mtx::strategy_type::independent_buckets);
+    auto x = Dense::create(this->exec, gko::dim<2>{4, 1});
+    x->fill(gko::one<value_type>());
+    auto y_monolithic = Dense::create(this->exec, gko::dim<2>{3, 1});
+    auto y_independent = Dense::create(this->exec, gko::dim<2>{3, 1});
+
+    mtx_monolithic->apply(x, y_monolithic);
+    mtx_independent->apply(x, y_independent);
+
+    GKO_ASSERT_MTX_NEAR(y_monolithic, y_independent, 1e-5);
 }
 
 
@@ -724,14 +880,34 @@ TYPED_TEST(Amp, ClonePreservesParameters)
     auto ell = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
     auto mtx = Mtx::build()
                    .with_tolerance(custom_tol)
-                   .with_strategy(Mtx::tolerance_type::normwise)
+                   .with_criterion(Mtx::criterion_type::normwise)
                    .on(this->exec)
                    ->generate(ell);
 
     auto clone = gko::clone(mtx);
 
     EXPECT_EQ(clone->get_parameters().tolerance, custom_tol);
-    EXPECT_EQ(clone->get_parameters().strategy, Mtx::tolerance_type::normwise);
+    EXPECT_EQ(clone->get_parameters().criterion, Mtx::criterion_type::normwise);
+    EXPECT_EQ(clone->get_parameters().strategy,
+              Mtx::strategy_type::monolithic_classical);
+}
+
+
+TYPED_TEST(Amp, ClonePreservesStrategy)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+
+    auto ell = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx = Mtx::build()
+                   .with_strategy(Mtx::strategy_type::independent_buckets)
+                   .on(this->exec)
+                   ->generate(ell);
+
+    auto clone = gko::clone(mtx);
+
+    EXPECT_EQ(clone->get_parameters().strategy,
+              Mtx::strategy_type::independent_buckets);
 }
 
 

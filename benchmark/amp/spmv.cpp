@@ -40,7 +40,8 @@
 template <typename scalar_t>
 using dist_vec_t = gko::experimental::distributed::Vector<scalar_t>;
 template <typename scalar_t>
-using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, gko::int32, gko::int64>;
+using dist_mtx_t =
+    gko::experimental::distributed::Matrix<scalar_t, gko::int32, gko::int64>;
 
 int main(int argc, char* argv[])
 {
@@ -102,17 +103,19 @@ int main(int argc, char* argv[])
     }
 
     json results;
-    results["config"] = {{"nx", cfg.nx},
-                         {"ny", cfg.ny},
-                         {"nz", cfg.nz},
-                         {"local_n", local_n},
-                         {"global_n", global_n},
-                         {"local_nnz", local_nnz},
-                         {"global_nnz", global_nnz},
-                         {"num_procs", num_procs},
-                         {"executor", cfg.executor},
-                         {"amp_tolerance", cfg.amp_tolerance},
-                         {"amp_base_format", cfg.amp_base_format}};
+    results["config"] = {
+        {"nx", cfg.nx},
+        {"ny", cfg.ny},
+        {"nz", cfg.nz},
+        {"local_n", local_n},
+        {"global_n", global_n},
+        {"local_nnz", local_nnz},
+        {"global_nnz", global_nnz},
+        {"num_procs", num_procs},
+        {"executor", cfg.executor},
+        {"amp_tolerance", cfg.amp_tolerance},
+        {"amp_base_format", cfg.amp_base_format},
+        {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)}};
     json rows = json::array();
 
     double baseline_ms = 1.0;
@@ -309,8 +312,8 @@ int main(int argc, char* argv[])
         results["spmv"] = rows;
 
         const std::string out = cfg.output_file_prefix + "spmv_" +
-                                cfg.amp_base_format + "_" + cfg.executor +
-                                "_results.json";
+                                cfg.amp_base_format + strategy_suffix(cfg) +
+                                "_" + cfg.executor + "_results.json";
         std::ofstream of(out);
         of << std::setw(2) << results << "\n";
         if (!amp_details.empty()) {

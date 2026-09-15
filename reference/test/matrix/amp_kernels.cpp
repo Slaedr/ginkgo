@@ -682,6 +682,73 @@ TYPED_TEST(AMPDouble, ApplyHasCorrectRelativeError)
     }
 }
 
+TYPED_TEST(AMPDouble, ApplyIndependentBucketsMatchesMonolithic)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    auto amp_monolithic =
+        Mtx::build()
+            .with_tolerance(this->tol)
+            .with_strategy(Mtx::strategy_type::monolithic_classical)
+            .on(this->exec)
+            ->generate(this->ell1);
+    auto amp_independent =
+        Mtx::build()
+            .with_tolerance(this->tol)
+            .with_strategy(Mtx::strategy_type::independent_buckets)
+            .on(this->exec)
+            ->generate(this->ell1);
+    auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    auto y_monolithic =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+    auto y_independent =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+
+    amp_monolithic->apply(x, y_monolithic);
+    amp_independent->apply(x, y_independent);
+
+    GKO_ASSERT_MTX_NEAR(y_monolithic, y_independent, 1e-14);
+}
+
+TYPED_TEST(AMPDouble, ApplyIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = gko::remove_complex<T>;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create test vector (matrix is 5x4)
+    auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    // Compute y_amp = AMP * x
+    auto y_amp =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+
+    amp_mtx->apply(x, y_amp);
+
+    // Compute y_ref = original * x
+    auto y_ref =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+    this->ell1->apply(x, y_ref);
+    // Check relative componentwise error
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < y_ref->get_size()[0]; i++) {
+        auto ref_val = y_ref_vals[i];
+        auto amp_val = y_amp_vals[i];
+        const auto abs_ref = std::abs(ref_val);
+        ASSERT_GT(abs_ref, real_T{1e-14});
+        auto rel_error =
+            std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+        EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+            << "Component " << i << ": amp=" << amp_val << ", ref=" << ref_val;
+    }
+}
+
 TYPED_TEST(AMPDouble, AdvancedApplyHasCorrectRelativeError)
 {
     using T = typename TestFixture::value_type;
@@ -691,6 +758,47 @@ TYPED_TEST(AMPDouble, AdvancedApplyHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create alpha and beta scalars
+    auto alpha = gko::initialize<Vec>({2.0}, this->exec);
+    auto beta = gko::initialize<Vec>({-1.0}, this->exec);
+    // Create test vector (matrix is 5x4)
+    auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    // Initialize y_amp with some values
+    auto y_amp = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0, 5.0}, this->exec);
+    // Initialize y_ref with the same values
+    auto y_ref = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0, 5.0}, this->exec);
+
+    amp_mtx->apply(alpha, x, beta, y_amp);
+
+    // Compute y_ref = alpha * original * x + beta * y_ref
+    this->ell1->apply(alpha, x, beta, y_ref);
+    // Check relative componentwise error
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < y_ref->get_size()[0]; i++) {
+        auto ref_val = y_ref_vals[i];
+        auto amp_val = y_amp_vals[i];
+        const auto abs_ref = std::abs(ref_val);
+        ASSERT_GT(abs_ref, real_T{1e-14});
+        auto rel_error =
+            std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+        EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+            << "Component " << i << ": amp=" << amp_val << ", ref=" << ref_val;
+    }
+}
+
+TYPED_TEST(AMPDouble, AdvancedApplyIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = gko::remove_complex<T>;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -772,6 +880,58 @@ TYPED_TEST(AMPDouble, ApplyWithMultipleRHSHasCorrectRelativeError)
 }
 
 
+TYPED_TEST(AMPDouble,
+           ApplyWithMultipleRHSIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = gko::remove_complex<T>;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
+    // clang-format off
+    auto x = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{1.0, 0.5},
+         I<T>{1.0, 2.0},
+         I<T>{1.0, 0.5}}, this->exec);
+    // clang-format on
+    // Compute y_amp = AMP * x (result is 5x2)
+    auto y_amp =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 2});
+    amp_mtx->apply(x, y_amp);
+    // Compute y_ref = original * x
+    auto y_ref =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 2});
+    this->ell1->apply(x, y_ref);
+    // Check relative componentwise error
+    const auto nrows = y_ref->get_size()[0];
+    const auto ncols = y_ref->get_size()[1];
+    const auto stride_amp = y_amp->get_stride();
+    const auto stride_ref = y_ref->get_stride();
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < nrows; i++) {
+        for (gko::size_type j = 0; j < ncols; j++) {
+            auto ref_val = y_ref_vals[i * stride_ref + j];
+            auto amp_val = y_amp_vals[i * stride_amp + j];
+            const auto abs_ref = std::abs(ref_val);
+            ASSERT_GT(abs_ref, real_T{1e-14});
+            auto rel_error =
+                std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+            EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+                << "Component (" << i << "," << j << "): amp=" << amp_val
+                << ", ref=" << ref_val;
+        }
+    }
+}
+
+
 TYPED_TEST(AMPDouble, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
 {
     using T = typename TestFixture::value_type;
@@ -781,6 +941,70 @@ TYPED_TEST(AMPDouble, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create alpha and beta scalars
+    auto alpha = gko::initialize<Vec>({2.0}, this->exec);
+    auto beta = gko::initialize<Vec>({-1.0}, this->exec);
+    // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
+    // clang-format off
+    auto x = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{1.0, 0.5},
+         I<T>{1.0, 2.0},
+         I<T>{1.0, 0.5}}, this->exec);
+    // Initialize y_amp and y_ref with identical values (5x2)
+    auto y_amp = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{2.0, 1.0},
+         I<T>{3.0, 3.0},
+         I<T>{4.0, 2.0},
+         I<T>{5.0, 1.0}}, this->exec);
+    auto y_ref = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{2.0, 1.0},
+         I<T>{3.0, 3.0},
+         I<T>{4.0, 2.0},
+         I<T>{5.0, 1.0}}, this->exec);
+    // clang-format on
+    amp_mtx->apply(alpha, x, beta, y_amp);
+    // Compute y_ref = alpha * original * x + beta * y_ref
+    this->ell1->apply(alpha, x, beta, y_ref);
+    // Check relative componentwise error
+    const auto nrows = y_ref->get_size()[0];
+    const auto ncols = y_ref->get_size()[1];
+    const auto stride_amp = y_amp->get_stride();
+    const auto stride_ref = y_ref->get_stride();
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < nrows; i++) {
+        for (gko::size_type j = 0; j < ncols; j++) {
+            auto ref_val = y_ref_vals[i * stride_ref + j];
+            auto amp_val = y_amp_vals[i * stride_amp + j];
+            const auto abs_ref = std::abs(ref_val);
+            ASSERT_GT(abs_ref, real_T{1e-14});
+            auto rel_error =
+                std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+            EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+                << "Component (" << i << "," << j << "): amp=" << amp_val
+                << ", ref=" << ref_val;
+        }
+    }
+}
+
+
+TYPED_TEST(
+    AMPDouble,
+    AdvancedApplyWithMultipleRHSIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = gko::remove_complex<T>;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -933,6 +1157,48 @@ TEST(AMPEmptyBin0, SpmvIsCorrectWhenBin0HasOnlyDiagonal)
 }
 
 
+TEST(AMPEmptyBin0, IndependentBucketsSpmvIsCorrectWhenBin0HasOnlyDiagonal)
+{
+    using ValueType = double;
+    using IndexType = int;
+    using Mtx = gko::matrix::AMP<ValueType, IndexType>;
+    using Ell = gko::matrix::Ell<ValueType, IndexType>;
+    using Vec = gko::matrix::Dense<ValueType>;
+    auto exec = gko::ReferenceExecutor::create();
+    // Same setup as SpmvIsCorrectWhenBin0HasOnlyDiagonal, but exercising the
+    // independent_buckets strategy's handling of a bin with nnzrow=1
+    // (bin 0, diagonal-only).
+    // clang-format off
+    auto dns = gko::initialize<gko::matrix::Dense<ValueType>>(
+        {{ 2.0, -1.0,  0.0,  0.0},
+         {-1.0,  2.0, -1.0,  0.0},
+         { 0.0, -1.0,  2.0, -1.0},
+         { 0.0,  0.0, -1.0,  2.0}}, exec);
+    // clang-format on
+    auto ell = Ell::create(exec);
+    dns->convert_to(ell.get());
+
+    auto amp = Mtx::build()
+                   .with_tolerance(0.01f)
+                   .with_strategy(Mtx::strategy_type::independent_buckets)
+                   .on(exec)
+                   ->generate(gko::share(ell->clone()));
+
+    auto bin0 = dynamic_cast<const Ell*>(amp->get_bin_matrix(0));
+    ASSERT_NE(bin0, nullptr);
+    EXPECT_EQ(bin0->get_num_stored_elements_per_row(), 1);
+
+    auto x = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0}, exec);
+    auto y_amp = Vec::create(exec, gko::dim<2>{4, 1});
+    auto y_ref = Vec::create(exec, gko::dim<2>{4, 1});
+
+    amp->apply(x, y_amp);
+    ell->apply(x, y_ref);
+
+    GKO_ASSERT_MTX_NEAR(y_amp, y_ref, 0.01);
+}
+
+
 TEST(AMPEmptyBin0, AdvancedSpmvIsCorrectWhenBin0IsEmpty)
 {
     using ValueType = double;
@@ -952,6 +1218,42 @@ TEST(AMPEmptyBin0, AdvancedSpmvIsCorrectWhenBin0IsEmpty)
     dns->convert_to(ell.get());
     auto amp = Mtx::build().with_tolerance(0.01f).on(exec)->generate(
         gko::share(ell->clone()));
+
+    auto alpha = gko::initialize<Vec>({2.0}, exec);
+    auto beta = gko::initialize<Vec>({-1.0}, exec);
+    auto x = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0}, exec);
+    auto y_amp = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, exec);
+    auto y_ref = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, exec);
+
+    amp->apply(alpha, x, beta, y_amp);
+    ell->apply(alpha, x, beta, y_ref);
+
+    GKO_ASSERT_MTX_NEAR(y_amp, y_ref, 0.01);
+}
+
+
+TEST(AMPEmptyBin0, IndependentBucketsAdvancedSpmvIsCorrectWhenBin0IsEmpty)
+{
+    using ValueType = double;
+    using IndexType = int;
+    using Mtx = gko::matrix::AMP<ValueType, IndexType>;
+    using Ell = gko::matrix::Ell<ValueType, IndexType>;
+    using Vec = gko::matrix::Dense<ValueType>;
+    auto exec = gko::ReferenceExecutor::create();
+    // clang-format off
+    auto dns = gko::initialize<gko::matrix::Dense<ValueType>>(
+        {{ 2.0, -1.0,  0.0,  0.0},
+         {-1.0,  2.0, -1.0,  0.0},
+         { 0.0, -1.0,  2.0, -1.0},
+         { 0.0,  0.0, -1.0,  2.0}}, exec);
+    // clang-format on
+    auto ell = Ell::create(exec);
+    dns->convert_to(ell.get());
+    auto amp = Mtx::build()
+                   .with_tolerance(0.01f)
+                   .with_strategy(Mtx::strategy_type::independent_buckets)
+                   .on(exec)
+                   ->generate(gko::share(ell->clone()));
 
     auto alpha = gko::initialize<Vec>({2.0}, exec);
     auto beta = gko::initialize<Vec>({-1.0}, exec);
@@ -1223,6 +1525,73 @@ TYPED_TEST(AMPFloat, ApplyHasCorrectRelativeError)
     }
 }
 
+TYPED_TEST(AMPFloat, ApplyIndependentBucketsMatchesMonolithic)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    auto amp_monolithic =
+        Mtx::build()
+            .with_tolerance(this->tol)
+            .with_strategy(Mtx::strategy_type::monolithic_classical)
+            .on(this->exec)
+            ->generate(this->ell1);
+    auto amp_independent =
+        Mtx::build()
+            .with_tolerance(this->tol)
+            .with_strategy(Mtx::strategy_type::independent_buckets)
+            .on(this->exec)
+            ->generate(this->ell1);
+    auto x = gko::initialize<Vec>({1.0, 2.0, 1.0, 2.0}, this->exec);
+    auto y_monolithic =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+    auto y_independent =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+
+    amp_monolithic->apply(x, y_monolithic);
+    amp_independent->apply(x, y_independent);
+
+    GKO_ASSERT_MTX_NEAR(y_monolithic, y_independent, 1e-6);
+}
+
+TYPED_TEST(AMPFloat, ApplyIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = typename TestFixture::real_T;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create test vector (matrix is 5x4)
+    auto x = gko::initialize<Vec>({1.0, 2.0, 1.0, 2.0}, this->exec);
+    // Compute y_amp = AMP * x
+    auto y_amp =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+
+    amp_mtx->apply(x, y_amp);
+
+    // Compute y_ref = original * x
+    auto y_ref =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 1});
+    this->ell1->apply(x, y_ref);
+    // Check relative componentwise error
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < y_ref->get_size()[0]; i++) {
+        const auto ref_val = y_ref_vals[i];
+        const auto amp_val = y_amp_vals[i];
+        const auto abs_ref = std::abs(ref_val);
+        ASSERT_GT(abs_ref, real_T{1e-6});
+        auto rel_error =
+            std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+        EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+            << "Component " << i << ": amp=" << amp_val << ", ref=" << ref_val;
+    }
+}
+
 TYPED_TEST(AMPFloat, AdvancedApplyHasCorrectRelativeError)
 {
     using T = typename TestFixture::value_type;
@@ -1232,6 +1601,47 @@ TYPED_TEST(AMPFloat, AdvancedApplyHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create alpha and beta scalars
+    auto alpha = gko::initialize<Vec>({2.0}, this->exec);
+    auto beta = gko::initialize<Vec>({-1.0}, this->exec);
+    // Create test vector (matrix is 5x4)
+    auto x = gko::initialize<Vec>({1.0, 2.0, 1.0, 2.0}, this->exec);
+    // Initialize y_amp with some values
+    auto y_amp = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0, 5.0}, this->exec);
+    // Initialize y_ref with the same values
+    auto y_ref = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0, 5.0}, this->exec);
+
+    amp_mtx->apply(alpha, x, beta, y_amp);
+
+    // Compute y_ref = alpha * original * x + beta * y_ref
+    this->ell1->apply(alpha, x, beta, y_ref);
+    // Check relative componentwise error
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < y_ref->get_size()[0]; i++) {
+        const auto ref_val = y_ref_vals[i];
+        const auto amp_val = y_amp_vals[i];
+        const auto abs_ref = std::abs(ref_val);
+        ASSERT_GT(abs_ref, real_T{1e-6});
+        auto rel_error =
+            std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+        EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+            << "Component " << i << ": amp=" << amp_val << ", ref=" << ref_val;
+    }
+}
+
+TYPED_TEST(AMPFloat, AdvancedApplyIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = typename TestFixture::real_T;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -1313,6 +1723,58 @@ TYPED_TEST(AMPFloat, ApplyWithMultipleRHSHasCorrectRelativeError)
 }
 
 
+TYPED_TEST(AMPFloat,
+           ApplyWithMultipleRHSIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = typename TestFixture::real_T;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
+    // clang-format off
+    auto x = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{2.0, 0.5},
+         I<T>{1.0, 2.0},
+         I<T>{2.0, 0.5}}, this->exec);
+    // clang-format on
+    // Compute y_amp = AMP * x (result is 5x2)
+    auto y_amp =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 2});
+    amp_mtx->apply(x, y_amp);
+    // Compute y_ref = original * x
+    auto y_ref =
+        Vec::create(this->exec, gko::dim<2>{this->ell1->get_size()[0], 2});
+    this->ell1->apply(x, y_ref);
+    // Check relative componentwise error
+    const auto nrows = y_ref->get_size()[0];
+    const auto ncols = y_ref->get_size()[1];
+    const auto stride_amp = y_amp->get_stride();
+    const auto stride_ref = y_ref->get_stride();
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < nrows; i++) {
+        for (gko::size_type j = 0; j < ncols; j++) {
+            const auto ref_val = y_ref_vals[i * stride_ref + j];
+            const auto amp_val = y_amp_vals[i * stride_amp + j];
+            const auto abs_ref = std::abs(ref_val);
+            ASSERT_GT(abs_ref, real_T{1e-6});
+            auto rel_error =
+                std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+            EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+                << "Component (" << i << "," << j << "): amp=" << amp_val
+                << ", ref=" << ref_val;
+        }
+    }
+}
+
+
 TYPED_TEST(AMPFloat, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
 {
     using T = typename TestFixture::value_type;
@@ -1322,6 +1784,70 @@ TYPED_TEST(AMPFloat, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .on(this->exec)
+                       ->generate(this->ell1);
+    // Create alpha and beta scalars
+    auto alpha = gko::initialize<Vec>({2.0}, this->exec);
+    auto beta = gko::initialize<Vec>({-1.0}, this->exec);
+    // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
+    // clang-format off
+    auto x = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{2.0, 0.5},
+         I<T>{1.0, 2.0},
+         I<T>{2.0, 0.5}}, this->exec);
+    // Initialize y_amp and y_ref with identical values (5x2)
+    auto y_amp = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{2.0, 1.0},
+         I<T>{3.0, 3.0},
+         I<T>{4.0, 2.0},
+         I<T>{5.0, 1.0}}, this->exec);
+    auto y_ref = gko::initialize<Vec>(
+        {I<T>{1.0, 2.0},
+         I<T>{2.0, 1.0},
+         I<T>{3.0, 3.0},
+         I<T>{4.0, 2.0},
+         I<T>{5.0, 1.0}}, this->exec);
+    // clang-format on
+    amp_mtx->apply(alpha, x, beta, y_amp);
+    // Compute y_ref = alpha * original * x + beta * y_ref
+    this->ell1->apply(alpha, x, beta, y_ref);
+    // Check relative componentwise error
+    const auto nrows = y_ref->get_size()[0];
+    const auto ncols = y_ref->get_size()[1];
+    const auto stride_amp = y_amp->get_stride();
+    const auto stride_ref = y_ref->get_stride();
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < nrows; i++) {
+        for (gko::size_type j = 0; j < ncols; j++) {
+            const auto ref_val = y_ref_vals[i * stride_ref + j];
+            const auto amp_val = y_amp_vals[i * stride_amp + j];
+            const auto abs_ref = std::abs(ref_val);
+            ASSERT_GT(abs_ref, real_T{1e-6});
+            auto rel_error =
+                std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+            EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+                << "Component (" << i << "," << j << "): amp=" << amp_val
+                << ", ref=" << ref_val;
+        }
+    }
+}
+
+
+TYPED_TEST(
+    AMPFloat,
+    AdvancedApplyWithMultipleRHSIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = typename TestFixture::real_T;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    // Create AMP matrix from the ELL matrix
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -1718,6 +2244,70 @@ TYPED_TEST(AMPDoubleCsr, ApplyHasCorrectRelativeError)
 }
 
 
+TYPED_TEST(AMPDoubleCsr, ApplyIndependentBucketsMatchesMonolithic)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    auto amp_monolithic =
+        Mtx::build()
+            .with_tolerance(this->tol)
+            .with_strategy(Mtx::strategy_type::monolithic_classical)
+            .on(this->exec)
+            ->generate(this->csr1);
+    auto amp_independent =
+        Mtx::build()
+            .with_tolerance(this->tol)
+            .with_strategy(Mtx::strategy_type::independent_buckets)
+            .on(this->exec)
+            ->generate(this->csr1);
+    auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    auto y_monolithic =
+        Vec::create(this->exec, gko::dim<2>{this->csr1->get_size()[0], 1});
+    auto y_independent =
+        Vec::create(this->exec, gko::dim<2>{this->csr1->get_size()[0], 1});
+
+    amp_monolithic->apply(x, y_monolithic);
+    amp_independent->apply(x, y_independent);
+
+    GKO_ASSERT_MTX_NEAR(y_monolithic, y_independent, 1e-14);
+}
+
+
+TYPED_TEST(AMPDoubleCsr, ApplyIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = typename TestFixture::real_T;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
+                       .on(this->exec)
+                       ->generate(this->csr1);
+    auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    auto y_amp =
+        Vec::create(this->exec, gko::dim<2>{this->csr1->get_size()[0], 1});
+
+    amp_mtx->apply(x, y_amp);
+
+    auto y_ref =
+        Vec::create(this->exec, gko::dim<2>{this->csr1->get_size()[0], 1});
+    this->csr1->apply(x, y_ref);
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < y_ref->get_size()[0]; i++) {
+        auto ref_val = y_ref_vals[i];
+        auto amp_val = y_amp_vals[i];
+        const auto abs_ref = std::abs(ref_val);
+        ASSERT_GT(abs_ref, real_T{1e-14});
+        auto rel_error =
+            std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+        EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+            << "Component " << i << ": amp=" << amp_val << ", ref=" << ref_val;
+    }
+}
+
+
 TYPED_TEST(AMPDoubleCsr, AdvancedApplyHasCorrectRelativeError)
 {
     using T = typename TestFixture::value_type;
@@ -1726,6 +2316,41 @@ TYPED_TEST(AMPDoubleCsr, AdvancedApplyHasCorrectRelativeError)
     using Vec = typename TestFixture::Vec;
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .on(this->exec)
+                       ->generate(this->csr1);
+    auto alpha = gko::initialize<Vec>({2.0}, this->exec);
+    auto beta = gko::initialize<Vec>({-1.0}, this->exec);
+    auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
+    auto y_amp = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0, 5.0}, this->exec);
+    auto y_ref = gko::initialize<Vec>({1.0, 2.0, 3.0, 4.0, 5.0}, this->exec);
+
+    amp_mtx->apply(alpha, x, beta, y_amp);
+
+    this->csr1->apply(alpha, x, beta, y_ref);
+    auto y_amp_vals = y_amp->get_const_values();
+    auto y_ref_vals = y_ref->get_const_values();
+    for (gko::size_type i = 0; i < y_ref->get_size()[0]; i++) {
+        auto ref_val = y_ref_vals[i];
+        auto amp_val = y_amp_vals[i];
+        const auto abs_ref = std::abs(ref_val);
+        ASSERT_GT(abs_ref, real_T{1e-14});
+        auto rel_error =
+            std::abs(amp_val - ref_val) / static_cast<real_T>(abs_ref);
+        EXPECT_LE(rel_error, static_cast<real_T>(this->tol))
+            << "Component " << i << ": amp=" << amp_val << ", ref=" << ref_val;
+    }
+}
+
+
+TYPED_TEST(AMPDoubleCsr, AdvancedApplyIndependentBucketsHasCorrectRelativeError)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = typename TestFixture::real_T;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->csr1);
     auto alpha = gko::initialize<Vec>({2.0}, this->exec);

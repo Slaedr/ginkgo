@@ -106,8 +106,23 @@ public:
         return i >= 0 && i < num_precisions ? mat_bins_[i].get() : nullptr;
     }
 
-    /// Type of tolerance for adaptive precision
-    enum class tolerance_type { normwise, componentwise };
+    /// Meaning of the tolerance - componentwise or normwise backward error.
+    enum class criterion_type { normwise, componentwise };
+
+    /// Algorithm used to perform the AMP SpMV.
+    enum class strategy_type {
+        /**
+         * A single kernel reads all precision buckets and accumulates each
+         * row in ValueType.
+         */
+        monolithic_classical,
+        /**
+         * One independent SpMV per precision bucket, accumulated into the
+         * output vector. Each bucket is free to use its own (Ell/Csr)
+         * kernel.
+         */
+        independent_buckets
+    };
 
     GKO_CREATE_FACTORY_PARAMETERS(parameters, Factory)
     {
@@ -120,8 +135,14 @@ public:
         /**
          * Meaning of the tolerance - componentwise or normwise tolerance.
          */
-        tolerance_type GKO_FACTORY_PARAMETER_SCALAR(
-            strategy, tolerance_type::componentwise);
+        criterion_type GKO_FACTORY_PARAMETER_SCALAR(
+            criterion, criterion_type::componentwise);
+
+        /**
+         * Strategy to use for SpMV.
+         */
+        strategy_type GKO_FACTORY_PARAMETER_SCALAR(
+            strategy, strategy_type::monolithic_classical);
     };
     GKO_ENABLE_LIN_OP_FACTORY(AMP, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);
@@ -163,7 +184,9 @@ protected:
           parameters_{factory->get_parameters()},
           row_sizes_(create_row_sizes()),
           mat_bins_(generate_amp(lin_op.get()))
-    {}
+    {
+        init_one();
+    }
 
     void apply_impl(const LinOp* b, LinOp* x) const override;
 
@@ -182,10 +205,21 @@ private:
 
     std::array<gko::array<IndexType>, num_precisions> create_row_sizes() const;
 
+    /**
+     * Sets #one_ to a scalar 1.0 on the current executor. Used as alpha/beta
+     * when accumulating buckets for the `independent_buckets` strategy.
+     */
+    void init_one();
+
 protected:
     /* Array of bins of the different precisions.
      */
     std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
+
+    /// Scalar one, used as alpha/beta when accumulating buckets in the
+    /// `independent_buckets` SpMV strategy. Type-erased as LinOp since Dense
+    /// is only forward-declared in this header.
+    std::shared_ptr<const LinOp> one_;
 };
 
 

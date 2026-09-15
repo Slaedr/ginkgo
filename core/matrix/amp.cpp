@@ -97,20 +97,49 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(AMP&& other)
 template <typename ValueType, typename IndexType>
 void AMP<ValueType, IndexType>::apply_impl(const LinOp* b, LinOp* x) const
 {
-    const bool csr_bins =
-        dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(
-            this->get_bin_matrix(0)) != nullptr;
-    mixed_precision_base_dispatch_real_complex<ValueType>(
-        [this, csr_bins](auto dense_b, auto dense_x) {
-            if (csr_bins) {
-                this->get_executor()->run(
-                    amp::make_spmv_csr(this, dense_b, dense_x));
-            } else {
-                this->get_executor()->run(
-                    amp::make_spmv_ell(this, dense_b, dense_x));
+    switch (parameters_.strategy) {
+    case strategy_type::monolithic_classical: {
+        const bool csr_bins =
+            dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(
+                this->get_bin_matrix(0)) != nullptr;
+        mixed_precision_base_dispatch_real_complex<ValueType>(
+            [this, csr_bins](auto dense_b, auto dense_x) {
+                if (csr_bins) {
+                    this->get_executor()->run(
+                        amp::make_spmv_csr(this, dense_b, dense_x));
+                } else {
+                    this->get_executor()->run(
+                        amp::make_spmv_ell(this, dense_b, dense_x));
+                }
+            },
+            b, x);
+        break;
+    }
+    case strategy_type::independent_buckets: {
+        // Each bucket is applied independently via its own (Ell/Csr) apply,
+        // accumulating into x. The first live bucket overwrites x, later
+        // ones accumulate with alpha = beta = 1. Note this is not
+        // bit-identical to monolithic_classical (different summation order
+        // and accumulator), and requires a mixed-precision build
+        // (GINKGO_MIXED_PRECISION=ON) to avoid narrowing b/x to each
+        // bucket's own precision.
+        bool first = true;
+        gko::constexpr_for<0, num_precisions, 1>([&](auto k) {
+            if (!mat_bins_[k]) {
+                return;
             }
-        },
-        b, x);
+            if (first) {
+                mat_bins_[k]->apply(b, x);
+                first = false;
+            } else {
+                mat_bins_[k]->apply(one_, b, one_, x);
+            }
+        });
+        break;
+    }
+    default:
+        GKO_NOT_SUPPORTED(parameters_.strategy);
+    }
 }
 
 
@@ -118,24 +147,45 @@ template <typename ValueType, typename IndexType>
 void AMP<ValueType, IndexType>::apply_impl(const LinOp* alpha, const LinOp* b,
                                            const LinOp* beta, LinOp* x) const
 {
-    const bool csr_bins =
-        dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(
-            this->get_bin_matrix(0)) != nullptr;
-
-    mixed_precision_base_dispatch_real_complex<ValueType>(
-        [this, csr_bins, alpha, beta](auto dense_b, auto dense_x) {
-            auto d_alpha = make_temporary_conversion<ValueType>(alpha);
-            auto d_beta = make_temporary_conversion<
-                typename std::decay_t<decltype(*dense_x)>::value_type>(beta);
-            if (csr_bins) {
-                this->get_executor()->run(amp::make_advanced_spmv_csr(
-                    d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
-            } else {
-                this->get_executor()->run(amp::make_advanced_spmv_ell(
-                    d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
+    switch (parameters_.strategy) {
+    case strategy_type::monolithic_classical: {
+        const bool csr_bins =
+            dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(
+                this->get_bin_matrix(0)) != nullptr;
+        mixed_precision_base_dispatch_real_complex<ValueType>(
+            [this, csr_bins, alpha, beta](auto dense_b, auto dense_x) {
+                auto d_alpha = make_temporary_conversion<ValueType>(alpha);
+                auto d_beta = make_temporary_conversion<
+                    typename std::decay_t<decltype(*dense_x)>::value_type>(
+                    beta);
+                if (csr_bins) {
+                    this->get_executor()->run(amp::make_advanced_spmv_csr(
+                        d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
+                } else {
+                    this->get_executor()->run(amp::make_advanced_spmv_ell(
+                        d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
+                }
+            },
+            b, x);
+        break;
+    }
+    case strategy_type::independent_buckets: {
+        // x = alpha * bin_k * b + beta * x for the first live bucket, then
+        // x = alpha * bin_k * b + 1 * x for every subsequent one, so beta
+        // is only applied once.
+        bool first = true;
+        gko::constexpr_for<0, num_precisions, 1>([&](auto k) {
+            if (!mat_bins_[k]) {
+                return;
             }
-        },
-        b, x);
+            mat_bins_[k]->apply(alpha, b, first ? beta : one_.get(), x);
+            first = false;
+        });
+        break;
+    }
+    default:
+        GKO_NOT_SUPPORTED(parameters_.strategy);
+    }
 }
 
 
@@ -267,7 +317,17 @@ template <typename ValueType, typename IndexType>
 AMP<ValueType, IndexType>::AMP(std::shared_ptr<const Executor> exec)
     : EnableLinOp<AMP<ValueType, IndexType>>(std::move(exec)),
       row_sizes_(create_row_sizes())
-{}
+{
+    init_one();
+}
+
+
+template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::init_one()
+{
+    one_ = gko::share(gko::initialize<Dense<ValueType>>({gko::one<ValueType>()},
+                                                        this->get_executor()));
+}
 
 
 template <typename ValueType, typename IndexType>
