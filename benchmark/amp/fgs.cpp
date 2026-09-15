@@ -72,14 +72,16 @@ int main(int argc, char* argv[])
     print_perf_header("FGS (single sweep)", n, nnz, comm.size());
 
     json results;
-    results["config"] = {{"nx", cfg.nx},
-                         {"ny", cfg.ny},
-                         {"nz", cfg.nz},
-                         {"n", n},
-                         {"nnz", nnz},
-                         {"executor", cfg.executor},
-                         {"amp_tolerance", cfg.amp_tolerance},
-                         {"amp_base_format", cfg.amp_base_format}};
+    results["config"] = {
+        {"nx", cfg.nx},
+        {"ny", cfg.ny},
+        {"nz", cfg.nz},
+        {"n", n},
+        {"nnz", nnz},
+        {"executor", cfg.executor},
+        {"amp_tolerance", cfg.amp_tolerance},
+        {"amp_base_format", cfg.amp_base_format},
+        {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)}};
     json rows = json::array();
 
     double baseline_ms = 1.0;
@@ -213,6 +215,7 @@ int main(int argc, char* argv[])
             gko::share(Amp::build()
                            .with_tolerance(cfg.amp_tolerance)
                            .with_criterion(Amp::criterion_type::componentwise)
+                           .with_strategy(cfg.amp_spmv_strategy)
                            .on(exec)
                            ->generate(base_mat));
         exec->synchronize();
@@ -255,8 +258,8 @@ int main(int argc, char* argv[])
     results["fgs"] = rows;
 
     const std::string out = cfg.output_file_prefix + "fgs_" +
-                            cfg.amp_base_format + "_" + cfg.executor +
-                            "_results.json";
+                            cfg.amp_base_format + strategy_suffix(cfg) + "_" +
+                            cfg.executor + "_results.json";
     std::ofstream of(out);
     of << std::setw(2) << results << "\n";
     std::cout << amp_details << std::endl;

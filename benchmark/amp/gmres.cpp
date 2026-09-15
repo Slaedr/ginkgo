@@ -50,7 +50,8 @@ using global_idx_t = gko::int64;
 template <typename scalar_t>
 using dist_vec_t = gko::experimental::distributed::Vector<scalar_t>;
 template <typename scalar_t>
-using dist_mtx_t = gko::experimental::distributed::Matrix<scalar_t, gko::int32, gko::int64>;
+using dist_mtx_t =
+    gko::experimental::distributed::Matrix<scalar_t, gko::int32, gko::int64>;
 using Schwarz =
     gko::experimental::distributed::preconditioner::Schwarz<double, local_idx_t,
                                                             global_idx_t>;
@@ -296,7 +297,8 @@ int main(int argc, char* argv[])
         exec, num_procs, static_cast<global_idx_t>(global_n)));
 
     // Gather global nnz
-    const gko::int64 local_nnz = static_cast<gko::int64>(mat_data.nonzeros.size());
+    const gko::int64 local_nnz =
+        static_cast<gko::int64>(mat_data.nonzeros.size());
     gko::int64 global_nnz = 0;
     MPI_Allreduce(&local_nnz, &global_nnz, 1, MPI_INT64_T, MPI_SUM, comm.get());
 
@@ -341,20 +343,22 @@ int main(int argc, char* argv[])
                   << std::string(83, '-') << "\n";
     }
 
-    results["config"] = {{"nx", cfg.nx},
-                         {"ny", cfg.ny},
-                         {"nz", cfg.nz},
-                         {"local_n", local_n},
-                         {"global_n", global_n},
-                         {"local_nnz", local_nnz},
-                         {"global_nnz", global_nnz},
-                         {"num_procs", num_procs},
-                         {"executor", cfg.executor},
-                         {"amp_tolerance", cfg.amp_tolerance},
-                         {"amp_base_format", cfg.amp_base_format},
-                         {"gmres_tol", cfg.gmres_tol},
-                         {"gmres_max_iters", cfg.gmres_max_iters},
-                         {"gmres_krylov_dim", cfg.gmres_krylov_dim}};
+    results["config"] = {
+        {"nx", cfg.nx},
+        {"ny", cfg.ny},
+        {"nz", cfg.nz},
+        {"local_n", local_n},
+        {"global_n", global_n},
+        {"local_nnz", local_nnz},
+        {"global_nnz", global_nnz},
+        {"num_procs", num_procs},
+        {"executor", cfg.executor},
+        {"amp_tolerance", cfg.amp_tolerance},
+        {"amp_base_format", cfg.amp_base_format},
+        {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)},
+        {"gmres_tol", cfg.gmres_tol},
+        {"gmres_max_iters", cfg.gmres_max_iters},
+        {"gmres_krylov_dim", cfg.gmres_krylov_dim}};
     json rows = json::array();
 
     auto print_row = [&](const std::string& label, const GmresStats& s,
@@ -477,8 +481,8 @@ int main(int argc, char* argv[])
         results["gmres"] = rows;
 
         const std::string out = cfg.output_file_prefix + "gmres_" +
-                                cfg.amp_base_format + "_" + cfg.executor +
-                                "_results.json";
+                                cfg.amp_base_format + strategy_suffix(cfg) +
+                                "_" + cfg.executor + "_results.json";
         std::ofstream of(out);
         of << std::setw(2) << results << "\n";
         if (!amp_details.empty()) {
