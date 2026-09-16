@@ -56,7 +56,7 @@ namespace kernels {
     void generate_cwise_ell_max_nnz_per_row(                                  \
         std::shared_ptr<const DefaultExecutor> exec,                          \
         const matrix::Ell<ValueType, IndexType>* a, const float tolerance,    \
-        gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+        gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 
 #define GKO_DECLARE_AMP_GENERATE_ELL_SCATTER_BINS_KERNEL(ValueType, IndexType) \
     void generate_ell_scatter_bins(                                            \
@@ -77,11 +77,10 @@ namespace kernels {
         const matrix::Csr<ValueType, IndexType>* a, const float tolerance, \
         gko::amp::precision_array<LinOp*, ValueType>& amat)
 
-#define GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(ValueType, IndexType)       \
-    gko::amp::precision_array<DataType, ValueType> reduce_bins_max(        \
-        std::shared_ptr<const DefaultExecutor> exec,                       \
-        const gko::amp::precision_array<gko::array<IndexType>, ValueType>& \
-            bin_arrays)
+#define GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(IndexType)            \
+    void reduce_bins_max(                                            \
+        std::shared_ptr<const DefaultExecutor> exec, int num_arrays, \
+        const gko::array<IndexType>* bin_arrays, IndexType* results)
 
 #define GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType)      \
     void fill_in_dense(std::shared_ptr<const DefaultExecutor> exec,     \
@@ -119,8 +118,8 @@ namespace kernels {
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL(ValueType,         \
                                                            IndexType);        \
-    template <typename ValueType, typename IndexType>                         \
-    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(ValueType, IndexType);             \
+    template <typename IndexType>                                             \
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(IndexType);                        \
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType);               \
     template <typename ValueType, typename IndexType>                         \

@@ -359,7 +359,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const OmpExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -393,7 +393,7 @@ void generate_cwise_ell_max_nnz_per_row(
             get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
 
         // Get max nnz per row for each precision bin matrix
-        std::array<int, q> row_nnz = {};
+        std::array<IndexType, q> row_nnz = {};
         for (int j = 0; j < omax_nnz; j++) {
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
@@ -413,28 +413,28 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
 
 
-template <typename ValueType, typename DataType>
-precision_array<DataType, ValueType> reduce_bins_max(
-    std::shared_ptr<const OmpExecutor> exec,
-    const precision_array<array<DataType>, ValueType>& bin_arrays)
+template <typename IndexType>
+void reduce_bins_max(std::shared_ptr<const OmpExecutor> exec, const int q,
+                     const array<IndexType>* const __restrict__ bin_arrays,
+                     IndexType* const __restrict__ results)
 {
-    constexpr int q = static_cast<int>(bin_arrays.size());
-    for (int k = 1; k < q; k++) {
-        GKO_ASSERT_EQUAL_DIMENSIONS(bin_arrays[0], bin_arrays[k]);
-    }
-    precision_array<DataType, ValueType> results{};
-    auto resultsa = &results[0];
-#pragma omp parallel for default(shared) reduction(max : resultsa[q])
-    for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
-        for (int k = 0; k < q; k++) {
-            resultsa[k] = std::max(resultsa[k], bin_arrays[k].get_data()[i]);
+    for (int k = 0; k < q; k++) {
+        results[k] = zero<IndexType>();
+        if (k > 0) {
+            GKO_ASSERT_EQ(bin_arrays[0].get_size(), bin_arrays[k].get_size());
         }
     }
-    return results;
+    for (int k = 0; k < q; k++) {
+        IndexType result = 0;
+#pragma omp parallel for default(shared) reduction(max : result)
+        for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
+            result = std::max(result, bin_arrays[k].get_const_data()[i]);
+        }
+        results[k] = result;
+    }
 }
 
-GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 }  // namespace amp

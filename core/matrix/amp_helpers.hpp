@@ -32,7 +32,7 @@ namespace amp {
 template <typename ValueType, typename IndexType>
 inline precision_array<std::unique_ptr<LinOp>, ValueType> allocate_bins(
     std::shared_ptr<const Executor> exec, const dim<2>& dims,
-    const precision_array<int, ValueType> bin_max_nnz_row)
+    const precision_array<IndexType, ValueType> bin_max_nnz_row)
 {
     using last_precision =
         std::tuple_element<num_amp_precisions - 1, supported_precisions>::type;
@@ -66,7 +66,7 @@ inline precision_array<std::unique_ptr<LinOp>, ValueType> allocate_bins(
 template <typename ValueType, typename IndexType>
 inline auto allocate_bins_tuple(
     std::shared_ptr<const Executor> exec, const dim<2>& dims,
-    const precision_array<int, ValueType> bin_max_nnz_row)
+    const precision_array<IndexType, ValueType> bin_max_nnz_row)
 {
     using last_precision =
         std::tuple_element<num_amp_precisions - 1, supported_precisions>::type;

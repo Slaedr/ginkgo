@@ -4,6 +4,7 @@
 
 #include "core/matrix/amp_kernels.hpp"
 
+#include <algorithm>
 #include <numeric>
 #include <random>
 
@@ -89,8 +90,8 @@ TEST_F(Amp, GenerateEllRownormsStorageIsEquivalentToRef)
     const float tol = 1e-10;
     auto mtx = gen_mtx(532, 231);
     auto dmtx = gko::clone(exec, mtx);
-    gko::amp::precision_array<int, T> ref_max_nnz;
-    gko::amp::precision_array<int, T> dev_max_nnz;
+    gko::amp::precision_array<IndexType, T> ref_max_nnz;
+    gko::amp::precision_array<IndexType, T> dev_max_nnz;
 
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
         ref, mtx.get(), tol, ref_max_nnz);
@@ -112,7 +113,7 @@ TEST_F(Amp, GenerateEllScatterBinsIsEquivalentToRef)
     auto mtx = gen_mtx(532, 231);
     auto dmtx = gko::clone(exec, mtx);
     // Compute max_nnz per bin using reference kernel
-    gko::amp::precision_array<int, T> max_nnz;
+    gko::amp::precision_array<IndexType, T> max_nnz;
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
         ref, mtx.get(), tol, max_nnz);
     // Allocate bins on ref and exec with the same max_nnz
@@ -904,4 +905,32 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
         exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+TEST_F(AmpCsr, ReducesThreeLongArraysEquivalentToRef)
+{
+    const int q = 3;
+    const int n = 61;
+    std::array<gko::array<long>, q> data, d_data;
+    for (int i = 0; i < q; i++) {
+        data[i].set_executor(ref);
+        data[i].resize_and_reset(n);
+        d_data[i].set_executor(exec);
+        d_data[i].resize_and_reset(n);
+        std::uniform_int_distribution<> dis(-100 * (i + 1), 100 * (i + 1));
+        std::generate(data[i].get_data(), data[i].get_data() + n,
+                      [&]() { return dis(rand_engine); });
+        d_data[i] = data[i];
+    }
+    gko::amp::precision_array<long, double> refmaxes;
+    gko::amp::precision_array<long, double> d_maxes;
+
+    gko::kernels::reference::amp::reduce_bins_max(ref, q, &data[0],
+                                                  &refmaxes[0]);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::reduce_bins_max(
+        exec, q, &d_data[0], &d_maxes[0]);
+
+    for (int i = 0; i < q; i++) {
+        EXPECT_EQ(refmaxes[i], d_maxes[i]);
+    }
 }

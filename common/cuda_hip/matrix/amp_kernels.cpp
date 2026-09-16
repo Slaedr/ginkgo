@@ -538,7 +538,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     const float tolerance, const size_type nrows, const size_type ostride,
     const size_type omax_nnz, const ValueType* const __restrict__ ovals,
     const IndexType* const __restrict__ ocolids,
-    int* const __restrict__ max_bin_nnzs_blocks)
+    IndexType* const __restrict__ max_bin_nnzs_blocks)
 {
     using real_type = remove_complex<ValueType>;
     // Compute minimum representable values for each bin
@@ -546,7 +546,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
         get_bins_min_representable<real_type>();
 
     // thread-level reduction
-    int max_nnz_thread[q];
+    IndexType max_nnz_thread[q];
 #pragma unroll
     for (int i = 0; i < q; i++) {
         max_nnz_thread[i] = 0;
@@ -569,7 +569,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
             get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
 
         // Get max nnz per row for each precision bin matrix
-        int row_nnz[q];
+        IndexType row_nnz[q];
 #pragma unroll
         for (int i = 0; i < q; i++) {
             row_nnz[i] = 0;
@@ -601,7 +601,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     // copy warp sums into shared memory
     const auto warp_id = threadIdx.x / config::warp_size;
     constexpr auto num_warps = default_block_size / config::warp_size;
-    __shared__ int warp_max[num_warps * q];
+    __shared__ IndexType warp_max[num_warps * q];
     __syncthreads();
     if (threadIdx.x % config::warp_size == 0) {
 #pragma unroll
@@ -629,9 +629,9 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     }
 }
 
-template <int q>
+template <int q, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void finish_reduce(
-    int* const __restrict__ data, const int len, const int stride)
+    IndexType* const __restrict__ data, const int len, const int stride)
 {
     const auto group = group::this_thread_block();
     const auto local_id = group.thread_rank();
@@ -641,7 +641,7 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
     // its strided portion into the first block_size elements.
     if (len > block_size) {
         for (int j = 0; j < q; j++) {
-            int local_max = 0;
+            IndexType local_max = 0;
             for (int idx = local_id; idx < len; idx += block_size) {
                 local_max = max(local_max, data[j * stride + idx]);
             }
@@ -656,10 +656,10 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
         group.sync();
         if (local_id < k && local_id < reduced_len) {
             for (int j = 0; j < q; j++) {
-                const int a = data[j * stride + local_id];
-                const int b = (local_id + k < reduced_len)
-                                  ? data[j * stride + local_id + k]
-                                  : 0;
+                const IndexType a = data[j * stride + local_id];
+                const IndexType b = (local_id + k < reduced_len)
+                                        ? data[j * stride + local_id + k]
+                                        : 0;
                 data[j * stride + local_id] = max(a, b);
             }
         }
@@ -676,7 +676,8 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
         auto val = warp.thread_rank() < reduced_len
                        ? data[j * stride + warp.thread_rank()]
                        : 0;
-        auto result = reduce(warp, val, [](int a, int b) { return max(a, b); });
+        auto result = reduce(
+            warp, val, [](IndexType a, IndexType b) { return max(a, b); });
         if (warp.thread_rank() == 0) {
             data[j * stride] = result;
         }
@@ -687,7 +688,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -702,7 +703,7 @@ void generate_cwise_ell_max_nnz_per_row(
     const auto num_blocks = num_cus * num_thread_blocks_per_cu;
     // const auto grid_size = ceildiv(nrows, block_size);
     const auto block_size = default_block_size;
-    gko::array<int> max_nnz_arr(exec, q * num_blocks);
+    gko::array<IndexType> max_nnz_arr(exec, q * num_blocks);
     thrust::fill(thrust::device, max_nnz_arr.get_data(),
                  max_nnz_arr.get_data() + q * num_blocks, 0);
     const auto max_nnz_ptr = max_nnz_arr.get_data();
@@ -714,7 +715,7 @@ void generate_cwise_ell_max_nnz_per_row(
         max_nnz_ptr, num_blocks, num_blocks);
     exec->synchronize();
 
-    std::vector<int> max_nnz_host = max_nnz_arr.copy_to_host();
+    std::vector<IndexType> max_nnz_host = max_nnz_arr.copy_to_host();
     for (int k = 0; k < q; k++) {
         max_nnz_per_row[k] = max_nnz_host[k * num_blocks];
     }
@@ -724,23 +725,20 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
 
 
-template <typename ValueType, typename DataType>
-precision_array<DataType, ValueType> reduce_bins_max(
-    std::shared_ptr<const DefaultExecutor> exec,
-    const precision_array<array<DataType>, ValueType>& bin_arrays)
+template <typename IndexType>
+void reduce_bins_max(std::shared_ptr<const DefaultExecutor> exec, const int q,
+                     const array<IndexType>* const bin_arrays,
+                     IndexType* const results)
 {
-    precision_array<DataType, ValueType> results{};
-    for (int k = 0; k < bin_arrays.size(); k++) {
-        results[k] =
-            thrust::reduce(thrust::device, bin_arrays[k].get_data(),
-                           bin_arrays[k].get_data() + bin_arrays[k].get_size(),
-                           zero<DataType>(), thrust::maximum<DataType>());
+    for (gko::size_type k = 0; k < q; k++) {
+        results[k] = thrust::reduce(
+            thrust::device, bin_arrays[k].get_const_data(),
+            bin_arrays[k].get_const_data() + bin_arrays[k].get_size(),
+            zero<IndexType>(), thrust::maximum<IndexType>());
     }
-    return results;
 }
 
-GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 }  // namespace amp

@@ -89,7 +89,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DpcppExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 {
     GKO_NOT_IMPLEMENTED;
 }
@@ -98,17 +98,15 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
 
 
-template <typename ValueType, typename DataType>
-precision_array<DataType, ValueType> reduce_bins_max(
-    std::shared_ptr<const DpcppExecutor> exec,
-    const precision_array<array<DataType>, ValueType>& bin_arrays)
+template <typename IndexType>
+void reduce_bins_max(std::shared_ptr<const DpcppExecutor> exec, const int q,
+                     const array<IndexType>* const bin_arrays,
+                     IndexType* const results)
 {
     GKO_NOT_IMPLEMENTED;
-    return precision_array<DataType, ValueType>();
 }
 
-GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 }  // namespace amp

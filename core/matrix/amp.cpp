@@ -194,7 +194,8 @@ template <typename ValueType, typename IndexType>
 auto generate_amp_impl(
     const matrix::Csr<ValueType, IndexType>* const mtx,
     std::shared_ptr<const Executor> exec, const float tol,
-    gko::amp::precision_array<gko::array<IndexType>, ValueType>& row_sizes)
+    gko::amp::precision_array<gko::array<IndexType>, ValueType>& row_sizes,
+    gko::amp::precision_array<IndexType, ValueType>& num_nonzeros_per_row)
 {
     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
     gko::amp::precision_array<IndexType*, ValueType> bin_row_sizes;
@@ -206,7 +207,8 @@ auto generate_amp_impl(
 
     exec->run(amp::make_generate_cwise_csr_calculate_row_sizes(mtx, tol,
                                                                bin_row_sizes));
-    num_nonzeros_per_row_ = exec->run(amp::make_reduce_bins_max(row_sizes));
+    exec->run(
+        amp::make_reduce_bins_max(q, &row_sizes[0], &num_nonzeros_per_row[0]));
 
     for (int k = 0; k < q; k++) {
         exec->run(
@@ -234,10 +236,11 @@ auto generate_amp_impl(
 
 template <typename ValueType, typename IndexType>
 auto generate_amp_impl(const matrix::Ell<ValueType, IndexType>* const mtx,
-                       std::shared_ptr<const Executor> exec, const float tol)
+                       std::shared_ptr<const Executor> exec, const float tol,
+                       gko::amp::precision_array<IndexType, ValueType>& max_nnz)
 {
-    gko::amp::precision_array<int, ValueType> max_nnz;
     exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(mtx, tol, max_nnz));
+    exec->synchronize();
 
     auto abins = gko::amp::allocate_bins<ValueType, IndexType>(
         exec, mtx->get_size(), max_nnz);
@@ -265,18 +268,16 @@ std::array<std::unique_ptr<const LinOp>,
 AMP<ValueType, IndexType>::generate_amp(const LinOp* const mtx)
 {
     const auto tol = parameters_.tolerance;
-    // typedef std::array<std::unique_ptr<const LinOp>, num_precisions>
-    // ret_type;
     auto a_ell = dynamic_cast<const matrix::Ell<ValueType, IndexType>*>(mtx);
     if (a_ell) {
         return generate_amp_impl<ValueType, IndexType>(
-            a_ell, this->get_executor(), tol);
+            a_ell, this->get_executor(), tol, max_nnz_per_row_);
     } else {
         auto a_csr =
             dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(mtx);
         if (a_csr) {
             return generate_amp_impl<ValueType, IndexType>(
-                a_csr, this->get_executor(), tol, row_sizes_);
+                a_csr, this->get_executor(), tol, row_sizes_, max_nnz_per_row_);
         } else {
             GKO_NOT_SUPPORTED(mtx);
         }

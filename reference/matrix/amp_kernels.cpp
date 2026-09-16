@@ -364,7 +364,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const ReferenceExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -396,7 +396,7 @@ void generate_cwise_ell_max_nnz_per_row(
             get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
 
         // Get max nnz per row for each precision bin matrix
-        std::array<int, q> row_nnz = {};
+        std::array<IndexType, q> row_nnz = {};
         for (int j = 0; j < omax_nnz; j++) {
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
@@ -637,25 +637,26 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL);
 
 
-template <typename ValueType, typename IndexType>
-precision_array<IndexType, ValueType> reduce_bins_max(
-    std::shared_ptr<const ReferenceExecutor> exec,
-    const precision_array<array<IndexType>, ValueType>& bin_arrays)
+template <typename IndexType>
+void reduce_bins_max(std::shared_ptr<const ReferenceExecutor> exec, const int q,
+                     const array<IndexType>* const bin_arrays,
+                     IndexType* const results)
 {
-    for (int k = 1; k < bin_arrays.size(); k++) {
-        GKO_ASSERT_EQUAL_DIMENSIONS(bin_arrays[0], bin_arrays[k]);
-    }
-    precision_array<IndexType, ValueType> results{};
-    for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
-        for (int k = 0; k < bin_arrays.size(); k++) {
-            results[k] = std::max(results[k], bin_arrays[k].get_data()[i]);
+    for (int k = 0; k < q; k++) {
+        results[k] = zero<IndexType>();
+        if (k > 0) {
+            GKO_ASSERT_EQ(bin_arrays[0].get_size(), bin_arrays[k].get_size());
         }
     }
-    return results;
+    for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
+        for (int k = 0; k < q; k++) {
+            results[k] =
+                std::max(results[k], bin_arrays[k].get_const_data()[i]);
+        }
+    }
 }
 
-GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
-    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 template <typename ValueType, typename IndexType>

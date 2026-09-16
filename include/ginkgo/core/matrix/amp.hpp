@@ -106,20 +106,31 @@ public:
         return i >= 0 && i < num_precisions ? mat_bins_[i].get() : nullptr;
     }
 
+    /**
+     * Maximum number of nonzero entries per row for a precision bin.
+     *
+     * @param i  bin index.
+     * @return  Max. number of nonzeros per row in bin i.
+     */
+    IndexType get_max_nnz_per_row_for_bin(const int i)
+    {
+        return i >= 0 && i < num_precisions ? max_nnz_per_row_[i] : 0;
+    }
+
     /// Meaning of the tolerance - componentwise or normwise backward error.
     enum class criterion_type { normwise, componentwise };
 
     /// Algorithm used to perform the AMP SpMV.
     enum class strategy_type {
         /**
-         * A single kernel reads all precision buckets and accumulates each
-         * row in ValueType.
+         * A single kernel reads all precision buckets and
+         * accumulates each row in ValueType.
          */
         monolithic_classical,
         /**
-         * One independent SpMV per precision bucket, accumulated into the
-         * output vector. Each bucket is free to use its own (Ell/Csr)
-         * kernel.
+         * One independent SpMV per precision bucket,
+         * accumulated into the output vector. Each bucket
+         * is free to use its own (Ell/Csr) kernel.
          */
         independent_buckets
     };
@@ -205,9 +216,10 @@ protected:
      * Max. nonzeros per row for each precision bucket.
      * This is used by certain AMP algorithms.
      */
-    std::array<IndexType, num_precisions> num_nonzeros_per_row_;
-
     std::array<gko::array<IndexType>, num_precisions> row_sizes_;
+
+    /// Max. number of nonzeros per row for each precision bin.
+    std::array<IndexType, num_precisions> num_nonzeros_per_row_;
 
     /// Array of bins of the different precisions.
     std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
