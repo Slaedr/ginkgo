@@ -200,8 +200,17 @@ protected:
     std::array<std::unique_ptr<const LinOp>, num_precisions> generate_amp(
         const LinOp* matrix);
 
-private:
+protected:
+    /**
+     * Max. nonzeros per row for each precision bucket.
+     * This is used by certain AMP algorithms.
+     */
+    std::array<IndexType, num_precisions> num_nonzeros_per_row_;
+
     std::array<gko::array<IndexType>, num_precisions> row_sizes_;
+
+    /// Array of bins of the different precisions.
+    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
 
     std::array<gko::array<IndexType>, num_precisions> create_row_sizes() const;
 
@@ -211,14 +220,8 @@ private:
      */
     void init_one();
 
-protected:
-    /* Array of bins of the different precisions.
-     */
-    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
-
     /// Scalar one, used as alpha/beta when accumulating buckets in the
-    /// `independent_buckets` SpMV strategy. Type-erased as LinOp since Dense
-    /// is only forward-declared in this header.
+    /// `independent_buckets` SpMV strategy.
     std::shared_ptr<const LinOp> one_;
 };
 

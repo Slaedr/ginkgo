@@ -413,6 +413,30 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
 
 
+template <typename ValueType, typename DataType>
+precision_array<DataType, ValueType> reduce_bins_max(
+    std::shared_ptr<const OmpExecutor> exec,
+    const precision_array<array<DataType>, ValueType>& bin_arrays)
+{
+    constexpr int q = static_cast<int>(bin_arrays.size());
+    for (int k = 1; k < q; k++) {
+        GKO_ASSERT_EQUAL_DIMENSIONS(bin_arrays[0], bin_arrays[k]);
+    }
+    precision_array<DataType, ValueType> results{};
+    auto resultsa = &results[0];
+#pragma omp parallel for default(shared) reduction(max : resultsa[q])
+    for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
+        for (int k = 0; k < q; k++) {
+            resultsa[k] = std::max(resultsa[k], bin_arrays[k].get_data()[i]);
+        }
+    }
+    return results;
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+
+
 }  // namespace amp
 }  // namespace omp
 }  // namespace kernels

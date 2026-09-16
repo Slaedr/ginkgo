@@ -51,6 +51,7 @@ GKO_REGISTER_OPERATION(generate_cwise_csr_calculate_row_sizes,
                        amp::generate_cwise_csr_calculate_row_sizes);
 GKO_REGISTER_OPERATION(generate_cwise_csr_scatter_bins,
                        amp::generate_cwise_csr_scatter_bins);
+GKO_REGISTER_OPERATION(reduce_bins_max, amp::reduce_bins_max);
 GKO_REGISTER_OPERATION(extract_diagonal, amp::extract_diagonal);
 GKO_REGISTER_OPERATION(fill_array, components::fill_array);
 GKO_REGISTER_OPERATION(prefix_sum_nonnegative,
@@ -205,6 +206,7 @@ auto generate_amp_impl(
 
     exec->run(amp::make_generate_cwise_csr_calculate_row_sizes(mtx, tol,
                                                                bin_row_sizes));
+    num_nonzeros_per_row_ = exec->run(amp::make_reduce_bins_max(row_sizes));
 
     for (int k = 0; k < q; k++) {
         exec->run(

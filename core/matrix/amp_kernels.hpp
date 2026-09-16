@@ -77,6 +77,12 @@ namespace kernels {
         const matrix::Csr<ValueType, IndexType>* a, const float tolerance, \
         gko::amp::precision_array<LinOp*, ValueType>& amat)
 
+#define GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(ValueType, IndexType)       \
+    gko::amp::precision_array<DataType, ValueType> reduce_bins_max(        \
+        std::shared_ptr<const DefaultExecutor> exec,                       \
+        const gko::amp::precision_array<gko::array<IndexType>, ValueType>& \
+            bin_arrays)
+
 #define GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType)      \
     void fill_in_dense(std::shared_ptr<const DefaultExecutor> exec,     \
                        const matrix::AMP<ValueType, IndexType>* source, \
@@ -113,6 +119,8 @@ namespace kernels {
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL(ValueType,         \
                                                            IndexType);        \
+    template <typename ValueType, typename IndexType>                         \
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(ValueType, IndexType);             \
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType);               \
     template <typename ValueType, typename IndexType>                         \

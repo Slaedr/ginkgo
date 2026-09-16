@@ -98,6 +98,19 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
 
 
+template <typename ValueType, typename DataType>
+precision_array<DataType, ValueType> reduce_bins_max(
+    std::shared_ptr<const DpcppExecutor> exec,
+    const precision_array<array<DataType>, ValueType>& bin_arrays)
+{
+    GKO_NOT_IMPLEMENTED;
+    return precision_array<DataType, ValueType>();
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+
+
 }  // namespace amp
 }  // namespace dpcpp
 }  // namespace kernels

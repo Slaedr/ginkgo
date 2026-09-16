@@ -638,6 +638,27 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
 
 
 template <typename ValueType, typename IndexType>
+precision_array<IndexType, ValueType> reduce_bins_max(
+    std::shared_ptr<const ReferenceExecutor> exec,
+    const precision_array<array<IndexType>, ValueType>& bin_arrays)
+{
+    for (int k = 1; k < bin_arrays.size(); k++) {
+        GKO_ASSERT_EQUAL_DIMENSIONS(bin_arrays[0], bin_arrays[k]);
+    }
+    precision_array<IndexType, ValueType> results{};
+    for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
+        for (int k = 0; k < bin_arrays.size(); k++) {
+            results[k] = std::max(results[k], bin_arrays[k].get_data()[i]);
+        }
+    }
+    return results;
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+
+
+template <typename ValueType, typename IndexType>
 void fill_in_dense(std::shared_ptr<const ReferenceExecutor> exec,
                    const matrix::AMP<ValueType, IndexType>* source,
                    matrix::Dense<ValueType>* result)
