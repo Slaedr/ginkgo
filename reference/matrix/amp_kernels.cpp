@@ -537,6 +537,10 @@ void generate_cwise_csr_calculate_row_sizes(
             }
         }
     }
+    // initialize the unused one-pas-the-end allocated value
+    for (int k = 0; k < q; k++) {
+        bin_row_sizes[k][nrows] = 0;
+    }
 }
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
@@ -653,8 +657,8 @@ void reduce_bins_max(
     }
     for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
         for (int k = 0; k < q; k++) {
-            results[k] =
-                std::max(results[k], bin_arrays[k].get_const_data()[i]);
+            const auto val = bin_arrays[k].get_const_data()[i];
+            results[k] = (results[k] < val) ? val : results[k];
         }
     }
 }

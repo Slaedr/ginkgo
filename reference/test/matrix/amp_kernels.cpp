@@ -2083,6 +2083,9 @@ TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizes)
     EXPECT_EQ(rnv[1][3], 1);
     EXPECT_EQ(rnv[1][4], 1);
 #endif
+    for (int i = 0; i < gko::amp::narrow_types<double>::num_types; i++) {
+        EXPECT_EQ(rnv[i][5], 0);
+    }
 }
 
 

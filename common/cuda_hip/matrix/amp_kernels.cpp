@@ -405,7 +405,6 @@ void spmv_csr_classical(syn::value_list<int, subwarp_size>,
         std::get<k>(xvalues) = as_device_type(cmatk->get_const_values());
     });
 
-    constexpr uint32 subwarps_per_block = default_block_size / subwarp_size;
     constexpr uint32 warps_per_block = default_block_size / config::warp_size;
     const auto nwarps = static_cast<uint32>(exec->get_num_warps_per_sm() *
                                             exec->get_num_multiprocessor()) *
@@ -448,7 +447,6 @@ void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
               matrix::Dense<OutputValueType>* c)
 {
     const auto max_length_per_row = max_nnz_per_row(a);
-    printf("Max nnz per row = %d\n", max_length_per_row);
     select_spmv_csr_classical(
         classical_kernels(),
         [&max_length_per_row](int compiled_row_len) {
@@ -506,7 +504,6 @@ void adv_spmv_csr_classical(syn::value_list<int, subwarp_size>,
         std::get<k>(xvalues) = as_device_type(cmatk->get_const_values());
     });
 
-    constexpr uint32 subwarps_per_block = default_block_size / subwarp_size;
     constexpr uint32 warps_per_block = default_block_size / config::warp_size;
     const auto nwarps = static_cast<uint32>(exec->get_num_warps_per_sm() *
                                             exec->get_num_multiprocessor()) *
