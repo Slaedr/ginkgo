@@ -413,11 +413,14 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
 
 
-template <typename IndexType>
-void reduce_bins_max(std::shared_ptr<const OmpExecutor> exec, const int q,
-                     const array<IndexType>* const __restrict__ bin_arrays,
-                     IndexType* const __restrict__ results)
+template <typename ValueType, typename IndexType>
+void reduce_bins_max(
+    std::shared_ptr<const OmpExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>*,
+    const gko::amp::precision_array<array<IndexType>, ValueType>& bin_arrays,
+    gko::amp::precision_array<IndexType, ValueType>& results)
 {
+    constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
     for (int k = 0; k < q; k++) {
         results[k] = zero<IndexType>();
         if (k > 0) {
@@ -434,7 +437,8 @@ void reduce_bins_max(std::shared_ptr<const OmpExecutor> exec, const int q,
     }
 }
 
-GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 }  // namespace amp

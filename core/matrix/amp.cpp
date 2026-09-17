@@ -77,7 +77,6 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
                 this->mat_bins_[i] = nullptr;
             }
         }
-        row_sizes_ = other.row_sizes_;
     }
     return *this;
 }
@@ -89,7 +88,6 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(AMP&& other)
     if (&other != this) {
         EnableLinOp<AMP>::operator=(std::move(other));
         mat_bins_ = std::move(other.mat_bins_);
-        row_sizes_ = std::move(other.row_sizes_);
     }
     return *this;
 }
@@ -191,24 +189,27 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* alpha, const LinOp* b,
 
 
 template <typename ValueType, typename IndexType>
-auto generate_amp_impl(
-    const matrix::Csr<ValueType, IndexType>* const mtx,
-    std::shared_ptr<const Executor> exec, const float tol,
-    gko::amp::precision_array<gko::array<IndexType>, ValueType>& row_sizes,
-    gko::amp::precision_array<IndexType, ValueType>& num_nonzeros_per_row)
+gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+AMP<ValueType, IndexType>::generate_amp_impl(
+    const matrix::Csr<ValueType, IndexType>* const mtx)
 {
+    auto exec = this->get_executor();
     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
+    const auto tol = parameters_.tolerance;
+
+    std::array<gko::array<IndexType>, num_precisions> row_sizes;
+
     gko::amp::precision_array<IndexType*, ValueType> bin_row_sizes;
     const size_type nrows = mtx->get_size()[0];
     gko::constexpr_for<0, q, 1>([&](auto k) {
+        row_sizes[k].set_executor(exec);
         row_sizes[k].resize_and_reset(nrows + 1);
         bin_row_sizes[k] = row_sizes[k].get_data();
     });
 
     exec->run(amp::make_generate_cwise_csr_calculate_row_sizes(mtx, tol,
                                                                bin_row_sizes));
-    exec->run(
-        amp::make_reduce_bins_max(q, &row_sizes[0], &num_nonzeros_per_row[0]));
+    exec->run(amp::make_reduce_bins_max(mtx, row_sizes, max_nnz_per_row_));
 
     for (int k = 0; k < q; k++) {
         exec->run(
@@ -235,15 +236,20 @@ auto generate_amp_impl(
 
 
 template <typename ValueType, typename IndexType>
-auto generate_amp_impl(const matrix::Ell<ValueType, IndexType>* const mtx,
-                       std::shared_ptr<const Executor> exec, const float tol,
-                       gko::amp::precision_array<IndexType, ValueType>& max_nnz)
+gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+AMP<ValueType, IndexType>::generate_amp_impl(
+    const matrix::Ell<ValueType, IndexType>* const mtx)
 {
-    exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(mtx, tol, max_nnz));
+    auto exec = this->get_executor();
+    constexpr int q = AMP<ValueType, IndexType>::num_precisions;
+    const auto tol = parameters_.tolerance;
+
+    exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(mtx, tol,
+                                                           max_nnz_per_row_));
     exec->synchronize();
 
     auto abins = gko::amp::allocate_bins<ValueType, IndexType>(
-        exec, mtx->get_size(), max_nnz);
+        exec, mtx->get_size(), max_nnz_per_row_);
     constexpr auto num_bins = std::tuple_size<decltype(abins)>::value;
     static_assert(num_bins == AMP<ValueType, IndexType>::num_precisions,
                   "Wrong number of bins!");
@@ -270,14 +276,12 @@ AMP<ValueType, IndexType>::generate_amp(const LinOp* const mtx)
     const auto tol = parameters_.tolerance;
     auto a_ell = dynamic_cast<const matrix::Ell<ValueType, IndexType>*>(mtx);
     if (a_ell) {
-        return generate_amp_impl<ValueType, IndexType>(
-            a_ell, this->get_executor(), tol, max_nnz_per_row_);
+        return generate_amp_impl(a_ell);
     } else {
         auto a_csr =
             dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(mtx);
         if (a_csr) {
-            return generate_amp_impl<ValueType, IndexType>(
-                a_csr, this->get_executor(), tol, row_sizes_, max_nnz_per_row_);
+            return generate_amp_impl(a_csr);
         } else {
             GKO_NOT_SUPPORTED(mtx);
         }
@@ -318,8 +322,7 @@ AMP<ValueType, IndexType>::extract_diagonal() const
 
 template <typename ValueType, typename IndexType>
 AMP<ValueType, IndexType>::AMP(std::shared_ptr<const Executor> exec)
-    : EnableLinOp<AMP<ValueType, IndexType>>(std::move(exec)),
-      row_sizes_(create_row_sizes())
+    : EnableLinOp<AMP<ValueType, IndexType>>(std::move(exec))
 {
     init_one();
 }
@@ -404,17 +407,17 @@ void AMP<ValueType, IndexType>::read(
 }
 
 
-template <typename ValueType, typename IndexType>
-std::array<gko::array<IndexType>, AMP<ValueType, IndexType>::num_precisions>
-AMP<ValueType, IndexType>::create_row_sizes() const
-{
-    constexpr int q = AMP<ValueType, IndexType>::num_precisions;
-    std::array<gko::array<IndexType>, num_precisions> arr;
-    for (int i = 0; i < q; i++) {
-        arr[i] = gko::array<IndexType>(this->get_executor());
-    }
-    return arr;
-}
+// template <typename ValueType, typename IndexType>
+// std::array<gko::array<IndexType>, AMP<ValueType, IndexType>::num_precisions>
+// AMP<ValueType, IndexType>::create_row_sizes() const
+//{
+//     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
+//     std::array<gko::array<IndexType>, num_precisions> arr;
+//     for (int i = 0; i < q; i++) {
+//         arr[i] = gko::array<IndexType>(this->get_executor());
+//     }
+//     return arr;
+// }
 
 
 #define GKO_DECLARE_AMP_MATRIX(ValueType, IndexType) \

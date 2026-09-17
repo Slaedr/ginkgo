@@ -637,11 +637,14 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL);
 
 
-template <typename IndexType>
-void reduce_bins_max(std::shared_ptr<const ReferenceExecutor> exec, const int q,
-                     const array<IndexType>* const bin_arrays,
-                     IndexType* const results)
+template <typename ValueType, typename IndexType>
+void reduce_bins_max(
+    std::shared_ptr<const ReferenceExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>*,
+    const gko::amp::precision_array<array<IndexType>, ValueType>& bin_arrays,
+    gko::amp::precision_array<IndexType, ValueType>& results)
 {
+    constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
     for (int k = 0; k < q; k++) {
         results[k] = zero<IndexType>();
         if (k > 0) {
@@ -656,7 +659,8 @@ void reduce_bins_max(std::shared_ptr<const ReferenceExecutor> exec, const int q,
     }
 }
 
-GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 template <typename ValueType, typename IndexType>

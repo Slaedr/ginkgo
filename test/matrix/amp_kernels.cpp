@@ -627,6 +627,29 @@ TEST_F(AmpCsr, GenerateCsrScatterBinsIsEquivalentToRef)
 }
 
 
+TEST_F(AmpCsr, MaxNNZPerRowsAreEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto d_csr = gko::clone(exec, csr);
+    auto nnz_csr = csr->get_num_stored_elements();
+
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_d = AmpMtx::build().with_tolerance(tol).on(exec)->generate(
+        gko::share(std::move(d_csr)));
+
+    for (int k = 0; k < q; k++) {
+        EXPECT_LT(amp_ref->get_max_nnz_per_row_for_bin(k), nnz_csr);
+        EXPECT_EQ(amp_ref->get_max_nnz_per_row_for_bin(k),
+                  amp_d->get_max_nnz_per_row_for_bin(k));
+    }
+}
+
+
 TEST_F(AmpCsr, SpmvIsEquivalentToRef)
 {
     using T = value_type;
@@ -922,13 +945,14 @@ TEST_F(AmpCsr, ReducesThreeLongArraysEquivalentToRef)
                       [&]() { return dis(rand_engine); });
         d_data[i] = data[i];
     }
-    gko::amp::precision_array<long, double> refmaxes;
-    gko::amp::precision_array<long, double> d_maxes;
+    gko::amp::precision_array<long, std::complex<double>> refmaxes;
+    gko::amp::precision_array<long, std::complex<double>> d_maxes;
+    auto mtx = gko::matrix::Csr<std::complex<double>, long>::create(ref);
 
-    gko::kernels::reference::amp::reduce_bins_max(ref, q, &data[0],
-                                                  &refmaxes[0]);
-    gko::kernels::GKO_DEVICE_NAMESPACE::amp::reduce_bins_max(
-        exec, q, &d_data[0], &d_maxes[0]);
+    gko::kernels::reference::amp::reduce_bins_max(ref, mtx.get(), data,
+                                                  refmaxes);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::reduce_bins_max(exec, mtx.get(),
+                                                             d_data, d_maxes);
 
     for (int i = 0; i < q; i++) {
         EXPECT_EQ(refmaxes[i], d_maxes[i]);

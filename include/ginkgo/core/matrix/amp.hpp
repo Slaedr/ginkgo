@@ -15,7 +15,6 @@
 #include <ginkgo/core/base/polymorphic_object.hpp>
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
-#include <ginkgo/core/matrix/ell.hpp>
 
 
 namespace gko {
@@ -24,6 +23,9 @@ namespace matrix {
 
 template <typename ValueType>
 class Dense;
+
+template <typename ValueType, typename IndexType>
+class Ell;
 
 
 /**
@@ -112,7 +114,7 @@ public:
      * @param i  bin index.
      * @return  Max. number of nonzeros per row in bin i.
      */
-    IndexType get_max_nnz_per_row_for_bin(const int i)
+    IndexType get_max_nnz_per_row_for_bin(const int i) const
     {
         return i >= 0 && i < num_precisions ? max_nnz_per_row_[i] : 0;
     }
@@ -193,7 +195,6 @@ protected:
     explicit AMP(const Factory* factory, std::shared_ptr<const LinOp> lin_op)
         : EnableLinOp<AMP>(factory->get_executor(), lin_op->get_size()),
           parameters_{factory->get_parameters()},
-          row_sizes_(create_row_sizes()),
           mat_bins_(generate_amp(lin_op.get()))
     {
         init_one();
@@ -212,19 +213,11 @@ protected:
         const LinOp* matrix);
 
 protected:
-    /**
-     * Max. nonzeros per row for each precision bucket.
-     * This is used by certain AMP algorithms.
-     */
-    std::array<gko::array<IndexType>, num_precisions> row_sizes_;
-
     /// Max. number of nonzeros per row for each precision bin.
-    std::array<IndexType, num_precisions> num_nonzeros_per_row_;
+    std::array<IndexType, num_precisions> max_nnz_per_row_;
 
     /// Array of bins of the different precisions.
     std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
-
-    std::array<gko::array<IndexType>, num_precisions> create_row_sizes() const;
 
     /**
      * Sets #one_ to a scalar 1.0 on the current executor. Used as alpha/beta
@@ -235,6 +228,15 @@ protected:
     /// Scalar one, used as alpha/beta when accumulating buckets in the
     /// `independent_buckets` SpMV strategy.
     std::shared_ptr<const LinOp> one_;
+
+private:
+    /// CSR-bin generation
+    gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+    generate_amp_impl(const matrix::Csr<ValueType, IndexType>* mtx);
+
+    /// ELL-bin generation
+    gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+    generate_amp_impl(const matrix::Ell<ValueType, IndexType>* mtx);
 };
 
 
