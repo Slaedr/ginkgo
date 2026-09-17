@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -465,7 +465,7 @@ void abstract_merge_path_spmv(
                                  num_rows, val, col_idxs, row_ptrs, srow, b, c,
                                  row_out, val_out, item_ct1,
                                  static_cast<IndexType*>(
-                                     shared_row_ptrs_acc_ct1.get_pointer()));
+                                     get_local_ptr(shared_row_ptrs_acc_ct1)));
                          });
     });
 }
@@ -525,7 +525,7 @@ void abstract_merge_path_spmv(
                                  num_rows, alpha, val, col_idxs, row_ptrs, srow,
                                  b, beta, c, row_out, val_out, item_ct1,
                                  static_cast<IndexType*>(
-                                     shared_row_ptrs_acc_ct1.get_pointer()));
+                                     get_local_ptr(shared_row_ptrs_acc_ct1)));
                          });
     });
 }
@@ -563,8 +563,8 @@ void abstract_reduce(dim3 grid, dim3 block, size_type dynamic_shared_memory,
         cgh.parallel_for(
             sycl_nd_range(grid, block), [=](sycl::nd_item<3> item_ct1) {
                 abstract_reduce(nwarps, last_val, last_row, c, item_ct1,
-                                *tmp_ind_acc_ct1.get_pointer(),
-                                *tmp_val_acc_ct1.get_pointer());
+                                *get_local_ptr(tmp_ind_acc_ct1),
+                                *get_local_ptr(tmp_val_acc_ct1));
             });
     });
 }
@@ -605,8 +605,8 @@ void abstract_reduce(dim3 grid, dim3 block, size_type dynamic_shared_memory,
         cgh.parallel_for(
             sycl_nd_range(grid, block), [=](sycl::nd_item<3> item_ct1) {
                 abstract_reduce(nwarps, last_val, last_row, alpha, c, item_ct1,
-                                *tmp_ind_acc_ct1.get_pointer(),
-                                *tmp_val_acc_ct1.get_pointer());
+                                *get_local_ptr(tmp_ind_acc_ct1),
+                                *get_local_ptr(tmp_val_acc_ct1));
             });
     });
 }
@@ -817,7 +817,7 @@ void check_unsorted(dim3 grid, dim3 block, size_type dynamic_shared_memory,
         cgh.parallel_for(
             sycl_nd_range(grid, block), [=](sycl::nd_item<3> item_ct1) {
                 check_unsorted(row_ptrs, col_idxs, num_rows, flag, item_ct1,
-                               sh_flag_acc_ct1.get_pointer());
+                               get_local_ptr(sh_flag_acc_ct1));
             });
     });
 }
@@ -1443,6 +1443,19 @@ bool try_general_sparselib_spmv(std::shared_ptr<const DpcppExecutor> exec,
     if constexpr (try_sparselib) {
         oneapi::mkl::sparse::matrix_handle_t mat_handle;
         oneapi::mkl::sparse::init_matrix_handle(&mat_handle);
+#if INTEL_MKL_VERSION >= 20260000
+        // MKL 2026.0 deprecated the overload without nnz and widened the
+        // dimensions to int64
+        oneapi::mkl::sparse::set_csr_data(
+            *exec->get_queue(), mat_handle,
+            static_cast<std::int64_t>(a->get_size()[0]),
+            static_cast<std::int64_t>(a->get_size()[1]),
+            static_cast<std::int64_t>(a->get_num_stored_elements()),
+            oneapi::mkl::index_base::zero,
+            const_cast<IndexType*>(a->get_const_row_ptrs()),
+            const_cast<IndexType*>(a->get_const_col_idxs()),
+            const_cast<ValueType*>(a->get_const_values()));
+#else
         oneapi::mkl::sparse::set_csr_data(
 #if INTEL_MKL_VERSION >= 20240000
             *exec->get_queue(),
@@ -1452,6 +1465,7 @@ bool try_general_sparselib_spmv(std::shared_ptr<const DpcppExecutor> exec,
             const_cast<IndexType*>(a->get_const_row_ptrs()),
             const_cast<IndexType*>(a->get_const_col_idxs()),
             const_cast<ValueType*>(a->get_const_values()));
+#endif
         if (b->get_size()[1] == 1 && b->get_stride() == 1) {
             oneapi::mkl::sparse::gemv(
                 *exec->get_queue(), oneapi::mkl::transpose::nontrans,

@@ -149,7 +149,9 @@ gko_add_sycl_to_target(TARGET ginkgo_dpcpp)
 # Note: add MKL as PRIVATE not PUBLIC (MKL example shows) to avoid propagating
 # find_package(MKL) everywhere when linking ginkgo (see the MKL example
 # https://software.intel.com/content/www/us/en/develop/documentation/onemkl-windows-developer-guide/top/getting-started/cmake-config-for-onemkl.html)
-target_link_options(ginkgo_dpcpp PRIVATE -fsycl-device-lib=all)
+# GINKGO_SYCL_DEVICE_LIB_FLAGS is empty on compilers that dropped
+# -fsycl-device-lib, see cmake/sycl.cmake
+target_link_options(ginkgo_dpcpp PRIVATE ${GINKGO_SYCL_DEVICE_LIB_FLAGS})
 # When building ginkgo as a static library, we need to use dpcpp and per_kernel
 # link option when the program uses a dpcpp related function.
 if(BUILD_SHARED_LIBS)

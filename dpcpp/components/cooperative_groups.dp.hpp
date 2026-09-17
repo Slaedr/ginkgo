@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -161,7 +161,12 @@ public:
 
     __dpct_inline__ unsigned size() const noexcept { return Size; }
 
-    __dpct_inline__ void sync() const noexcept { this->barrier(); }
+    // the cast is required because group_barrier deduces its group type from a
+    // by-value parameter, so it never sees the sycl::sub_group base class
+    __dpct_inline__ void sync() const noexcept
+    {
+        sycl::group_barrier(static_cast<sycl::sub_group>(*this));
+    }
 #define GKO_BIND_SHFL(ShflOpName, ShflOp)                                      \
     template <typename ValueType, typename SelectorType>                       \
     __dpct_inline__ ValueType ShflOpName(ValueType var, SelectorType selector) \

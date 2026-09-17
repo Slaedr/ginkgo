@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -7,6 +7,7 @@
 
 #include <climits>
 #include <cmath>
+#include <tuple>
 
 #if GINKGO_DPCPP_MAJOR_VERSION < 7 || \
     (GINKGO_DPCPP_MAJOR_VERSION == 7 && GINKGO_DPCPP_MINOR_VERSION < 1)
@@ -154,6 +155,10 @@ struct device_numeric_limits {
     static constexpr auto inf() { return std::numeric_limits<T>::infinity(); }
     static constexpr auto max() { return std::numeric_limits<T>::max(); }
     static constexpr auto min() { return std::numeric_limits<T>::min(); }
+    static constexpr auto epsilon()
+    {
+        return std::numeric_limits<T>::epsilon();
+    }
 };
 
 // There is no underlying data public access or storage_type input in
@@ -177,6 +182,13 @@ struct device_numeric_limits<vendor_bf16> {
     {
         return sycl::bit_cast<vendor_bf16>(
             static_cast<unsigned short>(0b0'00000001'0000000u));
+    }
+
+    // 2^(-7), with exponent represented as 120.
+    static GKO_ATTRIBUTES GKO_INLINE auto epsilon()
+    {
+        return sycl::bit_cast<vendor_bf16>(
+            static_cast<unsigned short>(0b0'01111000'0000000u));
     }
 };
 
@@ -267,6 +279,48 @@ bool __dpct_inline__ is_finite(const gko::complex<vendor_bf16>& value)
 {
     return is_finite(value.real()) && is_finite(value.imag());
 }
+
+
+namespace kernels {
+namespace dpcpp {
+namespace detail {
+
+
+template <typename T>
+struct device_to_complex_s {
+    using type = typename gko::detail::complex_helper<T>::type;
+};
+
+template <typename T>
+struct device_to_complex_s<std::complex<T>> {
+    using type = typename device_to_complex_s<T>::type;
+};
+
+template <typename T>
+struct device_to_complex_s<gko::complex<T>> {
+    using type = gko::complex<T>;
+};
+
+template <typename... Args>
+struct device_to_complex_s<std::tuple<Args...>> {
+    using type = std::tuple<typename device_to_complex_s<Args>::type...>;
+};
+
+
+}  // namespace detail
+
+
+template <typename T>
+using to_complex = typename detail::device_to_complex_s<T>::type;
+
+// for common unified half
+using device_half = sycl::half;
+// for common unified bf16
+using device_bfloat16 = vendor_bf16;
+
+
+}  // namespace dpcpp
+}  // namespace kernels
 
 
 }  // namespace gko

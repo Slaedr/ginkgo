@@ -6,19 +6,11 @@
 #define GKO_COMMON_UNIFIED_MATRIX_AMP_ALGORITHMS_H_
 
 
+// defines GKO_KERNEL for the current backend
 #include "common/unified/base/amp_types.hpp"
 // For contexpr_for
 #include "core/base/utils.hpp"
 
-#if defined(GKO_COMPILING_CUDA) || defined(GKO_COMPILING_HIP)
-
-#define GKO_KERNEL __device__
-
-#else
-
-#define GKO_KERNEL
-
-#endif
 
 namespace gko {
 namespace kernels {

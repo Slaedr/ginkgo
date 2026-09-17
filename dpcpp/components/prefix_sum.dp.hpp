@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -13,6 +13,7 @@
 #include "core/base/types.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
 #include "dpcpp/base/dpct.hpp"
+#include "dpcpp/base/helper.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/reduction.dp.hpp"
 #include "dpcpp/components/thread_ids.dp.hpp"
@@ -167,7 +168,7 @@ void start_prefix_sum(dim3 grid, dim3 block, size_type dynamic_shared_memory,
                          [=](sycl::nd_item<3> item_ct1) {
                              start_prefix_sum<DeviceConfig>(
                                  num_elements, elements, block_sum, item_ct1,
-                                 *prefix_helper_acc_ct1.get_pointer());
+                                 *get_local_ptr(prefix_helper_acc_ct1));
                          });
     });
 }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -189,6 +189,24 @@ std::uint32_t get_first_cfg(const IterArr& arr, Validate verify)
         }
     }
     GKO_NOT_SUPPORTED(arr);
+}
+
+
+/**
+ * Returns the raw pointer to the local memory of a sycl::local_accessor.
+ *
+ * sycl::accessor::get_pointer is deprecated in SYCL 2020 in favor of
+ * get_multi_ptr. The `template` keyword is required because the accessor type
+ * is usually dependent on the surrounding kernel's template parameters.
+ *
+ * @param acc  the local accessor to get the pointer of
+ *
+ * @return undecorated pointer to the accessor's local memory
+ */
+template <typename Accessor>
+auto get_local_ptr(Accessor&& acc)
+{
+    return acc.template get_multi_ptr<sycl::access::decorated::no>().get();
 }
 
 

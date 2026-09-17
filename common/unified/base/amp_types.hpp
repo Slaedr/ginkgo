@@ -15,6 +15,11 @@
 
 #include "common/cuda_hip/base/types.hpp"
 
+#elif defined(GKO_COMPILING_DPCPP)
+
+#include "dpcpp/base/math.hpp"
+#include "dpcpp/base/types.hpp"
+
 #else
 
 #include "omp/base/math.hpp"
@@ -173,8 +178,8 @@ struct narrow_types<half> {
 };
 
 template <>
-struct narrow_types<gkerdev::device_type<std::complex<half>>> {
-    using type = std::tuple<gkerdev::device_type<std::complex<half>>>;
+struct narrow_types<gkerdev::to_complex<half>> {
+    using type = std::tuple<gkerdev::to_complex<half>>;
     static constexpr int num_types = 1;
 };
 
@@ -187,8 +192,8 @@ struct narrow_types<float> {
 };
 
 template <>
-struct narrow_types<gkerdev::device_type<std::complex<float>>> {
-    using type = std::tuple<gkerdev::device_type<std::complex<float>>>;
+struct narrow_types<gkerdev::to_complex<float>> {
+    using type = std::tuple<gkerdev::to_complex<float>>;
     static constexpr int num_types = 1;
 };
 

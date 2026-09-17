@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -22,6 +22,7 @@
 #include "core/solver/cb_gmres_accessor.hpp"
 #include "dpcpp/base/config.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
+#include "dpcpp/base/helper.hpp"
 #include "dpcpp/base/types.hpp"
 #include "dpcpp/components/atomic.dp.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
@@ -251,7 +252,7 @@ void multinorm2_kernel(dim3 grid, dim3 block, size_type dynamic_shared_memory,
                     multinorm2_kernel(
                         num_rows, num_cols, next_krylov_basis,
                         stride_next_krylov, norms, stop_status, item_ct1,
-                        reduction_helper_array_acc_ct1.get_pointer());
+                        get_local_ptr(reduction_helper_array_acc_ct1));
                 });
     });
 }
@@ -328,7 +329,7 @@ void multinorminf_without_stop_kernel(
                     multinorminf_without_stop_kernel(
                         num_rows, num_cols, next_krylov_basis,
                         stride_next_krylov, norms, stride_norms, item_ct1,
-                        reduction_helper_array_acc_ct1.get_pointer());
+                        get_local_ptr(reduction_helper_array_acc_ct1));
                 });
     });
 }
@@ -431,7 +432,8 @@ void multinorm2_inf_kernel(
                     multinorm2_inf_kernel<compute_inf>(
                         num_rows, num_cols, next_krylov_basis,
                         stride_next_krylov, norms1, norms2, stop_status,
-                        item_ct1, reduction_helper_array_acc_ct1.get_pointer());
+                        item_ct1,
+                        get_local_ptr(reduction_helper_array_acc_ct1));
                 });
     });
 }
@@ -523,7 +525,7 @@ void multidot_kernel(dim3 grid, dim3 block, size_type dynamic_shared_memory,
                         num_rows, num_cols, next_krylov_basis,
                         stride_next_krylov, krylov_bases, hessenberg_iter,
                         stride_hessenberg, stop_status, item_ct1,
-                        *reduction_helper_array_acc_ct1.get_pointer());
+                        *get_local_ptr(reduction_helper_array_acc_ct1));
                 });
     });
 }
@@ -603,7 +605,7 @@ void singledot_kernel(dim3 grid, dim3 block, size_type dynamic_shared_memory,
                         num_rows, next_krylov_basis, stride_next_krylov,
                         krylov_bases, hessenberg_iter, stride_hessenberg,
                         stop_status, item_ct1,
-                        *reduction_helper_array_acc_ct1.get_pointer());
+                        *get_local_ptr(reduction_helper_array_acc_ct1));
                 });
     });
 }

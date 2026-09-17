@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -18,6 +18,7 @@
 #include "core/components/fill_array_kernels.hpp"
 #include "dpcpp/base/config.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
+#include "dpcpp/base/helper.hpp"
 #include "dpcpp/base/math.hpp"
 #include "dpcpp/base/onemkl_bindings.hpp"
 #include "dpcpp/base/types.hpp"
@@ -152,7 +153,7 @@ void orthonormalize_subspace_vectors_kernel(
                 [[sycl::reqd_sub_group_size(config::warp_size)]] {
                     orthonormalize_subspace_vectors_kernel<block_size>(
                         num_rows, num_cols, values, stride, item_ct1,
-                        *reduction_helper_array_acc_ct1.get_pointer());
+                        *get_local_ptr(reduction_helper_array_acc_ct1));
                 });
     });
 }
@@ -371,7 +372,7 @@ void multidot_kernel(dim3 grid, dim3 block, size_t dynamic_shared_memory,
                     multidot_kernel(
                         num_rows, nrhs, p_i, g_k, g_k_stride, alpha,
                         stop_status, item_ct1,
-                        *reduction_helper_array_acc_ct1.get_pointer());
+                        *get_local_ptr(reduction_helper_array_acc_ct1));
                 });
     });
 }

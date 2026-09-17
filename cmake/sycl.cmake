@@ -13,6 +13,22 @@ if(NOT COMMAND add_sycl_to_target)
     endif()
 endif()
 
+# oneAPI 2026.0 removed -fsycl-device-lib, where linking all device libraries
+# became the default, so only pass it to compilers that still accept it.
+# GINKGO_SYCL_DEVICE_LIB_FLAGS is used by every target that links SYCL device
+# code, both the ginkgo_dpcpp library and the tests in create_test.cmake.
+include(CheckCXXCompilerFlag)
+set(gko_saved_required_flags "${CMAKE_REQUIRED_FLAGS}")
+set(CMAKE_REQUIRED_FLAGS "-fsycl")
+check_cxx_compiler_flag(-fsycl-device-lib=all GKO_HAS_SYCL_DEVICE_LIB_ALL)
+set(CMAKE_REQUIRED_FLAGS "${gko_saved_required_flags}")
+unset(gko_saved_required_flags)
+if(GKO_HAS_SYCL_DEVICE_LIB_ALL)
+    set(GINKGO_SYCL_DEVICE_LIB_FLAGS -fsycl-device-lib=all)
+else()
+    set(GINKGO_SYCL_DEVICE_LIB_FLAGS)
+endif()
+
 # Provide a uniform way for those package without add_sycl_to_target
 function(gko_add_sycl_to_target)
     set(one_value_args TARGET)

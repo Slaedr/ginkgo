@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -13,6 +13,7 @@
 #include "core/synthesizer/implementation_selection.hpp"
 #include "dpcpp/base/config.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
+#include "dpcpp/base/helper.hpp"
 #include "dpcpp/base/types.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/reduction.dp.hpp"
@@ -49,7 +50,7 @@ void generic_kernel_reduction_1d(sycl::handler& cgh, int64 size,
     cgh.parallel_for(
         range,
         [=](sycl::nd_item<3> idx) [[sycl::reqd_sub_group_size(sg_size)]] {
-            auto subgroup_partial = &(*subgroup_partial_acc.get_pointer())[0];
+            auto subgroup_partial = &(*get_local_ptr(subgroup_partial_acc))[0];
             const auto tidx = thread::get_thread_id_flat<int64>(idx);
             const auto local_tidx = static_cast<int64>(tidx % wg_size);
             auto subgroup =
@@ -97,7 +98,7 @@ void generic_kernel_reduction_2d(sycl::handler& cgh, int64 rows, int64 cols,
     cgh.parallel_for(
         range,
         [=](sycl::nd_item<3> idx) [[sycl::reqd_sub_group_size(sg_size)]] {
-            auto subgroup_partial = &(*subgroup_partial_acc.get_pointer())[0];
+            auto subgroup_partial = &(*get_local_ptr(subgroup_partial_acc))[0];
             const auto tidx = thread::get_thread_id_flat<int64>(idx);
             const auto local_tidx = static_cast<int64>(tidx % wg_size);
             auto subgroup =
@@ -346,7 +347,7 @@ void generic_kernel_col_reduction_2d_small(
     const auto range = sycl_nd_range(dim3(row_blocks), dim3(wg_size));
     cgh.parallel_for(
         range, [=](sycl::nd_item<3> id) [[sycl::reqd_sub_group_size(sg_size)]] {
-            auto block_partial = &(*block_partial_acc.get_pointer())[0];
+            auto block_partial = &(*get_local_ptr(block_partial_acc))[0];
             const auto ssg_id =
                 thread::get_subwarp_id_flat<ssg_size, int64>(id);
             const auto local_sg_id = id.get_local_id(2) / sg_size;
@@ -425,7 +426,7 @@ void generic_kernel_col_reduction_2d_blocked(
             const auto sg_rank = subgroup.thread_rank();
             const auto col =
                 sg_rank + static_cast<int64>(id.get_group(1)) * sg_size;
-            auto block_partial = &(*block_partial_acc.get_pointer())[0];
+            auto block_partial = &(*get_local_ptr(block_partial_acc))[0];
             auto partial = identity;
             // accumulate within a thread
             if (col < cols) {
