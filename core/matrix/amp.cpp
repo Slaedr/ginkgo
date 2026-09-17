@@ -69,6 +69,7 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
     if (&other != this) {
         EnableLinOp<AMP>::operator=(other);
         this->parameters_ = other.parameters_;
+        this->max_nnz_per_row_ = other.max_nnz_per_row_;
         for (int i = 0; i < num_precisions; i++) {
             if (other.mat_bins_[i]) {
                 this->mat_bins_[i] =
@@ -88,6 +89,7 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(AMP&& other)
     if (&other != this) {
         EnableLinOp<AMP>::operator=(std::move(other));
         mat_bins_ = std::move(other.mat_bins_);
+        max_nnz_per_row_ = std::move(other.max_nnz_per_row_);
     }
     return *this;
 }
