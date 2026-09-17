@@ -208,8 +208,10 @@ template <typename InputValueType, typename MatrixValueType,
 void spmv_csr(std::shared_ptr<const ReferenceExecutor> exec,
               const matrix::AMP<MatrixValueType, IndexType>* const a,
               const matrix::Dense<InputValueType>* const b,
-              matrix::Dense<OutputValueType>* const c)
+              matrix::Dense<OutputValueType>* const c, int subwarp_size)
 {
+    // subwarp_size has no meaning on Reference; the parameter is only
+    // forwarded for interface parity with the CUDA/HIP kernel.
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
     auto csr0 = dynamic_cast<const matrix::Csr<MatrixValueType, IndexType>*>(
@@ -285,8 +287,10 @@ void advanced_spmv_csr(std::shared_ptr<const ReferenceExecutor> exec,
                        const matrix::AMP<MatrixValueType, IndexType>* a,
                        const matrix::Dense<InputValueType>* b,
                        const matrix::Dense<OutputValueType>* beta,
-                       matrix::Dense<OutputValueType>* c)
+                       matrix::Dense<OutputValueType>* c, int subwarp_size)
 {
+    // subwarp_size has no meaning on Reference; the parameter is only
+    // forwarded for interface parity with the CUDA/HIP kernel.
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
     auto csr0 = dynamic_cast<const matrix::Csr<MatrixValueType, IndexType>*>(

@@ -444,13 +444,18 @@ template <typename InputValueType, typename MatrixValueType,
 void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
               const matrix::AMP<MatrixValueType, IndexType>* a,
               const matrix::Dense<InputValueType>* b,
-              matrix::Dense<OutputValueType>* c)
+              matrix::Dense<OutputValueType>* c, const int subwarp_size)
 {
-    const auto max_length_per_row = max_nnz_per_row(a);
+    // subwarp_size == 0 means "automatic": derive it from the maximum number
+    // of nonzeros per row over all precision bins. Otherwise, the
+    // requested (already-validated, power-of-two) subwarp_size is used
+    // directly.
+    const int sel_row_len =
+        subwarp_size > 0 ? subwarp_size : std::max(max_nnz_per_row(a), 1);
     select_spmv_csr_classical(
         classical_kernels(),
-        [&max_length_per_row](int compiled_row_len) {
-            return max_length_per_row >= compiled_row_len;
+        [&sel_row_len](int compiled_row_len) {
+            return sel_row_len >= compiled_row_len;
         },
         syn::value_list<int>(), syn::type_list<>(), exec, a, b, c);
 }
@@ -533,13 +538,14 @@ void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
                        const matrix::AMP<MatrixValueType, IndexType>* a,
                        const matrix::Dense<InputValueType>* b,
                        const matrix::Dense<OutputValueType>* beta,
-                       matrix::Dense<OutputValueType>* c)
+                       matrix::Dense<OutputValueType>* c, int subwarp_size)
 {
-    const auto max_length_per_row = max_nnz_per_row(a);
+    const int sel_row_len =
+        subwarp_size > 0 ? subwarp_size : std::max(max_nnz_per_row(a), 1);
     select_adv_spmv_csr_classical(
         classical_kernels(),
-        [&max_length_per_row](int compiled_row_len) {
-            return max_length_per_row >= compiled_row_len;
+        [&sel_row_len](int compiled_row_len) {
+            return sel_row_len >= compiled_row_len;
         },
         syn::value_list<int>(), syn::type_list<>(), exec, alpha, a, b, beta, c);
 }

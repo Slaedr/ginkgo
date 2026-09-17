@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include <algorithm>
+#include <iostream>
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -62,6 +63,42 @@ GKO_REGISTER_OPERATION(prefix_sum_nonnegative,
 }  // namespace amp
 
 
+/*
+ * Rounds `requested` down to the nearest power of two no larger than the
+ * warp size of `exec` (defaulting to 32 on executors without a native warp
+ * concept), leaving 0 ("automatic") untouched. Warns once via std::cerr if
+ * the value had to change.
+ */
+template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::normalize_subwarp_size()
+{
+    const int requested = parameters_.subwarp_size;
+    auto exec = this->get_executor();
+    if (requested == 0) {
+        parameters_.subwarp_size = 0;
+        return;
+    }
+    int warp_size = 32;
+    if (auto cuda_exec = std::dynamic_pointer_cast<const CudaExecutor>(exec)) {
+        warp_size = cuda_exec->get_warp_size();
+    } else if (auto hip_exec =
+                   std::dynamic_pointer_cast<const HipExecutor>(exec)) {
+        warp_size = hip_exec->get_warp_size();
+    }
+    int clamped = std::min(std::max(requested, 1), warp_size);
+    int rounded = 1;
+    while (rounded * 2 <= clamped) {
+        rounded *= 2;
+    }
+    if (rounded != requested) {
+        std::cerr << "AMP: subwarp_size " << requested
+                  << " is not a power of two <= " << warp_size << "; using "
+                  << rounded << " instead." << std::endl;
+    }
+    parameters_.subwarp_size = rounded;
+}
+
+
 template <typename ValueType, typename IndexType>
 AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
     const AMP& other)
@@ -106,8 +143,8 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* b, LinOp* x) const
         mixed_precision_base_dispatch_real_complex<ValueType>(
             [this, csr_bins](auto dense_b, auto dense_x) {
                 if (csr_bins) {
-                    this->get_executor()->run(
-                        amp::make_spmv_csr(this, dense_b, dense_x));
+                    this->get_executor()->run(amp::make_spmv_csr(
+                        this, dense_b, dense_x, parameters_.subwarp_size));
                 } else {
                     this->get_executor()->run(
                         amp::make_spmv_ell(this, dense_b, dense_x));
@@ -161,7 +198,8 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* alpha, const LinOp* b,
                     beta);
                 if (csr_bins) {
                     this->get_executor()->run(amp::make_advanced_spmv_csr(
-                        d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
+                        d_alpha.get(), this, dense_b, d_beta.get(), dense_x,
+                        parameters_.subwarp_size));
                 } else {
                     this->get_executor()->run(amp::make_advanced_spmv_ell(
                         d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
@@ -220,7 +258,7 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     exec->synchronize();
 
     auto abins = gko::amp::allocate_csr_bins<ValueType, IndexType>(
-        exec, mtx->get_size(), std::move(row_sizes));
+        exec, mtx->get_size(), std::move(row_sizes), parameters_.csr_strategy);
     constexpr auto num_bins = std::tuple_size<decltype(abins)>::value;
     static_assert(num_bins == q, "Wrong number of bins!");
     gko::amp::precision_array<gko::LinOp*, ValueType> amat;
@@ -407,19 +445,6 @@ void AMP<ValueType, IndexType>::read(
     this->set_size(base_mtx->get_size());
     mat_bins_ = generate_amp(base_mtx.get());
 }
-
-
-// template <typename ValueType, typename IndexType>
-// std::array<gko::array<IndexType>, AMP<ValueType, IndexType>::num_precisions>
-// AMP<ValueType, IndexType>::create_row_sizes() const
-//{
-//     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
-//     std::array<gko::array<IndexType>, num_precisions> arr;
-//     for (int i = 0; i < q; i++) {
-//         arr[i] = gko::array<IndexType>(this->get_executor());
-//     }
-//     return arr;
-// }
 
 
 #define GKO_DECLARE_AMP_MATRIX(ValueType, IndexType) \

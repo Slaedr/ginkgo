@@ -32,7 +32,7 @@ namespace kernels {
     void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,           \
                   const matrix::AMP<MatrixValueType, IndexType>* a,      \
                   const matrix::Dense<InputValueType>* b,                \
-                  matrix::Dense<OutputValueType>* c)
+                  matrix::Dense<OutputValueType>* c, int subwarp_size)
 
 #define GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL(                            \
     InputValueType, MatrixValueType, OutputValueType, IndexType)             \
@@ -50,7 +50,8 @@ namespace kernels {
                            const matrix::AMP<MatrixValueType, IndexType>* a, \
                            const matrix::Dense<InputValueType>* b,           \
                            const matrix::Dense<OutputValueType>* beta,       \
-                           matrix::Dense<OutputValueType>* c)
+                           matrix::Dense<OutputValueType>* c,                \
+                           int subwarp_size)
 
 #define GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL(ValueType, IndexType) \
     void generate_cwise_ell_max_nnz_per_row(                                  \

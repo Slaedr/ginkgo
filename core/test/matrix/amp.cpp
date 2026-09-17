@@ -377,6 +377,97 @@ TYPED_TEST(Amp, FactoryCanBeCreatedWithIndependentBucketsStrategy)
 }
 
 
+TYPED_TEST(Amp, FactoryDefaultsToAutomaticSubwarpSize)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build().on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().subwarp_size, 0);
+}
+
+
+TYPED_TEST(Amp, FactoryCanBeCreatedWithValidSubwarpSize)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build().with_subwarp_size(8).on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().subwarp_size, 8);
+}
+
+
+TYPED_TEST(Amp, GenerateRoundsDownInvalidSubwarpSize)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+
+    auto ell = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx3 = Mtx::build().with_subwarp_size(3).on(this->exec)->generate(ell);
+    auto mtx40 =
+        Mtx::build().with_subwarp_size(40).on(this->exec)->generate(ell);
+    auto mtx100 =
+        Mtx::build().with_subwarp_size(100).on(this->exec)->generate(ell);
+
+    // ReferenceExecutor has no native warp size, so validation falls back to
+    // a warp size of 32.
+    EXPECT_EQ(mtx3->get_parameters().subwarp_size, 2);
+    EXPECT_EQ(mtx40->get_parameters().subwarp_size, 32);
+    EXPECT_EQ(mtx100->get_parameters().subwarp_size, 32);
+}
+
+
+TYPED_TEST(Amp, FactoryDefaultsToAutomaticalCsrStrategy)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build().on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().csr_strategy,
+              gko::matrix::amp_csr_strategy_type::automatical);
+}
+
+
+TYPED_TEST(Amp, FactoryCanBeCreatedWithClassicalCsrStrategy)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory =
+        Mtx::build()
+            .with_csr_strategy(gko::matrix::amp_csr_strategy_type::classical)
+            .on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().csr_strategy,
+              gko::matrix::amp_csr_strategy_type::classical);
+}
+
+
+TYPED_TEST(Amp, IndependentBucketsHonorsRequestedCsrStrategy)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Csr = typename TestFixture::Csr;
+    using Dense = typename TestFixture::Dense;
+
+    auto input = gko::share(Dense::create(this->exec, gko::dim<2>{3, 3}));
+    input->fill(gko::one<typename TestFixture::value_type>());
+    auto inmat = gko::share(Csr::create(this->exec));
+    input->convert_to(inmat.get());
+    auto mtx =
+        Mtx::build()
+            .with_strategy(Mtx::strategy_type::independent_buckets)
+            .with_csr_strategy(gko::matrix::amp_csr_strategy_type::classical)
+            .on(this->exec)
+            ->generate(inmat);
+
+    // Bin 0, the highest-precision bucket, shares Mtx's own value_type and
+    // so is exactly Csr<value_type, index_type>. Narrower bins use their own
+    // (smaller) precision and are not checked here.
+    auto bin0 = dynamic_cast<const Csr*>(mtx->get_bin_matrix(0));
+    ASSERT_TRUE(bin0);
+    EXPECT_EQ(bin0->get_strategy()->get_name(), "classical");
+}
+
+
 TYPED_TEST(Amp, FactoryGenerateCompletesWithoutError)
 {
     using Mtx = typename TestFixture::Mtx;
@@ -894,12 +985,15 @@ TYPED_TEST(Amp, ClonePreservesParameters)
 
     const float custom_tol = 1e-3f;
     auto ell = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
-    auto mtx = Mtx::build()
-                   .with_tolerance(custom_tol)
-                   .with_criterion(Mtx::criterion_type::normwise)
-                   .with_strategy(Mtx::strategy_type::independent_buckets)
-                   .on(this->exec)
-                   ->generate(ell);
+    auto mtx =
+        Mtx::build()
+            .with_tolerance(custom_tol)
+            .with_criterion(Mtx::criterion_type::normwise)
+            .with_strategy(Mtx::strategy_type::independent_buckets)
+            .with_subwarp_size(8)
+            .with_csr_strategy(gko::matrix::amp_csr_strategy_type::classical)
+            .on(this->exec)
+            ->generate(ell);
 
     auto clone = gko::clone(mtx);
 
@@ -907,6 +1001,9 @@ TYPED_TEST(Amp, ClonePreservesParameters)
     EXPECT_EQ(clone->get_parameters().criterion, Mtx::criterion_type::normwise);
     EXPECT_EQ(clone->get_parameters().strategy,
               Mtx::strategy_type::independent_buckets);
+    EXPECT_EQ(clone->get_parameters().subwarp_size, 8);
+    EXPECT_EQ(clone->get_parameters().csr_strategy,
+              gko::matrix::amp_csr_strategy_type::classical);
 }
 
 
