@@ -425,10 +425,11 @@ GKO_ENABLE_IMPLEMENTATION_SELECTION(select_spmv_csr_classical,
                                     spmv_csr_classical);
 
 template <typename ValueType, typename IndexType>
-inline int max_nnz_per_row(const matrix::AMP<ValueType, IndexType>* const a)
+inline IndexType max_nnz_per_row(
+    const matrix::AMP<ValueType, IndexType>* const a)
 {
     constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
-    int maxnr = 0;
+    auto maxnr = zero<IndexType>();
     for (int k = 0; k < q; k++) {
         auto binmax = a->get_max_nnz_per_row_for_bin(k);
         maxnr = (maxnr >= binmax) ? maxnr : binmax;
