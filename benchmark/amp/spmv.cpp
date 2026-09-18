@@ -117,7 +117,8 @@ int main(int argc, char* argv[])
         {"amp_base_format", cfg.amp_base_format},
         {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)},
         {"amp_subwarp_size", cfg.amp_subwarp_size},
-        {"amp_csr_strategy", to_string(cfg.amp_csr_strategy)}};
+        {"amp_csr_strategy", to_string(cfg.amp_csr_strategy)},
+        {"base_csr_strategy", cfg.base_csr_strategy_str}};
     json rows = json::array();
 
     double baseline_ms = 1.0;

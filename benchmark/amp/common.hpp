@@ -25,9 +25,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include <nlohmann/json.hpp>
+
+#include <ginkgo/ginkgo.hpp>
 
 using json = nlohmann::json;
 
@@ -80,6 +81,27 @@ inline amp_csr_strategy_t parse_amp_csr_strategy(const std::string& s)
     throw std::runtime_error("Invalid amp_csr_strategy " + s);
 }
 
+template <typename ValueType, typename IndexType>
+inline std::shared_ptr<
+    typename gko::matrix::Csr<ValueType, IndexType>::strategy_type>
+parse_csr_strategy(const std::string& s)
+{
+    using Csr = gko::matrix::Csr<ValueType, IndexType>;
+    if (s == "classical") {
+        return std::make_shared<typename Csr::classical>();
+    } else if (s == "load_balance") {
+        return std::make_shared<typename Csr::load_balance>();
+    } else if (s == "sparselib") {
+        return std::make_shared<typename Csr::sparselib>();
+    } else if (s == "merge_path") {
+        return std::make_shared<typename Csr::merge_path>();
+    } else if (s == "automatical") {
+        return std::make_shared<typename Csr::automatical>();
+    } else {
+        return nullptr;
+    }
+}
+
 // ============================================================
 // Configuration
 // ============================================================
@@ -104,6 +126,7 @@ struct Config {
     // of nonzeros per row over all precision bins).
     int amp_subwarp_size = 0;
     amp_csr_strategy_t amp_csr_strategy = amp_csr_strategy_t::automatical;
+    std::string base_csr_strategy_str = "automatical";
 };
 
 /**
@@ -219,6 +242,9 @@ inline Config load_config(const std::string& path)
             std::cerr << "Invalid amp_csr_strategy " << s << std::endl;
             throw;
         }
+    }
+    if (j.contains("base_csr_strategy")) {
+        cfg.base_csr_strategy_str = j["base_csr_strategy"];
     }
     return cfg;
 }
@@ -426,6 +452,15 @@ inline std::string compute_amp_details(
 // Matrix creation helpers (format-agnostic)
 // ============================================================
 
+template <typename ValueType, typename IndexType>
+std::unique_ptr<gko::LinOp> create_local_csr_matrix(
+    std::shared_ptr<const gko::Executor> exec, const Config& cfg)
+{
+    return gko::matrix::Csr<ValueType, IndexType>::create(
+        exec,
+        parse_csr_strategy<ValueType, IndexType>(cfg.base_csr_strategy_str));
+}
+
 /**
  * Create a local sparse matrix of the configured base format.
  */
@@ -434,9 +469,12 @@ std::unique_ptr<gko::LinOp> create_local_matrix(
     std::shared_ptr<const gko::Executor> exec, const Config& cfg)
 {
     if (cfg.amp_base_format == "csr") {
-        return gko::matrix::Csr<ValueType, IndexType>::create(exec);
+        return create_local_csr_matrix<ValueType, IndexType>(exec, cfg);
+    } else if (cfg.amp_base_format == "ell") {
+        return gko::matrix::Ell<ValueType, IndexType>::create(exec);
+    } else {
+        throw std::runtime_error("Unsupported base matrix type!");
     }
-    return gko::matrix::Ell<ValueType, IndexType>::create(exec);
 }
 
 /**
@@ -453,11 +491,15 @@ create_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
         gko::experimental::distributed::Matrix<ValueType, LocalIndexType,
                                                GlobalIndexType>;
     if (cfg.amp_base_format == "csr") {
+        auto templ =
+            create_local_csr_matrix<ValueType, LocalIndexType>(exec, cfg);
+        return DistMtx::create(exec, comm, templ.get());
+    } else if (cfg.amp_base_format == "ell") {
         return DistMtx::create(exec, comm,
-                               gko::with_matrix_type<gko::matrix::Csr>());
+                               gko::with_matrix_type<gko::matrix::Ell>());
+    } else {
+        throw std::runtime_error("Unsupported base matrix type!");
     }
-    return DistMtx::create(exec, comm,
-                           gko::with_matrix_type<gko::matrix::Ell>());
 }
 
 /**
