@@ -447,6 +447,7 @@ TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
     using T = typename TestFixture::value_type;
     using real_T = gko::remove_complex<typename TestFixture::value_type>;
     static_assert(std::is_same<real_T, double>::value, "double only!");
+    using itype = typename TestFixture::index_type;
 #if GINKGO_HAVE_AMP_HALF
     static_assert(
         std::tuple_size<gko::amp::precision_array<int, T>>::value == 3,
@@ -456,7 +457,7 @@ TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
         std::tuple_size<gko::amp::precision_array<int, T>>::value == 2,
         "should be 2 available precisions");
 #endif
-    gko::amp::precision_array<int, T> max_nnz;
+    gko::amp::precision_array<itype, T> max_nnz;
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
 
@@ -1957,6 +1958,42 @@ TYPED_TEST(AMPFloat, ExtractDiagonalSumsOverBins)
 }
 
 
+TEST(ReduceBinsMax, ReducesThreeIntArraysCorrectly)
+{
+    std::shared_ptr<const gko::ReferenceExecutor> exec =
+        gko::ReferenceExecutor::create();
+    constexpr int q = 3;
+    const gko::size_type sz = 5;
+    std::array<gko::array<int>, q> data;
+    for (int i = 0; i < q; i++) {
+        data[i].set_executor(exec);
+        data[i].resize_and_reset(sz);
+    }
+    data[0].get_data()[0] = -1;
+    data[0].get_data()[1] = 1;
+    data[0].get_data()[2] = 5;
+    data[0].get_data()[3] = -6;
+    data[0].get_data()[4] = 3;
+    for (int i = 1; i < q; i++) {
+        for (int j = 0; j < sz; j++) {
+            data[i].get_data()[j] = 300;
+        }
+    }
+    data[1].get_data()[2] = 200;
+    data[2].get_data()[3] = -301;
+    data[2].get_data()[4] = 301;
+    gko::amp::precision_array<int, double> maxes;
+    auto dumtx = gko::matrix::Csr<std::complex<double>, int>::create(exec);
+
+    gko::kernels::reference::amp::reduce_bins_max(exec, dumtx.get(), data,
+                                                  maxes);
+
+    EXPECT_EQ(maxes[0], 5);
+    EXPECT_EQ(maxes[1], 300);
+    EXPECT_EQ(maxes[2], 301);
+}
+
+
 #if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
 
 template <typename ValueType>
@@ -2046,6 +2083,9 @@ TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizes)
     EXPECT_EQ(rnv[1][3], 1);
     EXPECT_EQ(rnv[1][4], 1);
 #endif
+    for (int i = 0; i < gko::amp::narrow_types<double>::num_types; i++) {
+        EXPECT_EQ(rnv[i][5], 0);
+    }
 }
 
 
@@ -2207,6 +2247,31 @@ TYPED_TEST(AMPDoubleCsr, GenerateCsrScattersBinsCorrectly)
         }
 #endif
     });
+}
+
+
+TYPED_TEST(AMPDoubleCsr, ComputesCorrectMaxNNZsPerRow)
+{
+    using T = typename TestFixture::value_type;
+    using real_T = typename TestFixture::real_T;
+    using Mtx = typename TestFixture::Mtx;
+    using Vec = typename TestFixture::Vec;
+
+    auto amp_mtx = Mtx::build()
+                       .with_tolerance(this->tol)
+                       .on(this->exec)
+                       ->generate(this->csr1);
+
+    EXPECT_EQ(amp_mtx->get_max_nnz_per_row_for_bin(0), 2);
+#if GKO_AMP_HALF_IS_FP16
+    EXPECT_EQ(amp_mtx->get_max_nnz_per_row_for_bin(1), 2);
+    EXPECT_EQ(amp_mtx->get_max_nnz_per_row_for_bin(2), 0);
+#elif GKO_AMP_HALF_IS_BFLOAT16
+    EXPECT_EQ(amp_mtx->get_max_nnz_per_row_for_bin(1), 1);
+    EXPECT_EQ(amp_mtx->get_max_nnz_per_row_for_bin(2), 1);
+#else
+    EXPECT_EQ(amp_mtx->get_max_nnz_per_row_for_bin(1), 2);
+#endif
 }
 
 

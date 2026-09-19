@@ -60,7 +60,7 @@ template <typename InputValueType, typename MatrixValueType,
 void spmv_csr(std::shared_ptr<const DpcppExecutor> exec,
               const matrix::AMP<MatrixValueType, IndexType>* a,
               const matrix::Dense<InputValueType>* b,
-              matrix::Dense<OutputValueType>* c)
+              matrix::Dense<OutputValueType>* c, int subwarp_size)
 {
     GKO_NOT_IMPLEMENTED;
 }
@@ -76,7 +76,7 @@ void advanced_spmv_csr(std::shared_ptr<const DpcppExecutor> exec,
                        const matrix::AMP<MatrixValueType, IndexType>* a,
                        const matrix::Dense<InputValueType>* b,
                        const matrix::Dense<OutputValueType>* beta,
-                       matrix::Dense<OutputValueType>* c)
+                       matrix::Dense<OutputValueType>* c, int subwarp_size)
 {
     GKO_NOT_IMPLEMENTED;
 }
@@ -89,13 +89,24 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DpcppExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 {
     GKO_NOT_IMPLEMENTED;
 }
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
+
+
+template <typename IndexType>
+void reduce_bins_max(std::shared_ptr<const DpcppExecutor> exec, const int q,
+                     const array<IndexType>* const bin_arrays,
+                     IndexType* const results)
+{
+    GKO_NOT_IMPLEMENTED;
+}
+
+GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 }  // namespace amp

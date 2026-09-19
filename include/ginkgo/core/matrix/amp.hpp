@@ -15,7 +15,6 @@
 #include <ginkgo/core/base/polymorphic_object.hpp>
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
-#include <ginkgo/core/matrix/ell.hpp>
 
 
 namespace gko {
@@ -25,12 +24,39 @@ namespace matrix {
 template <typename ValueType>
 class Dense;
 
+template <typename ValueType, typename IndexType>
+class Ell;
+
+
+/**
+ * SpMV strategy applied to each CSR precision bucket of an adaptive mixed
+ * precision (AMP) matrix.
+ *
+ * Defined outside AMP, so that it is the same type across every
+ * AMP<ValueType, IndexType> instantiation: helpers that build a bucket's
+ * strategy operate on matrix::Csr<bucket_value_type, IndexType>, a different
+ * specialization than AMP's own ValueType, and need to accept this type
+ * regardless of which AMP instantiation it came from.
+ *
+ * `sparselib` (cu/hipSPARSE) and, on some executors, `merge_path` may not
+ * support every precision bucket (e.g. half or bfloat16); requesting them
+ * is a user opt-in and may raise an error at apply time for those bins.
+ */
+enum class amp_csr_strategy_type {
+    classical,
+    merge_path,
+    load_balance,
+    sparselib,
+    automatical
+};
+
 
 /**
  * AMP is an adaptive mixed precision matrix class.
  *
- * It takes any sparse matrix and sorts the nonzeros into 'bins' of different
- * precisions, where each bin is a sparse matrix with a specific value type.
+ * It takes any sparse matrix and sorts the nonzeros into 'bins' or 'buckets'
+ * of different precisions, where each bin is a sparse matrix with a
+ * specific value type.
  *
  * @tparam ValueType  Highest precision of matrix elements
  * @tparam IndexType  Integer type of matrix indexes
@@ -106,23 +132,44 @@ public:
         return i >= 0 && i < num_precisions ? mat_bins_[i].get() : nullptr;
     }
 
+    /**
+     * Maximum number of nonzero entries per row for a precision bin.
+     *
+     * @param i  bin index.
+     * @return  Max. number of nonzeros per row in bin i.
+     */
+    IndexType get_max_nnz_per_row_for_bin(const int i) const
+    {
+        return i >= 0 && i < num_precisions ? max_nnz_per_row_[i] : 0;
+    }
+
     /// Meaning of the tolerance - componentwise or normwise backward error.
     enum class criterion_type { normwise, componentwise };
 
     /// Algorithm used to perform the AMP SpMV.
     enum class strategy_type {
         /**
-         * A single kernel reads all precision buckets and accumulates each
-         * row in ValueType.
+         * A single kernel reads all precision buckets and
+         * accumulates each row in ValueType.
          */
         monolithic_classical,
         /**
-         * One independent SpMV per precision bucket, accumulated into the
-         * output vector. Each bucket is free to use its own (Ell/Csr)
-         * kernel.
+         * One independent SpMV per precision bucket,
+         * accumulated into the output vector. Each bucket
+         * is free to use its own (Ell/Csr) kernel.
          */
         independent_buckets
     };
+
+    /**
+     * SpMV strategy applied to each CSR precision bucket.
+     *
+     * See @ref amp_csr_strategy_type. Only has an effect for CSR bins
+     * (see the `amp_base_format` used at generation) under
+     * strategy_type::independent_buckets.
+     * The monolithic kernel never consults the buckets' strategies.
+     */
+    using csr_strategy_type = amp_csr_strategy_type;
 
     GKO_CREATE_FACTORY_PARAMETERS(parameters, Factory)
     {
@@ -143,6 +190,29 @@ public:
          */
         strategy_type GKO_FACTORY_PARAMETER_SCALAR(
             strategy, strategy_type::monolithic_classical);
+
+        /**
+         * Subwarp size used by the CSR kernels.
+         *
+         * Must be a power of two no larger than
+         * the executor's warp size; other values are rounded
+         * down to the nearest valid size, with a warning printed once. 0
+         * means "automatic": derive it from the maximum number of nonzeros
+         * per row over all precision bins (the default behaviour).
+         * Ignored for ELL bins and on non-CUDA/HIP executors.
+         *
+         * This value is normalized at generation time, so get_parameters()
+         * reports the subwarp size actually in use, which may differ from
+         * the one requested.
+         */
+        int GKO_FACTORY_PARAMETER_SCALAR(subwarp_size, 0);
+
+        /**
+         * Strategy to use for each CSR precision bucket's own SpMV.
+         * See @ref csr_strategy_type.
+         */
+        csr_strategy_type GKO_FACTORY_PARAMETER_SCALAR(
+            csr_strategy, csr_strategy_type::automatical);
     };
     GKO_ENABLE_LIN_OP_FACTORY(AMP, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);
@@ -182,11 +252,18 @@ protected:
     explicit AMP(const Factory* factory, std::shared_ptr<const LinOp> lin_op)
         : EnableLinOp<AMP>(factory->get_executor(), lin_op->get_size()),
           parameters_{factory->get_parameters()},
-          row_sizes_(create_row_sizes()),
           mat_bins_(generate_amp(lin_op.get()))
     {
+        normalize_subwarp_size();
         init_one();
     }
+
+    /**
+     * Rounds parameters_.subwarp_size down to the nearest power of two no
+     * larger than the executor's warp size (0 stays "automatic"), warning
+     * once if the requested value had to change. Defined in amp.cpp.
+     */
+    void normalize_subwarp_size();
 
     void apply_impl(const LinOp* b, LinOp* x) const override;
 
@@ -200,10 +277,12 @@ protected:
     std::array<std::unique_ptr<const LinOp>, num_precisions> generate_amp(
         const LinOp* matrix);
 
-private:
-    std::array<gko::array<IndexType>, num_precisions> row_sizes_;
+protected:
+    /// Max. number of nonzeros per row for each precision bin.
+    std::array<IndexType, num_precisions> max_nnz_per_row_{};
 
-    std::array<gko::array<IndexType>, num_precisions> create_row_sizes() const;
+    /// Array of bins of the different precisions.
+    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
 
     /**
      * Sets #one_ to a scalar 1.0 on the current executor. Used as alpha/beta
@@ -211,15 +290,18 @@ private:
      */
     void init_one();
 
-protected:
-    /* Array of bins of the different precisions.
-     */
-    std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;
-
     /// Scalar one, used as alpha/beta when accumulating buckets in the
-    /// `independent_buckets` SpMV strategy. Type-erased as LinOp since Dense
-    /// is only forward-declared in this header.
+    /// `independent_buckets` SpMV strategy.
     std::shared_ptr<const LinOp> one_;
+
+private:
+    /// CSR-bin generation
+    gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+    generate_amp_impl(const matrix::Csr<ValueType, IndexType>* mtx);
+
+    /// ELL-bin generation
+    gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+    generate_amp_impl(const matrix::Ell<ValueType, IndexType>* mtx);
 };
 
 

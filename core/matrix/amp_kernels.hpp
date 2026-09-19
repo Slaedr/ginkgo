@@ -32,7 +32,7 @@ namespace kernels {
     void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,           \
                   const matrix::AMP<MatrixValueType, IndexType>* a,      \
                   const matrix::Dense<InputValueType>* b,                \
-                  matrix::Dense<OutputValueType>* c)
+                  matrix::Dense<OutputValueType>* c, int subwarp_size)
 
 #define GKO_DECLARE_AMP_ADVANCED_SPMV_ELL_KERNEL(                            \
     InputValueType, MatrixValueType, OutputValueType, IndexType)             \
@@ -50,13 +50,14 @@ namespace kernels {
                            const matrix::AMP<MatrixValueType, IndexType>* a, \
                            const matrix::Dense<InputValueType>* b,           \
                            const matrix::Dense<OutputValueType>* beta,       \
-                           matrix::Dense<OutputValueType>* c)
+                           matrix::Dense<OutputValueType>* c,                \
+                           int subwarp_size)
 
 #define GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL(ValueType, IndexType) \
     void generate_cwise_ell_max_nnz_per_row(                                  \
         std::shared_ptr<const DefaultExecutor> exec,                          \
         const matrix::Ell<ValueType, IndexType>* a, const float tolerance,    \
-        gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+        gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 
 #define GKO_DECLARE_AMP_GENERATE_ELL_SCATTER_BINS_KERNEL(ValueType, IndexType) \
     void generate_ell_scatter_bins(                                            \
@@ -76,6 +77,14 @@ namespace kernels {
         std::shared_ptr<const DefaultExecutor> exec,                       \
         const matrix::Csr<ValueType, IndexType>* a, const float tolerance, \
         gko::amp::precision_array<LinOp*, ValueType>& amat)
+
+#define GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(ValueType, IndexType)       \
+    void reduce_bins_max(                                                  \
+        std::shared_ptr<const DefaultExecutor> exec,                       \
+        const matrix::Csr<ValueType, IndexType>* a,                        \
+        const gko::amp::precision_array<gko::array<IndexType>, ValueType>& \
+            bin_arrays,                                                    \
+        gko::amp::precision_array<IndexType, ValueType>& results)
 
 #define GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType)      \
     void fill_in_dense(std::shared_ptr<const DefaultExecutor> exec,     \
@@ -113,6 +122,8 @@ namespace kernels {
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL(ValueType,         \
                                                            IndexType);        \
+    template <typename ValueType, typename IndexType>                         \
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(ValueType, IndexType);             \
     template <typename ValueType, typename IndexType>                         \
     GKO_DECLARE_AMP_FILL_IN_DENSE_KERNEL(ValueType, IndexType);               \
     template <typename ValueType, typename IndexType>                         \

@@ -113,8 +113,10 @@ template <typename InputValueType, typename MatrixValueType,
 void spmv_csr(std::shared_ptr<const OmpExecutor> exec,
               const matrix::AMP<MatrixValueType, IndexType>* a,
               const matrix::Dense<InputValueType>* b,
-              matrix::Dense<OutputValueType>* c)
+              matrix::Dense<OutputValueType>* c, int subwarp_size)
 {
+    // subwarp_size has no meaning on OMP; the parameter is only forwarded
+    // for interface parity with the CUDA/HIP kernel.
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
     auto csr0 = dynamic_cast<const matrix::Csr<MatrixValueType, IndexType>*>(
@@ -278,8 +280,10 @@ void advanced_spmv_csr(std::shared_ptr<const OmpExecutor> exec,
                        const matrix::AMP<MatrixValueType, IndexType>* a,
                        const matrix::Dense<InputValueType>* b,
                        const matrix::Dense<OutputValueType>* beta,
-                       matrix::Dense<OutputValueType>* c)
+                       matrix::Dense<OutputValueType>* c, int subwarp_size)
 {
+    // subwarp_size has no meaning on OMP; the parameter is only forwarded
+    // for interface parity with the CUDA/HIP kernel.
     constexpr int q = matrix::AMP<MatrixValueType, IndexType>::num_precisions;
     static_assert(q > 0, "Need at least 1 bin!");
     auto csr0 = dynamic_cast<const matrix::Csr<MatrixValueType, IndexType>*>(
@@ -359,7 +363,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const OmpExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -393,7 +397,7 @@ void generate_cwise_ell_max_nnz_per_row(
             get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
 
         // Get max nnz per row for each precision bin matrix
-        std::array<int, q> row_nnz = {};
+        std::array<IndexType, q> row_nnz = {};
         for (int j = 0; j < omax_nnz; j++) {
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
@@ -411,6 +415,34 @@ void generate_cwise_ell_max_nnz_per_row(
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
+
+
+template <typename ValueType, typename IndexType>
+void reduce_bins_max(
+    std::shared_ptr<const OmpExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>*,
+    const gko::amp::precision_array<array<IndexType>, ValueType>& bin_arrays,
+    gko::amp::precision_array<IndexType, ValueType>& results)
+{
+    constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
+    for (int k = 0; k < q; k++) {
+        results[k] = zero<IndexType>();
+        if (k > 0) {
+            GKO_ASSERT_EQ(bin_arrays[0].get_size(), bin_arrays[k].get_size());
+        }
+    }
+    for (int k = 0; k < q; k++) {
+        IndexType result = 0;
+#pragma omp parallel for default(shared) reduction(max : result)
+        for (int i = 0; i < static_cast<int>(bin_arrays[0].get_size()); i++) {
+            result = std::max(result, bin_arrays[k].get_const_data()[i]);
+        }
+        results[k] = result;
+    }
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 }  // namespace amp
