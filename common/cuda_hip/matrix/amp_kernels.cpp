@@ -452,7 +452,8 @@ void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
     // requested (already-validated, power-of-two) subwarp_size is used
     // directly.
     const int sel_row_len =
-        subwarp_size > 0 ? subwarp_size : std::max(max_nnz_per_row(a), 1);
+        subwarp_size > 0 ? subwarp_size
+                         : std::max(max_nnz_per_row(a), one<IndexType>());
     select_spmv_csr_classical(
         classical_kernels(),
         [&sel_row_len](int compiled_row_len) {
@@ -542,7 +543,8 @@ void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
                        matrix::Dense<OutputValueType>* c, int subwarp_size)
 {
     const int sel_row_len =
-        subwarp_size > 0 ? subwarp_size : std::max(max_nnz_per_row(a), 1);
+        subwarp_size > 0 ? subwarp_size
+                         : std::max(max_nnz_per_row(a), one<IndexType>());
     select_adv_spmv_csr_classical(
         classical_kernels(),
         [&sel_row_len](int compiled_row_len) {
