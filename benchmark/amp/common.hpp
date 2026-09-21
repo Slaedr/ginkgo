@@ -81,27 +81,6 @@ inline amp_csr_strategy_t parse_amp_csr_strategy(const std::string& s)
     throw std::runtime_error("Invalid amp_csr_strategy " + s);
 }
 
-template <typename ValueType, typename IndexType>
-inline std::shared_ptr<
-    typename gko::matrix::Csr<ValueType, IndexType>::strategy_type>
-parse_csr_strategy(const std::string& s)
-{
-    using Csr = gko::matrix::Csr<ValueType, IndexType>;
-    if (s == "classical") {
-        return std::make_shared<typename Csr::classical>();
-    } else if (s == "load_balance") {
-        return std::make_shared<typename Csr::load_balance>();
-    } else if (s == "sparselib") {
-        return std::make_shared<typename Csr::sparselib>();
-    } else if (s == "merge_path") {
-        return std::make_shared<typename Csr::merge_path>();
-    } else if (s == "automatical") {
-        return std::make_shared<typename Csr::automatical>();
-    } else {
-        return nullptr;
-    }
-}
-
 // ============================================================
 // Configuration
 // ============================================================
@@ -437,7 +416,9 @@ inline std::string compute_amp_details(
         } else if (cfg.amp_base_format == "csr") {
             const auto* csrmat = static_cast<const Csr*>(bin);
             const auto nnz = csrmat->get_num_stored_elements();
-            sstream << "     Bin " << k << ": nnz = " << nnz << "\n";
+            sstream << "     Bin " << k << ": nnz = " << nnz
+                    << ", max_nnz_per_row = "
+                    << mtx->get_max_nnz_per_row_for_bin(k) << "\n";
             amps.push_back({{"bin", k}, {"nnz", nnz}});
         }
     }
@@ -453,12 +434,58 @@ inline std::string compute_amp_details(
 // ============================================================
 
 template <typename ValueType, typename IndexType>
+inline std::shared_ptr<
+    typename gko::matrix::Csr<ValueType, IndexType>::strategy_type>
+create_csr_strategy(const Config& cfg,
+                    std::shared_ptr<const gko::Executor> exec)
+{
+    using Csr = gko::matrix::Csr<ValueType, IndexType>;
+    auto s = cfg.base_csr_strategy_str;
+    int nwarps{}, warp_size{};
+    bool is_cuda = false;
+    if (auto de = std::dynamic_pointer_cast<const gko::CudaExecutor>(exec)) {
+        if (s == "load_balance") {
+            return std::make_shared<typename Csr::load_balance>(de);
+        } else if (s == "automatical") {
+            return std::make_shared<typename Csr::automatical>(de);
+        }
+    } else if (auto de =
+                   std::dynamic_pointer_cast<const gko::HipExecutor>(exec)) {
+        if (s == "load_balance") {
+            return std::make_shared<typename Csr::load_balance>(de);
+        } else if (s == "automatical") {
+            return std::make_shared<typename Csr::automatical>(de);
+        }
+    } else if (auto de =
+                   std::dynamic_pointer_cast<const gko::DpcppExecutor>(exec)) {
+        if (s == "load_balance") {
+            return std::make_shared<typename Csr::load_balance>(de);
+        } else if (s == "automatical") {
+            return std::make_shared<typename Csr::automatical>(de);
+        }
+    }
+
+    if (s == "classical") {
+        return std::make_shared<typename Csr::classical>();
+    } else if (s == "load_balance") {
+        return std::make_shared<typename Csr::load_balance>(nwarps);
+    } else if (s == "sparselib") {
+        return std::make_shared<typename Csr::sparselib>();
+    } else if (s == "merge_path") {
+        return std::make_shared<typename Csr::merge_path>();
+    } else if (s == "automatical") {
+        return std::make_shared<typename Csr::automatical>(nwarps);
+    } else {
+        throw gko::Error(__FILE__, __LINE__, "Invalid CSR strategy!");
+    }
+}
+
+template <typename ValueType, typename IndexType>
 std::unique_ptr<gko::LinOp> create_local_csr_matrix(
     std::shared_ptr<const gko::Executor> exec, const Config& cfg)
 {
     return gko::matrix::Csr<ValueType, IndexType>::create(
-        exec,
-        parse_csr_strategy<ValueType, IndexType>(cfg.base_csr_strategy_str));
+        exec, create_csr_strategy<ValueType, IndexType>(cfg, exec));
 }
 
 /**
