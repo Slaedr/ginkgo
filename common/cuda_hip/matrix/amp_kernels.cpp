@@ -425,15 +425,16 @@ GKO_ENABLE_IMPLEMENTATION_SELECTION(select_spmv_csr_classical,
                                     spmv_csr_classical);
 
 template <typename ValueType, typename IndexType>
-inline IndexType max_nnz_per_row(
+inline IndexType eff_max_row_len(
     const matrix::AMP<ValueType, IndexType>* const a)
 {
     constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
     auto maxnr = zero<IndexType>();
     for (int k = 0; k < q; k++) {
         auto binmax = a->get_max_nnz_per_row_for_bin(k);
-        maxnr = (maxnr >= binmax) ? maxnr : binmax;
+        maxnr += binmax;
     }
+    maxnr /= q;
     return maxnr;
 }
 
@@ -453,7 +454,7 @@ void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
     // directly.
     const int sel_row_len =
         subwarp_size > 0 ? subwarp_size
-                         : std::max(max_nnz_per_row(a), one<IndexType>());
+                         : std::max(eff_max_row_len(a), one<IndexType>());
     select_spmv_csr_classical(
         classical_kernels(),
         [&sel_row_len](int compiled_row_len) {
@@ -544,7 +545,7 @@ void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
 {
     const int sel_row_len =
         subwarp_size > 0 ? subwarp_size
-                         : std::max(max_nnz_per_row(a), one<IndexType>());
+                         : std::max(eff_max_row_len(a), one<IndexType>());
     select_adv_spmv_csr_classical(
         classical_kernels(),
         [&sel_row_len](int compiled_row_len) {
