@@ -25,9 +25,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include <nlohmann/json.hpp>
+
+#include <ginkgo/ginkgo.hpp>
 
 using json = nlohmann::json;
 
@@ -43,10 +44,41 @@ enum class mat_offdiag_t { hpcg, random_diag_dominant, random_general };
 // factory enum instead of a decoupled local one.
 using amp_strategy_t = gko::matrix::AMP<double, int>::strategy_type;
 
+// amp_csr_strategy_type is defined outside AMP (see amp.hpp) so it is the
+// same type across every AMP<ValueType, IndexType> instantiation.
+using amp_csr_strategy_t = gko::matrix::amp_csr_strategy_type;
+
 inline std::string to_string(amp_strategy_t s)
 {
     return s == amp_strategy_t::independent_buckets ? "independent_buckets"
                                                     : "monolithic_classical";
+}
+
+inline std::string to_string(amp_csr_strategy_t s)
+{
+    switch (s) {
+    case amp_csr_strategy_t::classical:
+        return "classical";
+    case amp_csr_strategy_t::merge_path:
+        return "merge_path";
+    case amp_csr_strategy_t::load_balance:
+        return "load_balance";
+    case amp_csr_strategy_t::sparselib:
+        return "sparselib";
+    case amp_csr_strategy_t::automatical:
+    default:
+        return "automatical";
+    }
+}
+
+inline amp_csr_strategy_t parse_amp_csr_strategy(const std::string& s)
+{
+    if (s == "classical") return amp_csr_strategy_t::classical;
+    if (s == "merge_path") return amp_csr_strategy_t::merge_path;
+    if (s == "load_balance") return amp_csr_strategy_t::load_balance;
+    if (s == "sparselib") return amp_csr_strategy_t::sparselib;
+    if (s == "automatical") return amp_csr_strategy_t::automatical;
+    throw std::runtime_error("Invalid amp_csr_strategy " + s);
 }
 
 // ============================================================
@@ -69,19 +101,47 @@ struct Config {
     std::string output_file_prefix = "";
     std::string amp_base_format = "ell";
     amp_strategy_t amp_spmv_strategy = amp_strategy_t::monolithic_classical;
+    // 0 means "automatic" (derive the subwarp size from the maximum number
+    // of nonzeros per row over all precision bins).
+    int amp_subwarp_size = 0;
+    amp_csr_strategy_t amp_csr_strategy = amp_csr_strategy_t::automatical;
+    std::string base_csr_strategy_str = "automatical";
 };
 
 /**
- * Short filename suffix distinguishing a non-default SpMV strategy, so that
- * running the same benchmark with a different amp_spmv_strategy does not
- * silently overwrite the previous run's
- * <bench>_<format>_<executor>_results.json. Empty for the default strategy, so
+ * Short filename suffix distinguishing a non-default SpMV strategy, subwarp
+ * size, or CSR bucket strategy, so that running the same benchmark with
+ * different amp_spmv_strategy / amp_subwarp_size / amp_csr_strategy values
+ * does not silently overwrite the previous run's
+ * <bench>_<format>_<executor>_results.json. Empty for all-default values, so
  * existing filenames are unaffected.
  */
 inline std::string strategy_suffix(const Config& cfg)
 {
-    return cfg.amp_spmv_strategy == amp_strategy_t::independent_buckets ? "_ib"
-                                                                        : "";
+    std::string suffix =
+        cfg.amp_spmv_strategy == amp_strategy_t::independent_buckets ? "_ib"
+                                                                     : "";
+    if (cfg.amp_subwarp_size != 0) {
+        suffix += "_sw" + std::to_string(cfg.amp_subwarp_size);
+    }
+    switch (cfg.amp_csr_strategy) {
+    case amp_csr_strategy_t::classical:
+        suffix += "_cl";
+        break;
+    case amp_csr_strategy_t::merge_path:
+        suffix += "_mp";
+        break;
+    case amp_csr_strategy_t::load_balance:
+        suffix += "_lb";
+        break;
+    case amp_csr_strategy_t::sparselib:
+        suffix += "_sl";
+        break;
+    case amp_csr_strategy_t::automatical:
+    default:
+        break;
+    }
+    return suffix;
 }
 
 inline Config load_config(const std::string& path)
@@ -149,6 +209,21 @@ inline Config load_config(const std::string& path)
             std::cerr << "Invalid amp_spmv_strategy " << s << std::endl;
             throw std::runtime_error("Invalid amp_spmv_strategy " + s);
         }
+    }
+    if (j.contains("amp_subwarp_size")) {
+        cfg.amp_subwarp_size = j["amp_subwarp_size"];
+    }
+    if (j.contains("amp_csr_strategy")) {
+        std::string s = j["amp_csr_strategy"];
+        try {
+            cfg.amp_csr_strategy = parse_amp_csr_strategy(s);
+        } catch (const std::runtime_error&) {
+            std::cerr << "Invalid amp_csr_strategy " << s << std::endl;
+            throw;
+        }
+    }
+    if (j.contains("base_csr_strategy")) {
+        cfg.base_csr_strategy_str = j["base_csr_strategy"];
     }
     return cfg;
 }
@@ -341,7 +416,9 @@ inline std::string compute_amp_details(
         } else if (cfg.amp_base_format == "csr") {
             const auto* csrmat = static_cast<const Csr*>(bin);
             const auto nnz = csrmat->get_num_stored_elements();
-            sstream << "     Bin " << k << ": nnz = " << nnz << "\n";
+            sstream << "     Bin " << k << ": nnz = " << nnz
+                    << ", max_nnz_per_row = "
+                    << mtx->get_max_nnz_per_row_for_bin(k) << "\n";
             amps.push_back({{"bin", k}, {"nnz", nnz}});
         }
     }
@@ -356,6 +433,61 @@ inline std::string compute_amp_details(
 // Matrix creation helpers (format-agnostic)
 // ============================================================
 
+template <typename ValueType, typename IndexType>
+inline std::shared_ptr<
+    typename gko::matrix::Csr<ValueType, IndexType>::strategy_type>
+create_csr_strategy(const Config& cfg,
+                    std::shared_ptr<const gko::Executor> exec)
+{
+    using Csr = gko::matrix::Csr<ValueType, IndexType>;
+    auto s = cfg.base_csr_strategy_str;
+    int nwarps{}, warp_size{};
+    bool is_cuda = false;
+    if (auto de = std::dynamic_pointer_cast<const gko::CudaExecutor>(exec)) {
+        if (s == "load_balance") {
+            return std::make_shared<typename Csr::load_balance>(de);
+        } else if (s == "automatical") {
+            return std::make_shared<typename Csr::automatical>(de);
+        }
+    } else if (auto de =
+                   std::dynamic_pointer_cast<const gko::HipExecutor>(exec)) {
+        if (s == "load_balance") {
+            return std::make_shared<typename Csr::load_balance>(de);
+        } else if (s == "automatical") {
+            return std::make_shared<typename Csr::automatical>(de);
+        }
+    } else if (auto de =
+                   std::dynamic_pointer_cast<const gko::DpcppExecutor>(exec)) {
+        if (s == "load_balance") {
+            return std::make_shared<typename Csr::load_balance>(de);
+        } else if (s == "automatical") {
+            return std::make_shared<typename Csr::automatical>(de);
+        }
+    }
+
+    if (s == "classical") {
+        return std::make_shared<typename Csr::classical>();
+    } else if (s == "load_balance") {
+        return std::make_shared<typename Csr::load_balance>(nwarps);
+    } else if (s == "sparselib") {
+        return std::make_shared<typename Csr::sparselib>();
+    } else if (s == "merge_path") {
+        return std::make_shared<typename Csr::merge_path>();
+    } else if (s == "automatical") {
+        return std::make_shared<typename Csr::automatical>(nwarps);
+    } else {
+        throw gko::Error(__FILE__, __LINE__, "Invalid CSR strategy!");
+    }
+}
+
+template <typename ValueType, typename IndexType>
+std::unique_ptr<gko::LinOp> create_local_csr_matrix(
+    std::shared_ptr<const gko::Executor> exec, const Config& cfg)
+{
+    return gko::matrix::Csr<ValueType, IndexType>::create(
+        exec, create_csr_strategy<ValueType, IndexType>(cfg, exec));
+}
+
 /**
  * Create a local sparse matrix of the configured base format.
  */
@@ -364,9 +496,12 @@ std::unique_ptr<gko::LinOp> create_local_matrix(
     std::shared_ptr<const gko::Executor> exec, const Config& cfg)
 {
     if (cfg.amp_base_format == "csr") {
-        return gko::matrix::Csr<ValueType, IndexType>::create(exec);
+        return create_local_csr_matrix<ValueType, IndexType>(exec, cfg);
+    } else if (cfg.amp_base_format == "ell") {
+        return gko::matrix::Ell<ValueType, IndexType>::create(exec);
+    } else {
+        throw std::runtime_error("Unsupported base matrix type!");
     }
-    return gko::matrix::Ell<ValueType, IndexType>::create(exec);
 }
 
 /**
@@ -383,11 +518,15 @@ create_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
         gko::experimental::distributed::Matrix<ValueType, LocalIndexType,
                                                GlobalIndexType>;
     if (cfg.amp_base_format == "csr") {
+        auto templ =
+            create_local_csr_matrix<ValueType, LocalIndexType>(exec, cfg);
+        return DistMtx::create(exec, comm, templ.get());
+    } else if (cfg.amp_base_format == "ell") {
         return DistMtx::create(exec, comm,
-                               gko::with_matrix_type<gko::matrix::Csr>());
+                               gko::with_matrix_type<gko::matrix::Ell>());
+    } else {
+        throw std::runtime_error("Unsupported base matrix type!");
     }
-    return DistMtx::create(exec, comm,
-                           gko::with_matrix_type<gko::matrix::Ell>());
 }
 
 /**
@@ -418,6 +557,8 @@ create_amp_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
                             .with_tolerance(cfg.amp_tolerance)
                             .with_criterion(Amp::criterion_type::componentwise)
                             .with_strategy(cfg.amp_spmv_strategy)
+                            .with_subwarp_size(cfg.amp_subwarp_size)
+                            .with_csr_strategy(cfg.amp_csr_strategy)
                             .on(exec)
                             ->generate(base_empty);
     auto csr_template = Csr::create(exec);

@@ -79,7 +79,9 @@ std::string format_description =
     "     for a like-for-like fixed-precision baseline.\n"
     "ampib: AMP with the independent_buckets SpMV strategy -- one SpMV per\n"
     "       precision bucket, accumulated into the output vector. Same\n"
-    "       storage (and --amp_* flags) as amp; differs only in the apply."
+    "       storage (and --amp_* flags) as amp; differs only in the apply.\n"
+    "       The SpMV strategy of each CSR precision bucket is controlled by\n"
+    "       --amp_csr_strategy."
 #ifdef HAS_CUDA
     "\n"
     "cusparse_coo: cuSPARSE COO SpMV, using cusparseXhybmv with \n"
@@ -146,6 +148,13 @@ DEFINE_string(amp_base_type, "ell",
 DEFINE_string(amp_tolerance_type, "componentwise",
               "Tolerance type for AMP: \"componentwise\" or \"normwise\".");
 
+DEFINE_string(amp_csr_strategy, "automatical",
+              "SpMV strategy applied to each CSR precision bucket of an AMP "
+              "matrix: \"automatical\", \"classical\", \"load_balance\" or "
+              "\"merge_path\". Only has an effect for the \"ampib\" format "
+              "with --amp_base_type=csr; the monolithic kernel used by "
+              "\"amp\" never consults the buckets' strategies.");
+
 
 namespace formats {
 
@@ -157,6 +166,54 @@ using coo = gko::matrix::Coo<etype, itype>;
 using ell = gko::matrix::Ell<etype, itype>;
 using ell_mixed = gko::matrix::Ell<gko::next_precision_base<etype>, itype>;
 using amp_type = gko::matrix::AMP<etype, itype>;
+
+
+/**
+ * Parses the SpMV strategy applied to each CSR precision bucket of an AMP
+ * matrix from a string. Supports "automatical", "classical", "load_balance"
+ * and "merge_path". "sparselib" is a valid gko::matrix::amp_csr_strategy_type
+ * enumerator but is deliberately not offered here, since it does not support
+ * every precision bucket (e.g. half or bfloat16) and would fail at apply
+ * time; unlike the CSR bucket's own value type, which is chosen internally
+ * by AMP itself, this cannot be gated in advance.
+ *
+ * @throws gko::Error if the string does not match a supported value.
+ */
+amp_type::csr_strategy_type parse_amp_csr_strategy(const std::string& s)
+{
+    if (s == "automatical") {
+        return amp_type::csr_strategy_type::automatical;
+    } else if (s == "classical") {
+        return amp_type::csr_strategy_type::classical;
+    } else if (s == "load_balance") {
+        return amp_type::csr_strategy_type::load_balance;
+    } else if (s == "merge_path") {
+        return amp_type::csr_strategy_type::merge_path;
+    } else {
+        throw gko::Error(__FILE__, __LINE__,
+                         "Invalid amp_csr_strategy '" + s +
+                             "': supported values are 'automatical', "
+                             "'classical', 'load_balance' and 'merge_path'");
+    }
+}
+
+
+std::string to_string(amp_type::csr_strategy_type s)
+{
+    switch (s) {
+    case amp_type::csr_strategy_type::classical:
+        return "classical";
+    case amp_type::csr_strategy_type::load_balance:
+        return "load_balance";
+    case amp_type::csr_strategy_type::merge_path:
+        return "merge_path";
+    case amp_type::csr_strategy_type::sparselib:
+        return "sparselib";
+    case amp_type::csr_strategy_type::automatical:
+    default:
+        return "automatical";
+    }
+}
 
 
 /**
@@ -327,6 +384,7 @@ std::unique_ptr<gko::LinOp> matrix_factory(
         return amp_type::build()
             .with_criterion(criterion)
             .with_strategy(strategy)
+            .with_csr_strategy(parse_amp_csr_strategy(FLAGS_amp_csr_strategy))
             .with_tolerance(static_cast<float>(FLAGS_amp_tolerance))
             .on(exec)
             ->generate(std::move(base_mat));
@@ -389,6 +447,8 @@ void write_amp_bin_info(const gko::LinOp* mtx, json& format_case)
         }
     }
     bins_json["base_type"] = is_csr ? "csr" : "ell";
+    bins_json["csr_strategy"] =
+        to_string(amp_mat->get_parameters().csr_strategy);
     format_case["amp_bins"] = std::move(bins_json);
 }
 

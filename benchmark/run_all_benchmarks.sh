@@ -79,6 +79,20 @@ if [ "${AMP_TOLERANCE_TYPE}" != "componentwise" ] && [ "${AMP_TOLERANCE_TYPE}" !
     exit 1
 fi
 
+if [ ! "${AMP_CSR_STRATEGY}" ]; then
+    AMP_CSR_STRATEGY="automatical"
+    print_default AMP_CSR_STRATEGY
+fi
+
+case "${AMP_CSR_STRATEGY}" in
+    automatical|classical|load_balance|merge_path) ;;
+    *)
+        echo "AMP_CSR_STRATEGY is set to the unsupported \"${AMP_CSR_STRATEGY}\"." 1>&2
+        echo "Currently supported values: \"automatical\", \"classical\", \"load_balance\" and \"merge_path\"" 1>&2
+        exit 1
+        ;;
+esac
+
 if [ ! "${AMP_TOLERANCE}" ]; then
     AMP_TOLERANCE="1e-14"
     print_default AMP_TOLERANCE
@@ -276,6 +290,7 @@ run_conversion_benchmarks() {
                 --amp_base_type="${AMP_BASE_TYPE}" \
                 --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
                 --amp_tolerance="${AMP_TOLERANCE}" \
+                --amp_csr_strategy="${AMP_CSR_STRATEGY}" \
                 <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }
@@ -297,6 +312,7 @@ run_spmv_benchmarks() {
                 --amp_base_type="${AMP_BASE_TYPE}" \
                 --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
                 --amp_tolerance="${AMP_TOLERANCE}" \
+                --amp_csr_strategy="${AMP_CSR_STRATEGY}" \
                 <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }
@@ -322,6 +338,7 @@ run_solver_benchmarks() {
                     --amp_base_type="${AMP_BASE_TYPE}" \
                     --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
                     --amp_tolerance="${AMP_TOLERANCE}" \
+                    --amp_csr_strategy="${AMP_CSR_STRATEGY}" \
                     --reorder="${SOLVERS_REORDER}" \
                     --fgs_sweeps="${SOLVERS_FGS_SWEEPS}" \
                     <"$1.imd" 2>&1 >"$1"

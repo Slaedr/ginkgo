@@ -4,6 +4,7 @@
 
 #include "core/matrix/amp_kernels.hpp"
 
+#include <algorithm>
 #include <numeric>
 #include <random>
 
@@ -89,8 +90,8 @@ TEST_F(Amp, GenerateEllRownormsStorageIsEquivalentToRef)
     const float tol = 1e-10;
     auto mtx = gen_mtx(532, 231);
     auto dmtx = gko::clone(exec, mtx);
-    gko::amp::precision_array<int, T> ref_max_nnz;
-    gko::amp::precision_array<int, T> dev_max_nnz;
+    gko::amp::precision_array<IndexType, T> ref_max_nnz;
+    gko::amp::precision_array<IndexType, T> dev_max_nnz;
 
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
         ref, mtx.get(), tol, ref_max_nnz);
@@ -112,7 +113,7 @@ TEST_F(Amp, GenerateEllScatterBinsIsEquivalentToRef)
     auto mtx = gen_mtx(532, 231);
     auto dmtx = gko::clone(exec, mtx);
     // Compute max_nnz per bin using reference kernel
-    gko::amp::precision_array<int, T> max_nnz;
+    gko::amp::precision_array<IndexType, T> max_nnz;
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
         ref, mtx.get(), tol, max_nnz);
     // Allocate bins on ref and exec with the same max_nnz
@@ -626,6 +627,29 @@ TEST_F(AmpCsr, GenerateCsrScatterBinsIsEquivalentToRef)
 }
 
 
+TEST_F(AmpCsr, MaxNNZPerRowsAreEquivalentToRef)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto csr = gen_mtx(532, 231);
+    auto d_csr = gko::clone(exec, csr);
+    auto nnz_csr = csr->get_num_stored_elements();
+
+    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
+        gko::share(std::move(csr)));
+    auto amp_d = AmpMtx::build().with_tolerance(tol).on(exec)->generate(
+        gko::share(std::move(d_csr)));
+
+    for (int k = 0; k < q; k++) {
+        EXPECT_LT(amp_ref->get_max_nnz_per_row_for_bin(k), nnz_csr);
+        EXPECT_EQ(amp_ref->get_max_nnz_per_row_for_bin(k),
+                  amp_d->get_max_nnz_per_row_for_bin(k));
+    }
+}
+
+
 TEST_F(AmpCsr, SpmvIsEquivalentToRef)
 {
     using T = value_type;
@@ -641,9 +665,9 @@ TEST_F(AmpCsr, SpmvIsEquivalentToRef)
     auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 1});
 
     gko::kernels::reference::amp::spmv_csr(ref, amp_ref.get(), b_ref.get(),
-                                           c_ref.get());
+                                           c_ref.get(), 0);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_csr(exec, amp_d.get(),
-                                                      b_d.get(), c_d.get());
+                                                      b_d.get(), c_d.get(), 0);
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -669,9 +693,10 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRef)
 
     gko::kernels::reference::amp::advanced_spmv_csr(
         ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
-        c_ref.get());
+        c_ref.get(), 0);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_csr(
-        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
+        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get(),
+        0);
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -692,9 +717,9 @@ TEST_F(AmpCsr, SpmvWithMultipleRHSIsEquivalentToRef)
     auto c_d = Vec::create(exec, gko::dim<2>{amp_d->get_size()[0], 4});
 
     gko::kernels::reference::amp::spmv_csr(ref, amp_ref.get(), b_ref.get(),
-                                           c_ref.get());
+                                           c_ref.get(), 0);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_csr(exec, amp_d.get(),
-                                                      b_d.get(), c_d.get());
+                                                      b_d.get(), c_d.get(), 0);
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -720,9 +745,10 @@ TEST_F(AmpCsr, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
 
     gko::kernels::reference::amp::advanced_spmv_csr(
         ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
-        c_ref.get());
+        c_ref.get(), 0);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_csr(
-        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
+        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get(),
+        0);
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -859,9 +885,9 @@ TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
     auto c_d = Vec::create(exec, gko::dim<2>{n, 1});
 
     gko::kernels::reference::amp::spmv_csr(ref, amp_ref.get(), b_ref.get(),
-                                           c_ref.get());
+                                           c_ref.get(), 0);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::spmv_csr(exec, amp_d.get(),
-                                                      b_d.get(), c_d.get());
+                                                      b_d.get(), c_d.get(), 0);
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
@@ -899,9 +925,39 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 
     gko::kernels::reference::amp::advanced_spmv_csr(
         ref, alpha_ref.get(), amp_ref.get(), b_ref.get(), beta_ref.get(),
-        c_ref.get());
+        c_ref.get(), 0);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::advanced_spmv_csr(
-        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get());
+        exec, alpha_d.get(), amp_d.get(), b_d.get(), beta_d.get(), c_d.get(),
+        0);
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
+}
+
+TEST_F(AmpCsr, ReducesThreeLongArraysEquivalentToRef)
+{
+    const int q = 3;
+    const int n = 61;
+    std::array<gko::array<long>, q> data, d_data;
+    for (int i = 0; i < q; i++) {
+        data[i].set_executor(ref);
+        data[i].resize_and_reset(n);
+        d_data[i].set_executor(exec);
+        d_data[i].resize_and_reset(n);
+        std::uniform_int_distribution<> dis(-100 * (i + 1), 100 * (i + 1));
+        std::generate(data[i].get_data(), data[i].get_data() + n,
+                      [&]() { return dis(rand_engine); });
+        d_data[i] = data[i];
+    }
+    gko::amp::precision_array<long, std::complex<double>> refmaxes;
+    gko::amp::precision_array<long, std::complex<double>> d_maxes;
+    auto mtx = gko::matrix::Csr<std::complex<double>, long>::create(ref);
+
+    gko::kernels::reference::amp::reduce_bins_max(ref, mtx.get(), data,
+                                                  refmaxes);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::reduce_bins_max(exec, mtx.get(),
+                                                             d_data, d_maxes);
+
+    for (int i = 0; i < q; i++) {
+        EXPECT_EQ(refmaxes[i], d_maxes[i]);
+    }
 }

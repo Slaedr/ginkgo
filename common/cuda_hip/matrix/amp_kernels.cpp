@@ -4,6 +4,9 @@
 
 #include "core/matrix/amp_kernels.hpp"
 
+#include <thrust/fill.h>
+#include <thrust/reduce.h>
+
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
@@ -18,6 +21,7 @@
 #include "common/unified/matrix/amp_algorithms.hpp"
 #include "core/base/mixed_precision_types.hpp"
 #include "core/base/utils.hpp"
+#include "core/synthesizer/implementation_selection.hpp"
 
 
 namespace gko {
@@ -36,6 +40,9 @@ constexpr uint32 num_thread_blocks_per_cu = 4;
 constexpr uint32 classical_oversubscription = 32;
 
 namespace gkerd = gko::kernels::GKO_DEVICE_NAMESPACE;
+
+using classical_kernels =
+    syn::value_list<int, config::warp_size, 32, 16, 8, 4, 2, 1>;
 
 // Tuple of device const pointers to relevant scalar types
 template <typename highest_type>
@@ -254,8 +261,8 @@ GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
 
 
 // CSR AMP SpMV kernel: one warp per row
-template <typename IValueType, typename MValueType, typename OValueType,
-          typename IndexType>
+template <size_type subwarp_size, typename IValueType, typename MValueType,
+          typename OValueType, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void csr_amp_basic_spmv(
     const size_type nrows, const uint32 nrhs,
     precision_array<const IndexType*, MValueType> bin_row_ptrs,
@@ -265,17 +272,16 @@ __global__ __launch_bounds__(default_block_size) void csr_amp_basic_spmv(
     OValueType* const __restrict__ y)
 {
     constexpr int q = narrow_types<MValueType>::num_types;
-    constexpr int warp_size = config::warp_size;
-    auto warp_tile =
-        group::tiled_partition<warp_size>(group::this_thread_block());
-    const auto warp_id = thread::get_subwarp_id_flat<warp_size>();
-    const auto num_warps = thread::get_subwarp_num_flat<warp_size>();
-    const auto lane = warp_tile.thread_rank();
+    auto subwarp_tile =
+        group::tiled_partition<subwarp_size>(group::this_thread_block());
+    const auto subwarp_id = thread::get_subwarp_id_flat<subwarp_size>();
+    const auto num_subwarps = thread::get_subwarp_num_flat<subwarp_size>();
+    const auto lane = subwarp_tile.thread_rank();
     const auto irhs = blockIdx.y;
     if (irhs >= nrhs) {
         return;
     }
-    for (auto irow = warp_id; irow < nrows; irow += num_warps) {
+    for (auto irow = subwarp_id; irow < nrows; irow += num_subwarps) {
         using highest_type =
             gko::highest_precision<IValueType, MValueType, OValueType>;
         auto sum = zero<highest_type>();
@@ -288,24 +294,24 @@ __global__ __launch_bounds__(default_block_size) void csr_amp_basic_spmv(
             const auto row_end = bin_row_ptrs[k][irow + 1];
             auto avals = std::get<k>(bin_values);
             auto acols = bin_col_idxs[k];
-            for (auto iz = row_start + lane; iz < row_end; iz += warp_size) {
+            for (auto iz = row_start + lane; iz < row_end; iz += subwarp_size) {
                 sum += static_cast<highest_type>(
                     static_cast<mult_type>(avals[iz]) *
                     static_cast<mult_type>(x[acols[iz] * x_stride + irhs]));
             }
         });
 
-        auto warp_result = reduce(
-            warp_tile, sum,
+        auto subwarp_result = reduce(
+            subwarp_tile, sum,
             [](const highest_type& a, const highest_type& b) { return a + b; });
         if (lane == 0) {
-            y[irow * y_stride + irhs] = static_cast<OValueType>(warp_result);
+            y[irow * y_stride + irhs] = static_cast<OValueType>(subwarp_result);
         }
     }
 }
 
-template <typename IValueType, typename MValueType, typename OValueType,
-          typename IndexType>
+template <size_type subwarp_size, typename IValueType, typename MValueType,
+          typename OValueType, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void csr_amp_adv_spmv(
     const size_type nrows, const uint32 nrhs,
     const MValueType* const __restrict__ alpha,
@@ -317,17 +323,16 @@ __global__ __launch_bounds__(default_block_size) void csr_amp_adv_spmv(
     OValueType* const __restrict__ y)
 {
     constexpr int q = narrow_types<MValueType>::num_types;
-    constexpr int warp_size = config::warp_size;
-    auto warp_tile =
-        group::tiled_partition<warp_size>(group::this_thread_block());
-    const auto warp_id = thread::get_subwarp_id_flat<warp_size>();
-    const auto num_warps = thread::get_subwarp_num_flat<warp_size>();
-    const auto lane = warp_tile.thread_rank();
+    auto subwarp_tile =
+        group::tiled_partition<subwarp_size>(group::this_thread_block());
+    const auto subwarp_id = thread::get_subwarp_id_flat<subwarp_size>();
+    const auto num_subwarps = thread::get_subwarp_num_flat<subwarp_size>();
+    const auto lane = subwarp_tile.thread_rank();
     const auto irhs = blockIdx.y;
     if (irhs >= nrhs) {
         return;
     }
-    for (auto irow = warp_id; irow < nrows; irow += num_warps) {
+    for (auto irow = subwarp_id; irow < nrows; irow += num_subwarps) {
         using highest_type =
             gko::highest_precision<IValueType, MValueType, OValueType>;
         auto sum = zero<highest_type>();
@@ -341,30 +346,33 @@ __global__ __launch_bounds__(default_block_size) void csr_amp_adv_spmv(
             const auto row_end = bin_row_ptrs[k][irow + 1];
             auto avals = std::get<k>(bin_values);
             auto acols = bin_col_idxs[k];
-            for (auto iz = row_start + lane; iz < row_end; iz += warp_size) {
+            for (auto iz = row_start + lane; iz < row_end; iz += subwarp_size) {
                 sum += static_cast<highest_type>(
                     static_cast<mult_type>(avals[iz]) *
                     static_cast<mult_type>(x[acols[iz] * x_stride + irhs]));
             }
         });
 
-        auto warp_result = reduce(
-            warp_tile, sum,
+        auto subwarp_result = reduce(
+            subwarp_tile, sum,
             [](const highest_type& a, const highest_type& b) { return a + b; });
         if (lane == 0) {
             y[irow * y_stride + irhs] =
                 beta[0] * y[irow * y_stride + irhs] +
-                static_cast<OValueType>(alval * warp_result);
+                static_cast<OValueType>(alval * subwarp_result);
         }
     }
 }
 
-template <typename InputValueType, typename MatrixValueType,
+namespace {
+
+template <int subwarp_size, typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
-              const matrix::AMP<MatrixValueType, IndexType>* a,
-              const matrix::Dense<InputValueType>* b,
-              matrix::Dense<OutputValueType>* c)
+void spmv_csr_classical(syn::value_list<int, subwarp_size>,
+                        std::shared_ptr<const DefaultExecutor> exec,
+                        const matrix::AMP<MatrixValueType, IndexType>* a,
+                        const matrix::Dense<InputValueType>* b,
+                        matrix::Dense<OutputValueType>* c)
 {
     using DMValueType =
         gko::kernels::GKO_DEVICE_NAMESPACE::device_type<MatrixValueType>;
@@ -397,34 +405,79 @@ void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
         std::get<k>(xvalues) = as_device_type(cmatk->get_const_values());
     });
 
-    constexpr uint32 block_size = default_block_size;
-    constexpr uint32 warps_per_block = block_size / config::warp_size;
+    constexpr uint32 warps_per_block = default_block_size / config::warp_size;
     const auto nwarps = static_cast<uint32>(exec->get_num_warps_per_sm() *
                                             exec->get_num_multiprocessor()) *
                         classical_oversubscription;
     const auto num_blocks = std::min(
-        static_cast<uint32>(ceildiv(nrows, block_size / config::warp_size)),
+        static_cast<uint32>(ceildiv(nrows, default_block_size / subwarp_size)),
         nwarps / warps_per_block);
     const dim3 grid{num_blocks, nrhs};
-    csr_amp_basic_spmv<DIValueType, DMValueType, DOValueType, IndexType>
-        <<<grid, block_size, 0, exec->get_stream()>>>(
+    csr_amp_basic_spmv<subwarp_size, DIValueType, DMValueType, DOValueType,
+                       IndexType>
+        <<<grid, default_block_size, 0, exec->get_stream()>>>(
             nrows, nrhs, xrow_ptrs, xcol_idxs, xvalues,
             static_cast<uint32>(b->get_stride()), b_ptr,
             static_cast<uint32>(c->get_stride()), c_ptr);
+}
+
+GKO_ENABLE_IMPLEMENTATION_SELECTION(select_spmv_csr_classical,
+                                    spmv_csr_classical);
+
+template <typename ValueType, typename IndexType>
+inline IndexType eff_max_row_len(
+    const matrix::AMP<ValueType, IndexType>* const a)
+{
+    constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
+    auto maxnr = zero<IndexType>();
+    for (int k = 0; k < q; k++) {
+        auto binmax = a->get_max_nnz_per_row_for_bin(k);
+        maxnr += binmax;
+    }
+    maxnr /= q;
+    return maxnr;
+}
+
+}  // anonymous namespace
+
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
+              const matrix::AMP<MatrixValueType, IndexType>* a,
+              const matrix::Dense<InputValueType>* b,
+              matrix::Dense<OutputValueType>* c, const int subwarp_size)
+{
+    // subwarp_size == 0 means "automatic": derive it from the maximum number
+    // of nonzeros per row over all precision bins. Otherwise, the
+    // requested (already-validated, power-of-two) subwarp_size is used
+    // directly.
+    const int sel_row_len =
+        subwarp_size > 0 ? subwarp_size
+                         : std::max(eff_max_row_len(a), one<IndexType>());
+    select_spmv_csr_classical(
+        classical_kernels(),
+        [&sel_row_len](int compiled_row_len) {
+            return sel_row_len >= compiled_row_len;
+        },
+        syn::value_list<int>(), syn::type_list<>(), exec, a, b, c);
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_SPMV_CSR_KERNEL);
 
 
-template <typename InputValueType, typename MatrixValueType,
+namespace {
+
+template <int subwarp_size, typename InputValueType, typename MatrixValueType,
           typename OutputValueType, typename IndexType>
-void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
-                       const matrix::Dense<MatrixValueType>* alpha,
-                       const matrix::AMP<MatrixValueType, IndexType>* a,
-                       const matrix::Dense<InputValueType>* b,
-                       const matrix::Dense<OutputValueType>* beta,
-                       matrix::Dense<OutputValueType>* c)
+void adv_spmv_csr_classical(syn::value_list<int, subwarp_size>,
+                            std::shared_ptr<const DefaultExecutor> exec,
+                            const matrix::Dense<MatrixValueType>* alpha,
+                            const matrix::AMP<MatrixValueType, IndexType>* a,
+                            const matrix::Dense<InputValueType>* b,
+                            const matrix::Dense<OutputValueType>* beta,
+                            matrix::Dense<OutputValueType>* c)
 {
     using DMValueType =
         gko::kernels::GKO_DEVICE_NAMESPACE::device_type<MatrixValueType>;
@@ -459,22 +512,46 @@ void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
         std::get<k>(xvalues) = as_device_type(cmatk->get_const_values());
     });
 
-    constexpr uint32 block_size = default_block_size;
-    constexpr uint32 warps_per_block = block_size / config::warp_size;
+    constexpr uint32 warps_per_block = default_block_size / config::warp_size;
     const auto nwarps = static_cast<uint32>(exec->get_num_warps_per_sm() *
                                             exec->get_num_multiprocessor()) *
                         classical_oversubscription;
     const uint32 num_blocks =
-        // static_cast<uint32>(ceildiv(nrows, warps_per_block));
-        std::min(static_cast<uint32>(
-                     ceildiv(a->get_size()[0], block_size / config::warp_size)),
+        std::min(static_cast<uint32>(ceildiv(
+                     a->get_size()[0], default_block_size / subwarp_size)),
                  nwarps / warps_per_block);
     const dim3 grid{num_blocks, nrhs};
-    csr_amp_adv_spmv<DIValueType, DMValueType, DOValueType, IndexType>
-        <<<grid, block_size, 0, exec->get_stream()>>>(
+    csr_amp_adv_spmv<subwarp_size, DIValueType, DMValueType, DOValueType,
+                     IndexType>
+        <<<grid, default_block_size, 0, exec->get_stream()>>>(
             nrows, nrhs, alpha_ptr, xrow_ptrs, xcol_idxs, xvalues,
             static_cast<uint32>(b->get_stride()), b_ptr, beta_ptr,
             static_cast<uint32>(c->get_stride()), c_ptr);
+}
+
+GKO_ENABLE_IMPLEMENTATION_SELECTION(select_adv_spmv_csr_classical,
+                                    adv_spmv_csr_classical);
+
+}  // anonymous namespace
+
+template <typename InputValueType, typename MatrixValueType,
+          typename OutputValueType, typename IndexType>
+void advanced_spmv_csr(std::shared_ptr<const DefaultExecutor> exec,
+                       const matrix::Dense<MatrixValueType>* alpha,
+                       const matrix::AMP<MatrixValueType, IndexType>* a,
+                       const matrix::Dense<InputValueType>* b,
+                       const matrix::Dense<OutputValueType>* beta,
+                       matrix::Dense<OutputValueType>* c, int subwarp_size)
+{
+    const int sel_row_len =
+        subwarp_size > 0 ? subwarp_size
+                         : std::max(eff_max_row_len(a), one<IndexType>());
+    select_adv_spmv_csr_classical(
+        classical_kernels(),
+        [&sel_row_len](int compiled_row_len) {
+            return sel_row_len >= compiled_row_len;
+        },
+        syn::value_list<int>(), syn::type_list<>(), exec, alpha, a, b, beta, c);
 }
 
 GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(
@@ -486,7 +563,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     const float tolerance, const size_type nrows, const size_type ostride,
     const size_type omax_nnz, const ValueType* const __restrict__ ovals,
     const IndexType* const __restrict__ ocolids,
-    int* const __restrict__ max_bin_nnzs_blocks)
+    IndexType* const __restrict__ max_bin_nnzs_blocks)
 {
     using real_type = remove_complex<ValueType>;
     // Compute minimum representable values for each bin
@@ -494,7 +571,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
         get_bins_min_representable<real_type>();
 
     // thread-level reduction
-    int max_nnz_thread[q];
+    IndexType max_nnz_thread[q];
 #pragma unroll
     for (int i = 0; i < q; i++) {
         max_nnz_thread[i] = 0;
@@ -517,7 +594,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
             get_bins_precision_lower_bounds<real_type>(rnorm, tolerance);
 
         // Get max nnz per row for each precision bin matrix
-        int row_nnz[q];
+        IndexType row_nnz[q];
 #pragma unroll
         for (int i = 0; i < q; i++) {
             row_nnz[i] = 0;
@@ -549,7 +626,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     // copy warp sums into shared memory
     const auto warp_id = threadIdx.x / config::warp_size;
     constexpr auto num_warps = default_block_size / config::warp_size;
-    __shared__ int warp_max[num_warps * q];
+    __shared__ IndexType warp_max[num_warps * q];
     __syncthreads();
     if (threadIdx.x % config::warp_size == 0) {
 #pragma unroll
@@ -577,9 +654,9 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     }
 }
 
-template <int q>
+template <int q, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void finish_reduce(
-    int* const __restrict__ data, const int len, const int stride)
+    IndexType* const __restrict__ data, const int len, const int stride)
 {
     const auto group = group::this_thread_block();
     const auto local_id = group.thread_rank();
@@ -589,7 +666,7 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
     // its strided portion into the first block_size elements.
     if (len > block_size) {
         for (int j = 0; j < q; j++) {
-            int local_max = 0;
+            IndexType local_max = 0;
             for (int idx = local_id; idx < len; idx += block_size) {
                 local_max = max(local_max, data[j * stride + idx]);
             }
@@ -604,10 +681,10 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
         group.sync();
         if (local_id < k && local_id < reduced_len) {
             for (int j = 0; j < q; j++) {
-                const int a = data[j * stride + local_id];
-                const int b = (local_id + k < reduced_len)
-                                  ? data[j * stride + local_id + k]
-                                  : 0;
+                const IndexType a = data[j * stride + local_id];
+                const IndexType b = (local_id + k < reduced_len)
+                                        ? data[j * stride + local_id + k]
+                                        : 0;
                 data[j * stride + local_id] = max(a, b);
             }
         }
@@ -624,7 +701,8 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
         auto val = warp.thread_rank() < reduced_len
                        ? data[j * stride + warp.thread_rank()]
                        : 0;
-        auto result = reduce(warp, val, [](int a, int b) { return max(a, b); });
+        auto result = reduce(
+            warp, val, [](IndexType a, IndexType b) { return max(a, b); });
         if (warp.thread_rank() == 0) {
             data[j * stride] = result;
         }
@@ -635,7 +713,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<int, ValueType>& max_nnz_per_row)
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -650,7 +728,7 @@ void generate_cwise_ell_max_nnz_per_row(
     const auto num_blocks = num_cus * num_thread_blocks_per_cu;
     // const auto grid_size = ceildiv(nrows, block_size);
     const auto block_size = default_block_size;
-    gko::array<int> max_nnz_arr(exec, q * num_blocks);
+    gko::array<IndexType> max_nnz_arr(exec, q * num_blocks);
     thrust::fill(thrust::device, max_nnz_arr.get_data(),
                  max_nnz_arr.get_data() + q * num_blocks, 0);
     const auto max_nnz_ptr = max_nnz_arr.get_data();
@@ -662,7 +740,7 @@ void generate_cwise_ell_max_nnz_per_row(
         max_nnz_ptr, num_blocks, num_blocks);
     exec->synchronize();
 
-    std::vector<int> max_nnz_host = max_nnz_arr.copy_to_host();
+    std::vector<IndexType> max_nnz_host = max_nnz_arr.copy_to_host();
     for (int k = 0; k < q; k++) {
         max_nnz_per_row[k] = max_nnz_host[k * num_blocks];
     }
@@ -670,6 +748,28 @@ void generate_cwise_ell_max_nnz_per_row(
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
     GKO_DECLARE_AMP_GENERATE_CWISE_ELL_STEP1_KERNEL);
+
+
+// Here, we can use the host-side gko::amp::precision_array because we don't
+// really use the ValueType. We only need ValueType to get the number of bins.
+template <typename ValueType, typename IndexType>
+void reduce_bins_max(
+    std::shared_ptr<const DefaultExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>* a,
+    const gko::amp::precision_array<array<IndexType>, ValueType>& bin_arrays,
+    gko::amp::precision_array<IndexType, ValueType>& results)
+{
+    constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
+    for (gko::size_type k = 0; k < q; k++) {
+        results[k] = thrust::reduce(
+            thrust::device, bin_arrays[k].get_const_data(),
+            bin_arrays[k].get_const_data() + bin_arrays[k].get_size(),
+            zero<IndexType>(), thrust::maximum<IndexType>());
+    }
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(
+    GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL);
 
 
 }  // namespace amp

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include <algorithm>
+#include <iostream>
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -51,6 +52,7 @@ GKO_REGISTER_OPERATION(generate_cwise_csr_calculate_row_sizes,
                        amp::generate_cwise_csr_calculate_row_sizes);
 GKO_REGISTER_OPERATION(generate_cwise_csr_scatter_bins,
                        amp::generate_cwise_csr_scatter_bins);
+GKO_REGISTER_OPERATION(reduce_bins_max, amp::reduce_bins_max);
 GKO_REGISTER_OPERATION(extract_diagonal, amp::extract_diagonal);
 GKO_REGISTER_OPERATION(fill_array, components::fill_array);
 GKO_REGISTER_OPERATION(prefix_sum_nonnegative,
@@ -61,6 +63,42 @@ GKO_REGISTER_OPERATION(prefix_sum_nonnegative,
 }  // namespace amp
 
 
+/*
+ * Rounds `requested` down to the nearest power of two no larger than the
+ * warp size of `exec` (defaulting to 32 on executors without a native warp
+ * concept), leaving 0 ("automatic") untouched. Warns once via std::cerr if
+ * the value had to change.
+ */
+template <typename ValueType, typename IndexType>
+void AMP<ValueType, IndexType>::normalize_subwarp_size()
+{
+    const int requested = parameters_.subwarp_size;
+    auto exec = this->get_executor();
+    if (requested == 0) {
+        parameters_.subwarp_size = 0;
+        return;
+    }
+    int warp_size = 32;
+    if (auto cuda_exec = std::dynamic_pointer_cast<const CudaExecutor>(exec)) {
+        warp_size = cuda_exec->get_warp_size();
+    } else if (auto hip_exec =
+                   std::dynamic_pointer_cast<const HipExecutor>(exec)) {
+        warp_size = hip_exec->get_warp_size();
+    }
+    int clamped = std::min(std::max(requested, 1), warp_size);
+    int rounded = 1;
+    while (rounded * 2 <= clamped) {
+        rounded *= 2;
+    }
+    if (rounded != requested) {
+        std::cerr << "AMP: subwarp_size " << requested
+                  << " is not a power of two <= " << warp_size << "; using "
+                  << rounded << " instead." << std::endl;
+    }
+    parameters_.subwarp_size = rounded;
+}
+
+
 template <typename ValueType, typename IndexType>
 AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
     const AMP& other)
@@ -68,6 +106,7 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
     if (&other != this) {
         EnableLinOp<AMP>::operator=(other);
         this->parameters_ = other.parameters_;
+        this->max_nnz_per_row_ = other.max_nnz_per_row_;
         for (int i = 0; i < num_precisions; i++) {
             if (other.mat_bins_[i]) {
                 this->mat_bins_[i] =
@@ -76,7 +115,6 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
                 this->mat_bins_[i] = nullptr;
             }
         }
-        row_sizes_ = other.row_sizes_;
     }
     return *this;
 }
@@ -88,7 +126,7 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(AMP&& other)
     if (&other != this) {
         EnableLinOp<AMP>::operator=(std::move(other));
         mat_bins_ = std::move(other.mat_bins_);
-        row_sizes_ = std::move(other.row_sizes_);
+        max_nnz_per_row_ = std::move(other.max_nnz_per_row_);
     }
     return *this;
 }
@@ -105,8 +143,8 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* b, LinOp* x) const
         mixed_precision_base_dispatch_real_complex<ValueType>(
             [this, csr_bins](auto dense_b, auto dense_x) {
                 if (csr_bins) {
-                    this->get_executor()->run(
-                        amp::make_spmv_csr(this, dense_b, dense_x));
+                    this->get_executor()->run(amp::make_spmv_csr(
+                        this, dense_b, dense_x, parameters_.subwarp_size));
                 } else {
                     this->get_executor()->run(
                         amp::make_spmv_ell(this, dense_b, dense_x));
@@ -160,7 +198,8 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* alpha, const LinOp* b,
                     beta);
                 if (csr_bins) {
                     this->get_executor()->run(amp::make_advanced_spmv_csr(
-                        d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
+                        d_alpha.get(), this, dense_b, d_beta.get(), dense_x,
+                        parameters_.subwarp_size));
                 } else {
                     this->get_executor()->run(amp::make_advanced_spmv_ell(
                         d_alpha.get(), this, dense_b, d_beta.get(), dense_x));
@@ -190,21 +229,27 @@ void AMP<ValueType, IndexType>::apply_impl(const LinOp* alpha, const LinOp* b,
 
 
 template <typename ValueType, typename IndexType>
-auto generate_amp_impl(
-    const matrix::Csr<ValueType, IndexType>* const mtx,
-    std::shared_ptr<const Executor> exec, const float tol,
-    gko::amp::precision_array<gko::array<IndexType>, ValueType>& row_sizes)
+gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+AMP<ValueType, IndexType>::generate_amp_impl(
+    const matrix::Csr<ValueType, IndexType>* const mtx)
 {
+    auto exec = this->get_executor();
     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
+    const auto tol = parameters_.tolerance;
+
+    std::array<gko::array<IndexType>, num_precisions> row_sizes;
+
     gko::amp::precision_array<IndexType*, ValueType> bin_row_sizes;
     const size_type nrows = mtx->get_size()[0];
     gko::constexpr_for<0, q, 1>([&](auto k) {
+        row_sizes[k].set_executor(exec);
         row_sizes[k].resize_and_reset(nrows + 1);
         bin_row_sizes[k] = row_sizes[k].get_data();
     });
 
     exec->run(amp::make_generate_cwise_csr_calculate_row_sizes(mtx, tol,
                                                                bin_row_sizes));
+    exec->run(amp::make_reduce_bins_max(mtx, row_sizes, max_nnz_per_row_));
 
     for (int k = 0; k < q; k++) {
         exec->run(
@@ -213,7 +258,7 @@ auto generate_amp_impl(
     exec->synchronize();
 
     auto abins = gko::amp::allocate_csr_bins<ValueType, IndexType>(
-        exec, mtx->get_size(), std::move(row_sizes));
+        exec, mtx->get_size(), std::move(row_sizes), parameters_.csr_strategy);
     constexpr auto num_bins = std::tuple_size<decltype(abins)>::value;
     static_assert(num_bins == q, "Wrong number of bins!");
     gko::amp::precision_array<gko::LinOp*, ValueType> amat;
@@ -231,14 +276,20 @@ auto generate_amp_impl(
 
 
 template <typename ValueType, typename IndexType>
-auto generate_amp_impl(const matrix::Ell<ValueType, IndexType>* const mtx,
-                       std::shared_ptr<const Executor> exec, const float tol)
+gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType>
+AMP<ValueType, IndexType>::generate_amp_impl(
+    const matrix::Ell<ValueType, IndexType>* const mtx)
 {
-    gko::amp::precision_array<int, ValueType> max_nnz;
-    exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(mtx, tol, max_nnz));
+    auto exec = this->get_executor();
+    constexpr int q = AMP<ValueType, IndexType>::num_precisions;
+    const auto tol = parameters_.tolerance;
+
+    exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(mtx, tol,
+                                                           max_nnz_per_row_));
+    exec->synchronize();
 
     auto abins = gko::amp::allocate_bins<ValueType, IndexType>(
-        exec, mtx->get_size(), max_nnz);
+        exec, mtx->get_size(), max_nnz_per_row_);
     constexpr auto num_bins = std::tuple_size<decltype(abins)>::value;
     static_assert(num_bins == AMP<ValueType, IndexType>::num_precisions,
                   "Wrong number of bins!");
@@ -263,18 +314,14 @@ std::array<std::unique_ptr<const LinOp>,
 AMP<ValueType, IndexType>::generate_amp(const LinOp* const mtx)
 {
     const auto tol = parameters_.tolerance;
-    // typedef std::array<std::unique_ptr<const LinOp>, num_precisions>
-    // ret_type;
     auto a_ell = dynamic_cast<const matrix::Ell<ValueType, IndexType>*>(mtx);
     if (a_ell) {
-        return generate_amp_impl<ValueType, IndexType>(
-            a_ell, this->get_executor(), tol);
+        return generate_amp_impl(a_ell);
     } else {
         auto a_csr =
             dynamic_cast<const matrix::Csr<ValueType, IndexType>*>(mtx);
         if (a_csr) {
-            return generate_amp_impl<ValueType, IndexType>(
-                a_csr, this->get_executor(), tol, row_sizes_);
+            return generate_amp_impl(a_csr);
         } else {
             GKO_NOT_SUPPORTED(mtx);
         }
@@ -315,8 +362,7 @@ AMP<ValueType, IndexType>::extract_diagonal() const
 
 template <typename ValueType, typename IndexType>
 AMP<ValueType, IndexType>::AMP(std::shared_ptr<const Executor> exec)
-    : EnableLinOp<AMP<ValueType, IndexType>>(std::move(exec)),
-      row_sizes_(create_row_sizes())
+    : EnableLinOp<AMP<ValueType, IndexType>>(std::move(exec))
 {
     init_one();
 }
@@ -398,19 +444,6 @@ void AMP<ValueType, IndexType>::read(
         ->read(data);
     this->set_size(base_mtx->get_size());
     mat_bins_ = generate_amp(base_mtx.get());
-}
-
-
-template <typename ValueType, typename IndexType>
-std::array<gko::array<IndexType>, AMP<ValueType, IndexType>::num_precisions>
-AMP<ValueType, IndexType>::create_row_sizes() const
-{
-    constexpr int q = AMP<ValueType, IndexType>::num_precisions;
-    std::array<gko::array<IndexType>, num_precisions> arr;
-    for (int i = 0; i < q; i++) {
-        arr[i] = gko::array<IndexType>(this->get_executor());
-    }
-    return arr;
 }
 
 

@@ -45,11 +45,14 @@ void generate_cwise_csr_calculate_row_sizes(
     const IndexType* const orow_ptrs = a->get_const_row_ptrs();
     run_kernel(
         exec,
-        [tolerance, min_repr] GKO_KERNEL(auto irow, auto orow_ptrs,
-                                         auto ocolidxs, auto ovals,
-                                         auto bin_row_sizes) {
+        [tolerance, min_repr, nrows] GKO_KERNEL(auto irow, auto orow_ptrs,
+                                                auto ocolidxs, auto ovals,
+                                                auto bin_row_sizes) {
             for (int k = 0; k < q; k++) {
                 bin_row_sizes[k][irow] = 0;
+            }
+            if (irow >= nrows) {
+                return;
             }
             // Compute row's 1-norm
             auto rnorm = static_cast<d_real_type>(0);
@@ -71,7 +74,7 @@ void generate_cwise_csr_calculate_row_sizes(
                 }
             }
         },
-        nrows, orow_ptrs, ocolidxs, ovals, bin_row_sizes);
+        nrows + 1, orow_ptrs, ocolidxs, ovals, bin_row_sizes);
 }
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(

@@ -81,7 +81,9 @@ int main(int argc, char* argv[])
         {"executor", cfg.executor},
         {"amp_tolerance", cfg.amp_tolerance},
         {"amp_base_format", cfg.amp_base_format},
-        {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)}};
+        {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)},
+        {"amp_subwarp_size", cfg.amp_subwarp_size},
+        {"amp_csr_strategy", to_string(cfg.amp_csr_strategy)}};
     json rows = json::array();
 
     double baseline_ms = 1.0;
@@ -216,6 +218,8 @@ int main(int argc, char* argv[])
                            .with_tolerance(cfg.amp_tolerance)
                            .with_criterion(Amp::criterion_type::componentwise)
                            .with_strategy(cfg.amp_spmv_strategy)
+                           .with_subwarp_size(cfg.amp_subwarp_size)
+                           .with_csr_strategy(cfg.amp_csr_strategy)
                            .on(exec)
                            ->generate(base_mat));
         exec->synchronize();

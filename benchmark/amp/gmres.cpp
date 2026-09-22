@@ -356,6 +356,8 @@ int main(int argc, char* argv[])
         {"amp_tolerance", cfg.amp_tolerance},
         {"amp_base_format", cfg.amp_base_format},
         {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)},
+        {"amp_subwarp_size", cfg.amp_subwarp_size},
+        {"amp_csr_strategy", to_string(cfg.amp_csr_strategy)},
         {"gmres_tol", cfg.gmres_tol},
         {"gmres_max_iters", cfg.gmres_max_iters},
         {"gmres_krylov_dim", cfg.gmres_krylov_dim}};
