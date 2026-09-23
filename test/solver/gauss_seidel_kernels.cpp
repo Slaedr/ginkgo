@@ -526,11 +526,17 @@ protected:
         // Clone the ELL to the device before consuming it for the ref AMP.
         auto d_gen_ell = gko::clone(exec, gen_ell);
 
-        amp = AMPMtx::build().with_tolerance(amp_tol).on(ref)->generate(
-            gko::share(std::move(gen_ell)));
+        amp = AMPMtx::build()
+                  .with_tolerance(amp_tol)
+                  .with_bin_foldup_nnz_ratio(0.0f)
+                  .on(ref)
+                  ->generate(gko::share(std::move(gen_ell)));
 
-        d_amp = AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(
-            gko::share(std::move(d_gen_ell)));
+        d_amp = AMPMtx::build()
+                    .with_tolerance(amp_tol)
+                    .with_bin_foldup_nnz_ratio(0.0f)
+                    .on(exec)
+                    ->generate(gko::share(std::move(d_gen_ell)));
     }
 
     // Runs the device AMP kernel and skips the test if the kernel is not
@@ -752,11 +758,17 @@ protected:
         gen_ell->convert_to(csr.get());
         auto d_csr = gko::clone(exec, csr);
 
-        amp = AMPMtx::build().with_tolerance(amp_tol).on(ref)->generate(
-            gko::share(std::move(csr)));
+        amp = AMPMtx::build()
+                  .with_tolerance(amp_tol)
+                  .with_bin_foldup_nnz_ratio(0.0f)
+                  .on(ref)
+                  ->generate(gko::share(std::move(csr)));
 
-        d_amp = AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(
-            gko::share(std::move(d_csr)));
+        d_amp = AMPMtx::build()
+                    .with_tolerance(amp_tol)
+                    .with_bin_foldup_nnz_ratio(0.0f)
+                    .on(exec)
+                    ->generate(gko::share(std::move(d_csr)));
     }
 
     template <typename... Args>

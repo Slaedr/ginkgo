@@ -80,6 +80,7 @@ int main(int argc, char* argv[])
         {"nnz", nnz},
         {"executor", cfg.executor},
         {"amp_tolerance", cfg.amp_tolerance},
+        {"amp_bin_foldup_nnz_ratio", cfg.amp_bin_foldup_nnz_ratio},
         {"amp_base_format", cfg.amp_base_format},
         {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)},
         {"amp_subwarp_size", cfg.amp_subwarp_size},
@@ -213,15 +214,16 @@ int main(int argc, char* argv[])
             ->read(data);
         exec->synchronize();
         const auto t1 = std::chrono::high_resolution_clock::now();
-        auto mat =
-            gko::share(Amp::build()
-                           .with_tolerance(cfg.amp_tolerance)
-                           .with_criterion(Amp::criterion_type::componentwise)
-                           .with_strategy(cfg.amp_spmv_strategy)
-                           .with_subwarp_size(cfg.amp_subwarp_size)
-                           .with_csr_strategy(cfg.amp_csr_strategy)
-                           .on(exec)
-                           ->generate(base_mat));
+        auto mat = gko::share(
+            Amp::build()
+                .with_tolerance(cfg.amp_tolerance)
+                .with_criterion(Amp::criterion_type::componentwise)
+                .with_strategy(cfg.amp_spmv_strategy)
+                .with_subwarp_size(cfg.amp_subwarp_size)
+                .with_csr_strategy(cfg.amp_csr_strategy)
+                .with_bin_foldup_nnz_ratio(cfg.amp_bin_foldup_nnz_ratio)
+                .on(exec)
+                ->generate(base_mat));
         exec->synchronize();
         auto t2 = std::chrono::high_resolution_clock::now();
         auto solver =

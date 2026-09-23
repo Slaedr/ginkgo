@@ -426,15 +426,18 @@ protected:
 
     FwdGaussSeidelAMP()
         : exec(gko::ReferenceExecutor::create()),
-          mtx(AMPMtx::build().with_tolerance(1e-6f).on(exec)->generate(
-              gko::share(gko::initialize<EllMtx>(
-                  // clang-format off
+          mtx(AMPMtx::build()
+                  .with_tolerance(1e-6f)
+                  .with_bin_foldup_nnz_ratio(0.0f)
+                  .on(exec)
+                  ->generate(gko::share(gko::initialize<EllMtx>(
+                      // clang-format off
                       {{2.0, 0.0, 1.0, 0.0},
                        {0.0, 3.0, 0.0, 1.0},
                        {1.0, 0.0, 4.0, 0.0},
                        {0.0, 1.0, 0.0, 5.0}},
-                  // clang-format on
-                  exec)))),
+                      // clang-format on
+                      exec)))),
           gs_factory(Solver::build()
                          .with_criteria(
                              gko::stop::Iteration::build().with_max_iters(1u))
@@ -571,15 +574,18 @@ protected:
 
     FwdGaussSeidelAMPCSR()
         : exec(gko::ReferenceExecutor::create()),
-          mtx(AMPMtx::build().with_tolerance(1e-6f).on(exec)->generate(
-              gko::share(gko::initialize<CsrMtx>(
-                  // clang-format off
+          mtx(AMPMtx::build()
+                  .with_tolerance(1e-6f)
+                  .with_bin_foldup_nnz_ratio(0.0f)
+                  .on(exec)
+                  ->generate(gko::share(gko::initialize<CsrMtx>(
+                      // clang-format off
                       {{2.0, 0.0, 1.0, 0.0},
                        {0.0, 3.0, 0.0, 1.0},
                        {1.0, 0.0, 4.0, 0.0},
                        {0.0, 1.0, 0.0, 5.0}},
-                  // clang-format on
-                  exec)))),
+                      // clang-format on
+                      exec)))),
           gs_factory(Solver::build()
                          .with_criteria(
                              gko::stop::Iteration::build().with_max_iters(1u))

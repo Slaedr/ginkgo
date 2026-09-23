@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <utility>
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -107,6 +108,7 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(
         EnableLinOp<AMP>::operator=(other);
         this->parameters_ = other.parameters_;
         this->max_nnz_per_row_ = other.max_nnz_per_row_;
+        this->num_nonempty_bins_ = other.num_nonempty_bins_;
         for (int i = 0; i < num_precisions; i++) {
             if (other.mat_bins_[i]) {
                 this->mat_bins_[i] =
@@ -127,6 +129,7 @@ AMP<ValueType, IndexType>& AMP<ValueType, IndexType>::operator=(AMP&& other)
         EnableLinOp<AMP>::operator=(std::move(other));
         mat_bins_ = std::move(other.mat_bins_);
         max_nnz_per_row_ = std::move(other.max_nnz_per_row_);
+        num_nonempty_bins_ = std::exchange(other.num_nonempty_bins_, 0);
     }
     return *this;
 }
@@ -236,6 +239,7 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     auto exec = this->get_executor();
     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
     const auto tol = parameters_.tolerance;
+    const auto ratio = parameters_.bin_foldup_nnz_ratio;
 
     std::array<gko::array<IndexType>, num_precisions> row_sizes;
 
@@ -247,15 +251,45 @@ AMP<ValueType, IndexType>::generate_amp_impl(
         bin_row_sizes[k] = row_sizes[k].get_data();
     });
 
-    exec->run(amp::make_generate_cwise_csr_calculate_row_sizes(mtx, tol,
-                                                               bin_row_sizes));
-    exec->run(amp::make_reduce_bins_max(mtx, row_sizes, max_nnz_per_row_));
+    // Computes bin_row_sizes and max_nnz_per_row_ for the given max_bin,
+    // turning the per-row counts into prefix-summed row pointers. Entries
+    // that would land in a bin above max_bin are clamped down to it.
+    auto compute_row_sizes = [&](int max_bin) {
+        exec->run(amp::make_generate_cwise_csr_calculate_row_sizes(
+            mtx, tol, max_bin, bin_row_sizes));
+        exec->run(amp::make_reduce_bins_max(mtx, row_sizes, max_nnz_per_row_));
+        for (int k = 0; k < q; k++) {
+            exec->run(
+                amp::make_prefix_sum_nonnegative(bin_row_sizes[k], nrows + 1));
+        }
+        exec->synchronize();
+    };
+    // Reads the total nonzero count of each bin from the prefix-summed row
+    // pointers computed by compute_row_sizes.
+    auto read_bin_nnz = [&] {
+        std::array<int64, q> counts{};
+        for (int k = 0; k < q; k++) {
+            counts[k] = static_cast<int64>(get_element(row_sizes[k], nrows));
+        }
+        return counts;
+    };
 
-    for (int k = 0; k < q; k++) {
-        exec->run(
-            amp::make_prefix_sum_nonnegative(bin_row_sizes[k], nrows + 1));
+    compute_row_sizes(q - 1);
+    auto bin_nnz = read_bin_nnz();
+    const int fold_max_bin = gko::amp::compute_last_active_bin<int64, q>(
+        bin_nnz, static_cast<int64>(mtx->get_num_stored_elements()), ratio);
+    if (fold_max_bin < q - 1) {
+        // Some trailing bins were folded up: recompute the row sizes (and
+        // max_nnz_per_row_) with entries clamped to the new max_bin.
+        compute_row_sizes(fold_max_bin);
+        bin_nnz = read_bin_nnz();
     }
-    exec->synchronize();
+    num_nonempty_bins_ = 0;
+    for (int k = 0; k < q; k++) {
+        if (bin_nnz[k] > 0) {
+            num_nonempty_bins_++;
+        }
+    }
 
     auto abins = gko::amp::allocate_csr_bins<ValueType, IndexType>(
         exec, mtx->get_size(), std::move(row_sizes), parameters_.csr_strategy);
@@ -265,7 +299,8 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     gko::constexpr_for<0, num_bins, 1>(
         [&](auto k) { amat[k] = abins[k].get(); });
 
-    exec->run(amp::make_generate_cwise_csr_scatter_bins(mtx, tol, amat));
+    exec->run(amp::make_generate_cwise_csr_scatter_bins(mtx, tol, fold_max_bin,
+                                                        amat));
 
     gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType> cabins;
     for (int i = 0; i < q; i++) {
@@ -283,10 +318,42 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     auto exec = this->get_executor();
     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
     const auto tol = parameters_.tolerance;
+    const auto ratio = parameters_.bin_foldup_nnz_ratio;
 
-    exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(mtx, tol,
-                                                           max_nnz_per_row_));
-    exec->synchronize();
+    // Computes max_nnz_per_row_ and bin_nnz for the given max_bin. Entries
+    // that would land in a bin above max_bin are clamped down to it.
+    gko::amp::precision_array<int64, ValueType> bin_nnz_dev;
+    auto compute_max_nnz = [&](int max_bin) {
+        exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(
+            mtx, tol, max_bin, max_nnz_per_row_, bin_nnz_dev));
+        exec->synchronize();
+    };
+
+    compute_max_nnz(q - 1);
+    std::array<int64, q> bin_nnz{};
+    int64 total_nnz = 0;
+    for (int k = 0; k < q; k++) {
+        bin_nnz[k] = bin_nnz_dev[k];
+        total_nnz += bin_nnz[k];
+    }
+    const int fold_max_bin =
+        gko::amp::compute_last_active_bin<int64, q>(bin_nnz, total_nnz, ratio);
+    if (fold_max_bin < q - 1) {
+        // Some trailing bins were folded up: recompute max_nnz_per_row_ with
+        // entries clamped to the new max_bin (a merged bin's maximum row
+        // length is not just the sum of the old maxima, so it must be
+        // recomputed from the actual data).
+        compute_max_nnz(fold_max_bin);
+        for (int k = 0; k < q; k++) {
+            bin_nnz[k] = bin_nnz_dev[k];
+        }
+    }
+    num_nonempty_bins_ = 0;
+    for (int k = 0; k < q; k++) {
+        if (bin_nnz[k] > 0) {
+            num_nonempty_bins_++;
+        }
+    }
 
     auto abins = gko::amp::allocate_bins<ValueType, IndexType>(
         exec, mtx->get_size(), max_nnz_per_row_);
@@ -297,7 +364,8 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     gko::constexpr_for<0, num_bins, 1>(
         [&](auto k) { amat[k] = abins[k].get(); });
 
-    exec->run(amp::make_generate_ell_scatter_bins(mtx, tol, amat));
+    exec->run(
+        amp::make_generate_ell_scatter_bins(mtx, tol, fold_max_bin, amat));
 
     gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType> cabins;
     for (int i = 0; i < matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -313,7 +381,6 @@ std::array<std::unique_ptr<const LinOp>,
            AMP<ValueType, IndexType>::num_precisions>
 AMP<ValueType, IndexType>::generate_amp(const LinOp* const mtx)
 {
-    const auto tol = parameters_.tolerance;
     auto a_ell = dynamic_cast<const matrix::Ell<ValueType, IndexType>*>(mtx);
     if (a_ell) {
         return generate_amp_impl(a_ell);

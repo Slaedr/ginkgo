@@ -115,6 +115,19 @@ public:
     void read(const device_mat_data& data) override;
 
     /**
+     * Returns the number of precision bins that are non-empty (contain at
+     * least one nonzero) after generation.
+     *
+     * Sparse trailing bins may be "folded up" into the next higher precision
+     * bin during generation (see @ref parameters_type::min_bin_nnz_ratio), and
+     * a bin may also be empty on its own even without folding. This function
+     * reports how many of the `num_precisions` bins actually hold nonzeros.
+     *
+     * @return  Number of non-empty precision bins.
+     */
+    int get_num_nonempty_bins() const { return num_nonempty_bins_; }
+
+    /**
      * Returns a pointer to the i-th bin matrix.
      *
      * The zeroth entry always refers to FP64, the 1st entry to FP32,
@@ -213,6 +226,23 @@ public:
          */
         csr_strategy_type GKO_FACTORY_PARAMETER_SCALAR(
             csr_strategy, csr_strategy_type::automatical);
+
+        /**
+         * Threshold, as a ratio of the original matrix's number of nonzeros,
+         * below which a trailing (lowest-precision) bin is folded into the
+         * next higher precision bin instead of being generated on its own.
+         *
+         * During generation, the lowest-precision bin (bin index
+         * `num_precisions - 1`) is checked first: if its nonzero count is
+         * below `ratio * nnz(original matrix)`, its entries are merged into
+         * the next higher precision bin and it is left empty. The next
+         * higher bin (now holding the merged count) is checked the same
+         * way, and so on, until a bin meets the threshold or bin 0 is
+         * reached. Bin 0 itself is never folded away.
+         *
+         * A value of 0 disables folding.
+         */
+        float GKO_FACTORY_PARAMETER_SCALAR(bin_foldup_nnz_ratio, 0.01f);
     };
     GKO_ENABLE_LIN_OP_FACTORY(AMP, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);
@@ -280,6 +310,10 @@ protected:
 protected:
     /// Max. number of nonzeros per row for each precision bin.
     std::array<IndexType, num_precisions> max_nnz_per_row_{};
+
+    /// Number of precision bins that hold at least one nonzero, after any
+    /// bin folding performed during generation. @sa get_num_nonempty_bins
+    int num_nonempty_bins_{0};
 
     /// Array of bins of the different precisions.
     std::array<std::unique_ptr<const LinOp>, num_precisions> mat_bins_;

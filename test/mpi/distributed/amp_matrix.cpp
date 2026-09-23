@@ -67,8 +67,11 @@ protected:
     std::shared_ptr<dist_mat> create_amp_dist_matrix()
     {
         auto ell_empty = gko::share(Ell::create(ref, gko::dim<2>{0, 0}));
-        auto amp_template =
-            Amp::build().with_tolerance(0.01f).on(exec)->generate(ell_empty);
+        auto amp_template = Amp::build()
+                                .with_tolerance(0.01f)
+                                .with_bin_foldup_nnz_ratio(0.0f)
+                                .on(exec)
+                                ->generate(ell_empty);
         auto csr_template = Csr::create(exec);
         auto A = dist_mat::create(exec, comm, amp_template.get(),
                                   csr_template.get());
@@ -88,8 +91,11 @@ protected:
 TEST_F(DistributedAmpMatrix, CanCreateWithAmpLocalBlock)
 {
     auto ell_empty = gko::share(Ell::create(ref, gko::dim<2>{0, 0}));
-    auto amp_template =
-        Amp::build().with_tolerance(0.01f).on(exec)->generate(ell_empty);
+    auto amp_template = Amp::build()
+                            .with_tolerance(0.01f)
+                            .with_bin_foldup_nnz_ratio(0.0f)
+                            .on(exec)
+                            ->generate(ell_empty);
     auto csr_template = Csr::create(exec);
 
     auto A =
@@ -155,10 +161,16 @@ TEST_F(DistributedAmpMatrix, AdvancedSpMVProducesCorrectResult)
 TEST_F(DistributedAmpMatrix, SpMVWorksWithAmpNonLocalBlock)
 {
     auto ell_empty = gko::share(Ell::create(ref, gko::dim<2>{0, 0}));
-    auto amp_local =
-        Amp::build().with_tolerance(0.01f).on(exec)->generate(ell_empty);
-    auto amp_nonlocal =
-        Amp::build().with_tolerance(0.01f).on(exec)->generate(ell_empty);
+    auto amp_local = Amp::build()
+                         .with_tolerance(0.01f)
+                         .with_bin_foldup_nnz_ratio(0.0f)
+                         .on(exec)
+                         ->generate(ell_empty);
+    auto amp_nonlocal = Amp::build()
+                            .with_tolerance(0.01f)
+                            .with_bin_foldup_nnz_ratio(0.0f)
+                            .on(exec)
+                            ->generate(ell_empty);
     auto A = dist_mat::create(exec, comm, amp_local.get(), amp_nonlocal.get());
     A->read_distributed(mat_data, partition);
 

@@ -154,19 +154,25 @@ GKO_INLINE GKO_KERNEL int adjust_bin_for_underflow(
  * @param abs_number  Absolute value of the entry to be classified.
  * @param is_diagonal  True iff the entry sits on the matrix diagonal
  *                     (i.e., its row and column indices are equal).
+ * @param max_bin  Highest bin index that may still be generated on its own;
+ *                 any bin assignment below this bin (i.e. a lower precision
+ *                 than `max_bin`) is clamped up to `max_bin`. Used to fold
+ *                 sparse trailing bins into a higher precision one. A
+ *                 dropped entry (return value -1) is never clamped.
  */
 template <typename RealType>
 GKO_INLINE GKO_KERNEL int get_adjusted_bin(
     const precision_array<float, RealType>& lower_bounds,
     const precision_array<RealType, RealType>& min_representable,
-    const RealType abs_number, const bool is_diagonal)
+    const RealType abs_number, const bool is_diagonal, const int max_bin)
 {
     if (is_diagonal) {
         return 0;
     }
     const int ibin = get_precision_bin<RealType>(lower_bounds, abs_number);
-    return adjust_bin_for_underflow<RealType>(min_representable, abs_number,
-                                              ibin);
+    const int adjusted =
+        adjust_bin_for_underflow<RealType>(min_representable, abs_number, ibin);
+    return adjusted > max_bin ? max_bin : adjusted;
 }
 
 /**

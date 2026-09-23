@@ -363,7 +363,9 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const OmpExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
+    const int max_bin,
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row,
+    gko::amp::precision_array<int64, ValueType>& bin_nnz)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = gko::matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -378,9 +380,12 @@ void generate_cwise_ell_max_nnz_per_row(
     const IndexType* const ocolids = a->get_const_col_idxs();
     for (int k = 0; k < q; k++) {
         max_nnz_per_row[k] = 0;
+        bin_nnz[k] = 0;
     }
     const auto max_nnz_ptr = &max_nnz_per_row[0];
-#pragma omp parallel for reduction(max : max_nnz_ptr [0:q])
+    const auto bin_nnz_ptr = &bin_nnz[0];
+#pragma omp parallel for \
+    reduction(max : max_nnz_ptr [0:q]) reduction(+ : bin_nnz_ptr [0:q])
     for (int irow = 0; irow < nrows; irow++) {
         // Compute row's 1-norm
         auto rnorm = static_cast<real_type>(0);
@@ -402,13 +407,14 @@ void generate_cwise_ell_max_nnz_per_row(
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
                 min_bin, min_repr, std::abs(ovals[j * ostride + irow]),
-                jcol == static_cast<IndexType>(irow));
+                jcol == static_cast<IndexType>(irow), max_bin);
             if (ibin >= 0) {
                 row_nnz[ibin]++;
             }
         }
         for (int k = 0; k < q; k++) {
             max_nnz_ptr[k] = std::max(max_nnz_ptr[k], row_nnz[k]);
+            bin_nnz_ptr[k] += row_nnz[k];
         }
     }
 }

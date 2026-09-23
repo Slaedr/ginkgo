@@ -206,6 +206,70 @@ TEST(AMPHelpers, AllocatesEllBinsTupleCorrectlyComplexFloat)
 #endif
 
 
+TEST(AMPHelpers, ComputeLastActiveBinDoesNotFoldWhenAllBinsAreAboveThreshold)
+{
+    std::array<gko::int64, 3> bin_nnz{10, 10, 10};
+    const auto last = gko::amp::compute_last_active_bin<gko::int64, 3>(
+        bin_nnz, gko::int64{30}, 0.01f);
+
+    EXPECT_EQ(last, 2);
+    EXPECT_EQ(bin_nnz, (std::array<gko::int64, 3>{10, 10, 10}));
+}
+
+
+TEST(AMPHelpers, ComputeLastActiveBinFoldsSingleSparseTrailingBin)
+{
+    // bin 2 has only 1 out of 21 total nonzeros (< 10% threshold), so it
+    // folds into bin 1. Bin 1 then holds 10 + 1 = 11 nonzeros, well above
+    // the threshold, so folding stops there.
+    std::array<gko::int64, 3> bin_nnz{10, 10, 1};
+    const auto last = gko::amp::compute_last_active_bin<gko::int64, 3>(
+        bin_nnz, gko::int64{21}, 0.1f);
+
+    EXPECT_EQ(last, 1);
+    EXPECT_EQ(bin_nnz, (std::array<gko::int64, 3>{10, 11, 0}));
+}
+
+
+TEST(AMPHelpers, ComputeLastActiveBinCascadesAllTheWayToBinZero)
+{
+    // Every bin is sparse relative to the (deliberately huge) threshold, so
+    // folding cascades: bin 2 into bin 1, then the merged bin 1 into bin 0.
+    std::array<gko::int64, 3> bin_nnz{1, 1, 1};
+    const auto last = gko::amp::compute_last_active_bin<gko::int64, 3>(
+        bin_nnz, gko::int64{3}, 1.0f);
+
+    EXPECT_EQ(last, 0);
+    EXPECT_EQ(bin_nnz, (std::array<gko::int64, 3>{3, 0, 0}));
+}
+
+
+TEST(AMPHelpers, ComputeLastActiveBinDoesNothingWhenRatioIsZero)
+{
+    // Same bin_nnz as ComputeLastActiveBinFoldsSingleSparseTrailingBin,
+    // where a nonzero ratio would fold bin 2 into bin 1; with ratio 0,
+    // folding must stay disabled and bin_nnz must be left untouched.
+    std::array<gko::int64, 3> bin_nnz{10, 10, 1};
+    const auto last = gko::amp::compute_last_active_bin<gko::int64, 3>(
+        bin_nnz, gko::int64{21}, 0.0f);
+
+    EXPECT_EQ(last, 2);
+    EXPECT_EQ(bin_nnz, (std::array<gko::int64, 3>{10, 10, 1}));
+}
+
+
+TEST(AMPHelpers, ComputeLastActiveBinHandlesSingleBin)
+{
+    std::array<gko::int64, 1> bin_nnz{5};
+    const auto last = gko::amp::compute_last_active_bin<gko::int64, 1>(
+        bin_nnz, gko::int64{5}, 1.0f);
+
+    // There is nowhere higher to fold to: bin 0 is always kept.
+    EXPECT_EQ(last, 0);
+    EXPECT_EQ(bin_nnz, (std::array<gko::int64, 1>{5}));
+}
+
+
 template <typename ValueIndexType>
 class Amp : public ::testing::Test {
 protected:
@@ -324,6 +388,26 @@ TYPED_TEST(Amp, FactoryCanBeCreatedWithCustomTolerance)
     auto factory = Mtx::build().with_tolerance(1e-6f).on(this->exec);
 
     EXPECT_EQ(factory->get_parameters().tolerance, 1e-6f);
+}
+
+
+TYPED_TEST(Amp, FactoryDefaultsToDefaultBinFoldupNnzRatio)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build().on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().bin_foldup_nnz_ratio, 0.01f);
+}
+
+
+TYPED_TEST(Amp, FactoryCanBeCreatedWithCustomBinFoldupNnzRatio)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build().with_bin_foldup_nnz_ratio(0.25f).on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().bin_foldup_nnz_ratio, 0.25f);
 }
 
 
@@ -505,6 +589,32 @@ TYPED_TEST(Amp, GeneratedMatrixHasCorrectSize)
     });
     EXPECT_EQ(mtx->get_bin_matrix(Mtx::num_precisions), nullptr);
     EXPECT_EQ(mtx->get_bin_matrix(-1), nullptr);
+}
+
+
+TYPED_TEST(Amp, GetNumNonemptyBinsIsZeroForAnEmptyMatrix)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+    auto input = gko::share(Ell::create(this->exec, gko::dim<2>{4, 5}));
+    auto factory = Mtx::build().on(this->exec);
+
+    auto mtx = factory->generate(input);
+
+    EXPECT_EQ(mtx->get_num_nonempty_bins(), 0);
+}
+
+
+TYPED_TEST(Amp, GetNumNonemptyBinsCountsOnlyBinZeroForUniformMatrix)
+{
+    // Every entry has the same magnitude, so all of them land in bin 0
+    // (the highest precision) regardless of the (default) tolerance: none
+    // of the other bins are ever populated, folded or not.
+    auto mtx_ell = this->create_ampell_from_dense_ones(gko::dim<2>{20, 20});
+    auto mtx_csr = this->create_ampcsr_from_dense_ones(gko::dim<2>{20, 20});
+
+    EXPECT_EQ(mtx_ell->get_num_nonempty_bins(), 1);
+    EXPECT_EQ(mtx_csr->get_num_nonempty_bins(), 1);
 }
 
 
@@ -908,6 +1018,76 @@ TYPED_TEST(Amp, ReadFromMatrixDataProducesCorrectSizeAndBinTypesCsr)
             mtx->get_bin_matrix(k));
         EXPECT_TRUE(mptr) << " Csr bin " << k;
     });
+}
+
+
+TYPED_TEST(Amp, BinFoldupCascadesSparseTrailingBinIntoBinZero)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Csr = gko::matrix::Csr<value_type, index_type>;
+    using Dense = typename TestFixture::Dense;
+    constexpr int nrows = 200;
+
+    // Every row has only a diagonal entry of magnitude 1e6, except the
+    // last row, which also has one off-diagonal entry of magnitude 10. At
+    // tolerance 1e-6, the lowest-precision bin's lower bound is
+    // row_norm * tolerance ~= 1, and the next bin up starts at
+    // row_norm * tolerance / epsilon(lowest precision type), which is at
+    // least ~128 (bfloat16's epsilon ~1/128) or ~1024 (fp16's epsilon
+    // ~1/1024) -- so 10 reliably lands in the lowest-precision bin (and
+    // well above its underflow threshold) regardless of which of the two
+    // is configured as the narrowest supported type. That lone
+    // off-diagonal entry is the only one that ever lands outside bin 0,
+    // and it is far too sparse (1 out of 201 nonzeros) to survive folding
+    // at the default 1% threshold, so with folding enabled it is merged
+    // all the way back into bin 0.
+    gko::matrix_data<value_type, index_type> data(gko::dim<2>{nrows, nrows});
+    for (int i = 0; i < nrows; i++) {
+        data.nonzeros.emplace_back(i, i, value_type{1000000.0});
+    }
+    data.nonzeros.emplace_back(nrows - 1, 0, value_type{10.0});
+    data.sort_row_major();
+
+    auto base_empty = gko::share(Csr::create(this->exec, gko::dim<2>{0, 0}));
+    auto folded = Mtx::build()
+                      .with_tolerance(1e-6f)
+                      .with_bin_foldup_nnz_ratio(0.01f)
+                      .on(this->exec)
+                      ->generate(base_empty);
+    folded->read(data);
+    auto unfolded = Mtx::build()
+                        .with_tolerance(1e-6f)
+                        .with_bin_foldup_nnz_ratio(0.0f)
+                        .on(this->exec)
+                        ->generate(base_empty);
+    unfolded->read(data);
+
+    if constexpr (Mtx::num_precisions >= 2) {
+        // Without folding, the tiny entry survives in the lowest bin.
+        EXPECT_EQ(unfolded->get_num_nonempty_bins(), 2);
+        EXPECT_GT(
+            unfolded->get_max_nnz_per_row_for_bin(Mtx::num_precisions - 1), 0);
+
+        // With folding, it is merged all the way back into bin 0, leaving
+        // every other bin empty.
+        EXPECT_EQ(folded->get_num_nonempty_bins(), 1);
+        EXPECT_EQ(folded->get_max_nnz_per_row_for_bin(Mtx::num_precisions - 1),
+                  0);
+    } else {
+        // Only bin 0 exists, so there is nothing to fold either way.
+        EXPECT_EQ(unfolded->get_num_nonempty_bins(), 1);
+        EXPECT_EQ(folded->get_num_nonempty_bins(), 1);
+    }
+
+    // Every stored value here is a small integer, exactly representable in
+    // every candidate precision
+    auto dense_folded = Dense::create(this->exec);
+    auto dense_unfolded = Dense::create(this->exec);
+    folded->convert_to(dense_folded.get());
+    unfolded->convert_to(dense_unfolded.get());
+    GKO_ASSERT_MTX_NEAR(dense_folded, dense_unfolded, 0.0);
 }
 
 

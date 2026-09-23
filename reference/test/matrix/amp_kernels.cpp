@@ -164,14 +164,18 @@ TEST(AMPAlgorithm, GetsAdjustedBinByMagnitude)
         gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
     const auto mins = gkra::get_bins_min_representable<double>();
 
+    constexpr int q = gko::amp::narrow_types<double>::num_types;
+    constexpr int q_f = gko::amp::narrow_types<float>::num_types;
+
     // Large value goes to bin 0
     auto bin_large =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false);
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false, q - 1);
     EXPECT_EQ(bin_large, 0);
 
     // Value in middle range: precision bin then adjusted for underflow
     double val_mid = (lbs[0] + lbs[1]) / 2.0;
-    int bin_mid = gkra::get_adjusted_bin<double>(lbs, mins, val_mid, false);
+    int bin_mid =
+        gkra::get_adjusted_bin<double>(lbs, mins, val_mid, false, q - 1);
     // Should be assigned to some bin (precision determined, then underflow
     // adjusted)
     EXPECT_GE(bin_mid, 0);
@@ -182,7 +186,7 @@ TEST(AMPAlgorithm, GetsAdjustedBinByMagnitude)
     //  but those smaller than bfloat16 min are discarded.
     const double val_under = mins[2] / 1.1;
     const int bin_under =
-        gkra::get_adjusted_bin<double>(lbs, mins, val_under, false);
+        gkra::get_adjusted_bin<double>(lbs, mins, val_under, false, q - 1);
 #if GKO_AMP_HALF_IS_FP16
     EXPECT_EQ(bin_under, 1);
 #else
@@ -191,18 +195,18 @@ TEST(AMPAlgorithm, GetsAdjustedBinByMagnitude)
 
     // Very small value gets dropped
     auto bin_drop =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[2] * 0.5, false);
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[2] * 0.5, false, q - 1);
     EXPECT_EQ(bin_drop, -1);
 
     // Test with float as base type
     const auto lbs_f =
         gkra::get_bins_precision_lower_bounds<float>(rownorm, tol);
     const auto mins_f = gkra::get_bins_min_representable<float>();
-    auto bin_f0 =
-        gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[0] * 2.0f, false);
+    auto bin_f0 = gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[0] * 2.0f,
+                                                false, q_f - 1);
     EXPECT_EQ(bin_f0, 0);
-    auto bin_f_drop =
-        gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[1] * 0.5f, false);
+    auto bin_f_drop = gkra::get_adjusted_bin<float>(
+        lbs_f, mins_f, lbs_f[1] * 0.5f, false, q_f - 1);
     EXPECT_EQ(bin_f_drop, -1);
 }
 
@@ -215,8 +219,9 @@ TEST(AMPAlgorithm, DiagonalGoesToBin0)
         gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
     const auto mins = gkra::get_bins_min_representable<double>();
     const double val = std::sqrt(lbs[0] * lbs[1]);
+    constexpr int q = gko::amp::narrow_types<double>::num_types;
 
-    const int bin = gkra::get_adjusted_bin<double>(lbs, mins, val, true);
+    const int bin = gkra::get_adjusted_bin<double>(lbs, mins, val, true, q - 1);
 
     EXPECT_EQ(bin, 0);
 }
@@ -319,22 +324,24 @@ TEST(AMPAlgorithm, GetsAdjustedBin)
     const auto lbs =
         gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
     const auto mins = gkra::get_bins_min_representable<double>();
+    constexpr int q = gko::amp::narrow_types<double>::num_types;
 
     // Large value goes to bin 0
     auto bin_large =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false);
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false, q - 1);
     EXPECT_EQ(bin_large, 0);
 
     // Value that would go to bin 1 and is representable stays in bin 1
     double val_bin1 = (lbs[0] + lbs[1]) / 2.0;
     if (val_bin1 >= static_cast<double>(mins[1])) {
-        auto bin1 = gkra::get_adjusted_bin<double>(lbs, mins, val_bin1, false);
+        auto bin1 =
+            gkra::get_adjusted_bin<double>(lbs, mins, val_bin1, false, q - 1);
         EXPECT_EQ(bin1, 1);
     }
 
     // Very small value gets dropped
     auto bin_drop =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[1] * 0.5, false);
+        gkra::get_adjusted_bin<double>(lbs, mins, lbs[1] * 0.5, false, q - 1);
     EXPECT_EQ(bin_drop, -1);
 }
 
@@ -458,11 +465,13 @@ TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
         "should be 2 available precisions");
 #endif
     gko::amp::precision_array<itype, T> max_nnz;
+    gko::amp::precision_array<gko::int64, T> bin_nnz;
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
+    constexpr int q = gko::amp::narrow_types<T>::num_types;
 
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
-        rexec, this->ell1.get(), this->tol, max_nnz);
+        rexec, this->ell1.get(), this->tol, q - 1, max_nnz, bin_nnz);
 
     // Bin 0 holds two entries in row 1: the diagonal a_{1,1}=1.2e-11
     // (forced into bin 0 by the diagonal-in-bin-0 override) plus the
@@ -518,7 +527,7 @@ TYPED_TEST(AMPDouble, GenerateEllScattersBinsCorrectly)
         [&](auto k) { amat[k] = abins[k].get(); });
 
     gko::kernels::reference::amp::generate_ell_scatter_bins(
-        rexec, this->ell1.get(), this->tol, amat);
+        rexec, this->ell1.get(), this->tol, num_bins - 1, amat);
 
     using types_list = typename gko::amp::narrow_types<T>::type;
     gko::constexpr_for<0, num_bins, 1>([&](auto k) {
@@ -650,6 +659,7 @@ TYPED_TEST(AMPDouble, ApplyHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create test vector (matrix is 5x4)
@@ -690,12 +700,14 @@ TYPED_TEST(AMPDouble, ApplyIndependentBucketsMatchesMonolithic)
     auto amp_monolithic =
         Mtx::build()
             .with_tolerance(this->tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(Mtx::strategy_type::monolithic_classical)
             .on(this->exec)
             ->generate(this->ell1);
     auto amp_independent =
         Mtx::build()
             .with_tolerance(this->tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(Mtx::strategy_type::independent_buckets)
             .on(this->exec)
             ->generate(this->ell1);
@@ -720,6 +732,7 @@ TYPED_TEST(AMPDouble, ApplyIndependentBucketsHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -759,6 +772,7 @@ TYPED_TEST(AMPDouble, AdvancedApplyHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -799,6 +813,7 @@ TYPED_TEST(AMPDouble, AdvancedApplyIndependentBucketsHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -840,6 +855,7 @@ TYPED_TEST(AMPDouble, ApplyWithMultipleRHSHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
@@ -891,6 +907,7 @@ TYPED_TEST(AMPDouble,
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -942,6 +959,7 @@ TYPED_TEST(AMPDouble, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -1005,6 +1023,7 @@ TYPED_TEST(
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -1068,6 +1087,7 @@ TYPED_TEST(AMPDouble, FillInDenseReconstructsOriginalMatrix)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create result dense matrix with same size
@@ -1090,6 +1110,7 @@ TYPED_TEST(AMPDouble, ExtractDiagonalSumsOverBins)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // The matrix is 5x4, so diagonal size is min(5,4) = 4
@@ -1140,8 +1161,11 @@ TEST(AMPEmptyBin0, SpmvIsCorrectWhenBin0HasOnlyDiagonal)
     auto ell = Ell::create(exec);
     dns->convert_to(ell.get());
 
-    auto amp = Mtx::build().with_tolerance(0.01f).on(exec)->generate(
-        gko::share(ell->clone()));
+    auto amp = Mtx::build()
+                   .with_tolerance(0.01f)
+                   .with_bin_foldup_nnz_ratio(0.0f)
+                   .on(exec)
+                   ->generate(gko::share(ell->clone()));
 
     auto bin0 = dynamic_cast<const Ell*>(amp->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
@@ -1181,6 +1205,7 @@ TEST(AMPEmptyBin0, IndependentBucketsSpmvIsCorrectWhenBin0HasOnlyDiagonal)
 
     auto amp = Mtx::build()
                    .with_tolerance(0.01f)
+                   .with_bin_foldup_nnz_ratio(0.0f)
                    .with_strategy(Mtx::strategy_type::independent_buckets)
                    .on(exec)
                    ->generate(gko::share(ell->clone()));
@@ -1217,8 +1242,11 @@ TEST(AMPEmptyBin0, AdvancedSpmvIsCorrectWhenBin0IsEmpty)
     // clang-format on
     auto ell = Ell::create(exec);
     dns->convert_to(ell.get());
-    auto amp = Mtx::build().with_tolerance(0.01f).on(exec)->generate(
-        gko::share(ell->clone()));
+    auto amp = Mtx::build()
+                   .with_tolerance(0.01f)
+                   .with_bin_foldup_nnz_ratio(0.0f)
+                   .on(exec)
+                   ->generate(gko::share(ell->clone()));
 
     auto alpha = gko::initialize<Vec>({2.0}, exec);
     auto beta = gko::initialize<Vec>({-1.0}, exec);
@@ -1252,6 +1280,7 @@ TEST(AMPEmptyBin0, IndependentBucketsAdvancedSpmvIsCorrectWhenBin0IsEmpty)
     dns->convert_to(ell.get());
     auto amp = Mtx::build()
                    .with_tolerance(0.01f)
+                   .with_bin_foldup_nnz_ratio(0.0f)
                    .with_strategy(Mtx::strategy_type::independent_buckets)
                    .on(exec)
                    ->generate(gko::share(ell->clone()));
@@ -1323,11 +1352,13 @@ TYPED_TEST(AMPFloat, GenerateComputesCorrectBinNNZs)
         "should be 1 available precision");
 #endif
     gko::amp::precision_array<int, T> max_nnz;
+    gko::amp::precision_array<gko::int64, T> bin_nnz;
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
+    constexpr int q = gko::amp::narrow_types<T>::num_types;
 
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
-        rexec, this->ell1.get(), this->tol, max_nnz);
+        rexec, this->ell1.get(), this->tol, q - 1, max_nnz, bin_nnz);
 
 #if GINKGO_HAVE_AMP_HALF
     EXPECT_EQ(max_nnz[0], 2);
@@ -1373,7 +1404,7 @@ TYPED_TEST(AMPFloat, GenerateEllScattersBinsCorrectly)
         [&](auto k) { amat[k] = abins[k].get(); });
 
     gko::kernels::reference::amp::generate_ell_scatter_bins(
-        rexec, this->ell1.get(), this->tol, amat);
+        rexec, this->ell1.get(), this->tol, num_bins - 1, amat);
 
     using types_list = typename gko::amp::narrow_types<T>::type;
     gko::constexpr_for<0, num_bins, 1>([&](auto k) {
@@ -1497,6 +1528,7 @@ TYPED_TEST(AMPFloat, ApplyHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create test vector (matrix is 5x4)
@@ -1533,12 +1565,14 @@ TYPED_TEST(AMPFloat, ApplyIndependentBucketsMatchesMonolithic)
     auto amp_monolithic =
         Mtx::build()
             .with_tolerance(this->tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(Mtx::strategy_type::monolithic_classical)
             .on(this->exec)
             ->generate(this->ell1);
     auto amp_independent =
         Mtx::build()
             .with_tolerance(this->tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(Mtx::strategy_type::independent_buckets)
             .on(this->exec)
             ->generate(this->ell1);
@@ -1563,6 +1597,7 @@ TYPED_TEST(AMPFloat, ApplyIndependentBucketsHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -1602,6 +1637,7 @@ TYPED_TEST(AMPFloat, AdvancedApplyHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -1642,6 +1678,7 @@ TYPED_TEST(AMPFloat, AdvancedApplyIndependentBucketsHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -1683,6 +1720,7 @@ TYPED_TEST(AMPFloat, ApplyWithMultipleRHSHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create test matrix with 2 RHS (matrix is 5x4, so x is 4x2)
@@ -1734,6 +1772,7 @@ TYPED_TEST(AMPFloat,
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -1785,6 +1824,7 @@ TYPED_TEST(AMPFloat, AdvancedApplyWithMultipleRHSHasCorrectRelativeError)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create alpha and beta scalars
@@ -1848,6 +1888,7 @@ TYPED_TEST(
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->ell1);
@@ -1911,6 +1952,7 @@ TYPED_TEST(AMPFloat, FillInDenseReconstructsOriginalMatrix)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // Create result dense matrix with same size
@@ -1933,6 +1975,7 @@ TYPED_TEST(AMPFloat, ExtractDiagonalSumsOverBins)
     // Create AMP matrix from the ELL matrix
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->ell1);
     // The matrix is 5x4, so diagonal size is min(5,4) = 4
@@ -2044,9 +2087,10 @@ TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizes)
     auto row_sz_ptrs = gko::amp::get_pointer_array<index_type, T>(row_sizes);
     auto rexec =
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
+    constexpr int q = gko::amp::narrow_types<double>::num_types;
 
     gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
-        rexec, this->csr1.get(), this->tol, row_sz_ptrs);
+        rexec, this->csr1.get(), this->tol, q - 1, row_sz_ptrs);
 
     auto rnv = row_sz_ptrs;
     // Bin 0: rows 0, 2, 3, 4 each contribute 1 entry; row 1 contributes 2
@@ -2147,7 +2191,7 @@ TYPED_TEST(AMPDoubleCsr, GenerateCsrScattersBinsCorrectly)
         [&](auto k) { amat[k] = abins[k].get(); });
 
     gko::kernels::reference::amp::generate_cwise_csr_scatter_bins(
-        rexec, this->csr1.get(), this->tol, amat);
+        rexec, this->csr1.get(), this->tol, q - 1, amat);
 
     using types_list = typename gko::amp::narrow_types<T>::type;
     gko::constexpr_for<0, num_bins, 1>([&](auto k) {
@@ -2259,6 +2303,7 @@ TYPED_TEST(AMPDoubleCsr, ComputesCorrectMaxNNZsPerRow)
 
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->csr1);
 
@@ -2283,6 +2328,7 @@ TYPED_TEST(AMPDoubleCsr, ApplyHasCorrectRelativeError)
     using Vec = typename TestFixture::Vec;
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->csr1);
     auto x = gko::initialize<Vec>({1.0, 1.0, 1.0, 1.0}, this->exec);
@@ -2316,12 +2362,14 @@ TYPED_TEST(AMPDoubleCsr, ApplyIndependentBucketsMatchesMonolithic)
     auto amp_monolithic =
         Mtx::build()
             .with_tolerance(this->tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(Mtx::strategy_type::monolithic_classical)
             .on(this->exec)
             ->generate(this->csr1);
     auto amp_independent =
         Mtx::build()
             .with_tolerance(this->tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(Mtx::strategy_type::independent_buckets)
             .on(this->exec)
             ->generate(this->csr1);
@@ -2346,6 +2394,7 @@ TYPED_TEST(AMPDoubleCsr, ApplyIndependentBucketsHasCorrectRelativeError)
     using Vec = typename TestFixture::Vec;
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->csr1);
@@ -2381,6 +2430,7 @@ TYPED_TEST(AMPDoubleCsr, AdvancedApplyHasCorrectRelativeError)
     using Vec = typename TestFixture::Vec;
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(this->csr1);
     auto alpha = gko::initialize<Vec>({2.0}, this->exec);
@@ -2415,6 +2465,7 @@ TYPED_TEST(AMPDoubleCsr, AdvancedApplyIndependentBucketsHasCorrectRelativeError)
     using Vec = typename TestFixture::Vec;
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .with_strategy(Mtx::strategy_type::independent_buckets)
                        .on(this->exec)
                        ->generate(this->csr1);
@@ -2451,6 +2502,7 @@ TYPED_TEST(AMPDoubleCsr, FillInDenseReconstructsOriginalMatrix)
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(gko::share(this->csr1->clone()));
     auto result = Dns::create(this->exec, this->csr1->get_size());
@@ -2472,6 +2524,7 @@ TYPED_TEST(AMPDoubleCsr, ExtractDiagonalIsCorrect)
         std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
     auto amp_mtx = Mtx::build()
                        .with_tolerance(this->tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
                        .on(this->exec)
                        ->generate(gko::share(this->csr1->clone()));
     // Matrix is 5x4, so diagonal size is min(5,4) = 4
