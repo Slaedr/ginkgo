@@ -411,6 +411,27 @@ TYPED_TEST(Amp, FactoryCanBeCreatedWithCustomBinFoldupNnzRatio)
 }
 
 
+TYPED_TEST(Amp, FactoryDefaultsToHighPrecisionDiagonal)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory = Mtx::build().on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().high_precision_diagonal, true);
+}
+
+
+TYPED_TEST(Amp, FactoryCanBeCreatedWithHighPrecisionDiagonalDisabled)
+{
+    using Mtx = typename TestFixture::Mtx;
+
+    auto factory =
+        Mtx::build().with_high_precision_diagonal(false).on(this->exec);
+
+    EXPECT_EQ(factory->get_parameters().high_precision_diagonal, false);
+}
+
+
 TYPED_TEST(Amp, FactoryCanBeCreatedWithNormwiseCriterion)
 {
     using Mtx = typename TestFixture::Mtx;

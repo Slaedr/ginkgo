@@ -115,6 +115,7 @@ int main(int argc, char* argv[])
         {"executor", cfg.executor},
         {"amp_tolerance", cfg.amp_tolerance},
         {"amp_bin_foldup_nnz_ratio", cfg.amp_bin_foldup_nnz_ratio},
+        {"amp_high_precision_diagonal", cfg.amp_high_precision_diagonal},
         {"amp_base_format", cfg.amp_base_format},
         {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)},
         {"amp_subwarp_size", cfg.amp_subwarp_size},

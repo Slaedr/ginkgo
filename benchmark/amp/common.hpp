@@ -95,6 +95,7 @@ struct Config {
     int solver_reps = 3;
     float amp_tolerance = 0.01f;
     float amp_bin_foldup_nnz_ratio = 0.01f;
+    bool amp_high_precision_diagonal = true;
     double gmres_tol = 1e-8;
     int gmres_max_iters = 1000;
     int gmres_krylov_dim = 50;
@@ -142,6 +143,9 @@ inline std::string strategy_suffix(const Config& cfg)
     default:
         break;
     }
+    if (!cfg.amp_high_precision_diagonal) {
+        suffix += "_nhpd";
+    }
     return suffix;
 }
 
@@ -170,6 +174,9 @@ inline Config load_config(const std::string& path)
     if (j.contains("amp_bin_foldup_nnz_ratio"))
         cfg.amp_bin_foldup_nnz_ratio =
             j["amp_bin_foldup_nnz_ratio"].get<float>();
+    if (j.contains("amp_high_precision_diagonal"))
+        cfg.amp_high_precision_diagonal =
+            j["amp_high_precision_diagonal"].get<bool>();
     if (j.contains("gmres_tol")) cfg.gmres_tol = j["gmres_tol"];
     if (j.contains("gmres_max_iters"))
         cfg.gmres_max_iters = j["gmres_max_iters"];
@@ -568,6 +575,7 @@ create_amp_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
             .with_subwarp_size(cfg.amp_subwarp_size)
             .with_csr_strategy(cfg.amp_csr_strategy)
             .with_bin_foldup_nnz_ratio(cfg.amp_bin_foldup_nnz_ratio)
+            .with_high_precision_diagonal(cfg.amp_high_precision_diagonal)
             .on(exec)
             ->generate(base_empty);
     auto csr_template = Csr::create(exec);
@@ -585,6 +593,8 @@ inline void print_config(const Config& cfg)
               << "  AMP tolerance: " << cfg.amp_tolerance << "\n"
               << "  AMP bin foldup nnz ratio: " << cfg.amp_bin_foldup_nnz_ratio
               << "\n"
+              << "  AMP high precision diagonal: "
+              << (cfg.amp_high_precision_diagonal ? "true" : "false") << "\n"
               << "  Warmup / bench reps: " << cfg.warmup_reps << " / "
               << cfg.bench_reps << "\n";
 }

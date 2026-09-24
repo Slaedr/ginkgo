@@ -363,7 +363,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const OmpExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    const int max_bin,
+    const int max_bin, const bool force_diagonal_0,
     gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row,
     gko::amp::precision_array<int64, ValueType>& bin_nnz)
 {
@@ -407,7 +407,8 @@ void generate_cwise_ell_max_nnz_per_row(
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
                 min_bin, min_repr, std::abs(ovals[j * ostride + irow]),
-                jcol == static_cast<IndexType>(irow), max_bin);
+                force_diagonal_0 & (jcol == static_cast<IndexType>(irow)),
+                max_bin);
             if (ibin >= 0) {
                 row_nnz[ibin]++;
             }

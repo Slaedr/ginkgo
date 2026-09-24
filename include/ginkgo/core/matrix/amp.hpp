@@ -243,6 +243,22 @@ public:
          * A value of 0 disables folding.
          */
         float GKO_FACTORY_PARAMETER_SCALAR(bin_foldup_nnz_ratio, 0.01f);
+
+        /**
+         * Whether diagonal entries are always placed in bin 0 (the highest
+         * precision, FP64) regardless of their magnitude.
+         *
+         * When true (the default), this protects iterative methods that
+         * divide by the diagonal (e.g. Gauss-Seidel, ILU sweeps) from
+         * accumulating a bin's quantization error in the divisor, and
+         * decouples the per-row error bound from the user's choice of AMP
+         * tolerance @c tau. When false, diagonal entries are binned by
+         * magnitude like any other entry: a small diagonal entry may then
+         * end up in a lower-precision bin, or be dropped entirely by
+         * underflow, which can cause such divide-by-diagonal methods to
+         * silently skip the row.
+         */
+        bool GKO_FACTORY_PARAMETER_SCALAR(high_precision_diagonal, true);
     };
     GKO_ENABLE_LIN_OP_FACTORY(AMP, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);

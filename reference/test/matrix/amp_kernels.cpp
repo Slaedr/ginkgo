@@ -471,7 +471,7 @@ TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
     constexpr int q = gko::amp::narrow_types<T>::num_types;
 
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
-        rexec, this->ell1.get(), this->tol, q - 1, max_nnz, bin_nnz);
+        rexec, this->ell1.get(), this->tol, q - 1, true, max_nnz, bin_nnz);
 
     // Bin 0 holds two entries in row 1: the diagonal a_{1,1}=1.2e-11
     // (forced into bin 0 by the diagonal-in-bin-0 override) plus the
@@ -491,6 +491,29 @@ TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZs)
     EXPECT_EQ(max_nnz[0], 2);
     EXPECT_EQ(max_nnz[1], 2);
 #endif
+}
+
+TYPED_TEST(AMPDouble, GenerateComputesCorrectBinNNZsWithoutForcedDiagonal)
+{
+    using T = typename TestFixture::value_type;
+    using itype = typename TestFixture::index_type;
+    gko::amp::precision_array<itype, T> max_nnz;
+    gko::amp::precision_array<gko::int64, T> bin_nnz;
+    auto rexec =
+        std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
+    constexpr int q = gko::amp::narrow_types<T>::num_types;
+
+    gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
+        rexec, this->ell1.get(), this->tol, q - 1, false, max_nnz, bin_nnz);
+
+    // With force_diagonal_0 disabled, a_{1,1}=1.2e-11 is binned by
+    // magnitude like any other entry: it falls below every bin's lower
+    // bound, so it is dropped instead of being forced into bin 0. Row 1's
+    // bin 0 count drops from 2 (forced diagonal + magnitude-binned
+    // a_{1,2}=2.0) to 1 (just a_{1,2}=2.0), which is also the new maximum
+    // and total across all rows (rows 0, 2, 3, 4 each still contribute 1).
+    EXPECT_EQ(max_nnz[0], 1);
+    EXPECT_EQ(bin_nnz[0], 5);
 }
 
 TYPED_TEST(AMPDouble, GenerateEllScattersBinsCorrectly)
@@ -527,7 +550,7 @@ TYPED_TEST(AMPDouble, GenerateEllScattersBinsCorrectly)
         [&](auto k) { amat[k] = abins[k].get(); });
 
     gko::kernels::reference::amp::generate_ell_scatter_bins(
-        rexec, this->ell1.get(), this->tol, num_bins - 1, amat);
+        rexec, this->ell1.get(), this->tol, num_bins - 1, true, amat);
 
     using types_list = typename gko::amp::narrow_types<T>::type;
     gko::constexpr_for<0, num_bins, 1>([&](auto k) {
@@ -1358,7 +1381,7 @@ TYPED_TEST(AMPFloat, GenerateComputesCorrectBinNNZs)
     constexpr int q = gko::amp::narrow_types<T>::num_types;
 
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
-        rexec, this->ell1.get(), this->tol, q - 1, max_nnz, bin_nnz);
+        rexec, this->ell1.get(), this->tol, q - 1, true, max_nnz, bin_nnz);
 
 #if GINKGO_HAVE_AMP_HALF
     EXPECT_EQ(max_nnz[0], 2);
@@ -1404,7 +1427,7 @@ TYPED_TEST(AMPFloat, GenerateEllScattersBinsCorrectly)
         [&](auto k) { amat[k] = abins[k].get(); });
 
     gko::kernels::reference::amp::generate_ell_scatter_bins(
-        rexec, this->ell1.get(), this->tol, num_bins - 1, amat);
+        rexec, this->ell1.get(), this->tol, num_bins - 1, true, amat);
 
     using types_list = typename gko::amp::narrow_types<T>::type;
     gko::constexpr_for<0, num_bins, 1>([&](auto k) {
@@ -2090,7 +2113,7 @@ TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizes)
     constexpr int q = gko::amp::narrow_types<double>::num_types;
 
     gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
-        rexec, this->csr1.get(), this->tol, q - 1, row_sz_ptrs);
+        rexec, this->csr1.get(), this->tol, q - 1, true, row_sz_ptrs);
 
     auto rnv = row_sz_ptrs;
     // Bin 0: rows 0, 2, 3, 4 each contribute 1 entry; row 1 contributes 2
@@ -2130,6 +2153,36 @@ TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizes)
     for (int i = 0; i < gko::amp::narrow_types<double>::num_types; i++) {
         EXPECT_EQ(rnv[i][5], 0);
     }
+}
+
+
+TYPED_TEST(AMPDoubleCsr, GenerateComputesCorrectRowSizesWithoutForcedDiagonal)
+{
+    using T = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    gko::amp::precision_array<gko::array<index_type>, T> row_sizes;
+    for (int i = 0; i < gko::amp::narrow_types<double>::num_types; i++) {
+        row_sizes[i].set_executor(this->exec);
+        row_sizes[i].resize_and_reset(this->csr1->get_size()[0] + 1);
+    }
+    auto row_sz_ptrs = gko::amp::get_pointer_array<index_type, T>(row_sizes);
+    auto rexec =
+        std::dynamic_pointer_cast<const gko::ReferenceExecutor>(this->exec);
+    constexpr int q = gko::amp::narrow_types<double>::num_types;
+
+    gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
+        rexec, this->csr1.get(), this->tol, q - 1, false, row_sz_ptrs);
+
+    auto rnv = row_sz_ptrs;
+    // With force_diagonal_0 disabled, a_{1,1}=1.2e-11 is dropped (it falls
+    // below every bin's lower bound) instead of being forced into bin 0, so
+    // row 1's bin 0 count drops from 2 to 1 (just the magnitude-binned
+    // a_{1,2}=2.0); all other rows are unaffected.
+    EXPECT_EQ(rnv[0][0], 1);
+    EXPECT_EQ(rnv[0][1], 1);
+    EXPECT_EQ(rnv[0][2], 1);
+    EXPECT_EQ(rnv[0][3], 1);
+    EXPECT_EQ(rnv[0][4], 1);
 }
 
 
@@ -2191,7 +2244,7 @@ TYPED_TEST(AMPDoubleCsr, GenerateCsrScattersBinsCorrectly)
         [&](auto k) { amat[k] = abins[k].get(); });
 
     gko::kernels::reference::amp::generate_cwise_csr_scatter_bins(
-        rexec, this->csr1.get(), this->tol, q - 1, amat);
+        rexec, this->csr1.get(), this->tol, q - 1, true, amat);
 
     using types_list = typename gko::amp::narrow_types<T>::type;
     gko::constexpr_for<0, num_bins, 1>([&](auto k) {

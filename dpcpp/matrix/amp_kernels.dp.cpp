@@ -89,7 +89,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DpcppExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    const int max_bin,
+    const int max_bin, const bool force_diagonal_0,
     gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row,
     gko::amp::precision_array<int64, ValueType>& bin_nnz)
 {

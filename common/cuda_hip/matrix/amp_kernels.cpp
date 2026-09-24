@@ -563,6 +563,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     const float tolerance, const size_type nrows, const size_type ostride,
     const size_type omax_nnz, const ValueType* const __restrict__ ovals,
     const IndexType* const __restrict__ ocolids, const int max_bin,
+    const bool force_diagonal_0,
     IndexType* const __restrict__ max_bin_nnzs_blocks,
     int64* const __restrict__ sum_bin_nnzs_blocks)
 {
@@ -606,7 +607,8 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
                 min_bin, min_repr, abs(ovals[j * ostride + irow]),
-                jcol == static_cast<IndexType>(irow), max_bin);
+                force_diagonal_0 & (jcol == static_cast<IndexType>(irow)),
+                max_bin);
             if (ibin >= 0) {
                 row_nnz[ibin]++;
             }
@@ -746,7 +748,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    const int max_bin,
+    const int max_bin, const bool force_diagonal_0,
     gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row,
     gko::amp::precision_array<int64, ValueType>& bin_nnz)
 {
@@ -774,7 +776,7 @@ void generate_cwise_ell_max_nnz_per_row(
 
     compute_max_nnzs<q><<<num_blocks, block_size, 0, exec->get_stream()>>>(
         tolerance, nrows, ostride, omax_nnz, as_device_type(ovals), ocolids,
-        max_bin, max_nnz_ptr, sum_nnz_ptr);
+        max_bin, force_diagonal_0, max_nnz_ptr, sum_nnz_ptr);
     finish_reduce<q><<<1, block_size, 0, exec->get_stream()>>>(
         max_nnz_ptr, sum_nnz_ptr, num_blocks, num_blocks);
     exec->synchronize();

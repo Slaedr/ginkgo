@@ -81,6 +81,7 @@ int main(int argc, char* argv[])
         {"executor", cfg.executor},
         {"amp_tolerance", cfg.amp_tolerance},
         {"amp_bin_foldup_nnz_ratio", cfg.amp_bin_foldup_nnz_ratio},
+        {"amp_high_precision_diagonal", cfg.amp_high_precision_diagonal},
         {"amp_base_format", cfg.amp_base_format},
         {"amp_spmv_strategy", to_string(cfg.amp_spmv_strategy)},
         {"amp_subwarp_size", cfg.amp_subwarp_size},
@@ -222,6 +223,7 @@ int main(int argc, char* argv[])
                 .with_subwarp_size(cfg.amp_subwarp_size)
                 .with_csr_strategy(cfg.amp_csr_strategy)
                 .with_bin_foldup_nnz_ratio(cfg.amp_bin_foldup_nnz_ratio)
+                .with_high_precision_diagonal(cfg.amp_high_precision_diagonal)
                 .on(exec)
                 ->generate(base_mat));
         exec->synchronize();

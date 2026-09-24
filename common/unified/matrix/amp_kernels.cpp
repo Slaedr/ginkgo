@@ -30,7 +30,7 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_csr_calculate_row_sizes(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Csr<ValueType, IndexType>* a, const float tolerance,
-    const int max_bin,
+    const int max_bin, const bool force_diagonal_0,
     gko::amp::precision_array<IndexType*, ValueType>& bin_row_sizes)
 {
     using DValueType =
@@ -46,7 +46,7 @@ void generate_cwise_csr_calculate_row_sizes(
     const IndexType* const orow_ptrs = a->get_const_row_ptrs();
     run_kernel(
         exec,
-        [tolerance, min_repr, nrows, max_bin] GKO_KERNEL(
+        [tolerance, min_repr, nrows, max_bin, force_diagonal_0] GKO_KERNEL(
             auto irow, auto orow_ptrs, auto ocolidxs, auto ovals,
             auto bin_row_sizes) {
             for (int k = 0; k < q; k++) {
@@ -69,7 +69,9 @@ void generate_cwise_csr_calculate_row_sizes(
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
                 const int ibin = get_adjusted_bin<d_real_type>(
                     min_bin, min_repr, abs(ovals[j]),
-                    ocolidxs[j] == static_cast<IndexType>(irow), max_bin);
+                    force_diagonal_0 &
+                        (ocolidxs[j] == static_cast<IndexType>(irow)),
+                    max_bin);
                 if (ibin >= 0) {
                     bin_row_sizes[ibin][irow]++;
                 }
@@ -86,7 +88,8 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_csr_scatter_bins(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Csr<ValueType, IndexType>* a, const float tolerance,
-    const int max_bin, gko::amp::precision_array<LinOp*, ValueType>& amat)
+    const int max_bin, const bool force_diagonal_0,
+    gko::amp::precision_array<LinOp*, ValueType>& amat)
 {
     using DValueType =
         gko::kernels::GKO_DEVICE_NAMESPACE::device_type<ValueType>;
@@ -124,7 +127,7 @@ void generate_cwise_csr_scatter_bins(
     // of that bin.
     run_kernel(
         exec,
-        [tolerance, min_repr, max_bin] GKO_KERNEL(
+        [tolerance, min_repr, max_bin, force_diagonal_0] GKO_KERNEL(
             auto irow, auto orow_ptrs, auto ocolidxs, auto ovals,
             auto xrow_ptrs, auto xcol_idxs, auto xvalues) {
             std::array<IndexType, q> cursors;
@@ -139,7 +142,9 @@ void generate_cwise_csr_scatter_bins(
             for (auto j = orow_ptrs[irow]; j < orow_ptrs[irow + 1]; j++) {
                 const int ibin = get_adjusted_bin<d_real_type>(
                     min_bin, min_repr, abs(ovals[j]),
-                    ocolidxs[j] == static_cast<IndexType>(irow), max_bin);
+                    force_diagonal_0 &
+                        (ocolidxs[j] == static_cast<IndexType>(irow)),
+                    max_bin);
                 if (ibin >= 0) {
                     const auto pos = cursors[ibin]++;
                     xcol_idxs[ibin][pos] = ocolidxs[j];
@@ -159,7 +164,8 @@ template <typename ValueType, typename IndexType>
 void generate_ell_scatter_bins(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    const int max_bin, gko::amp::precision_array<LinOp*, ValueType>& amat)
+    const int max_bin, const bool force_diagonal_0,
+    gko::amp::precision_array<LinOp*, ValueType>& amat)
 {
     using DValueType =
         gko::kernels::GKO_DEVICE_NAMESPACE::device_type<ValueType>;
@@ -211,9 +217,10 @@ void generate_ell_scatter_bins(
 
     run_kernel(
         exec,
-        [tolerance, min_repr, bin_strides, max_bin] GKO_KERNEL(
-            auto irow, auto ocolidxs, auto ovals, auto ostride, auto omax_nnz,
-            auto xcol_idxs, auto xvalues) {
+        [tolerance, min_repr, bin_strides, max_bin,
+         force_diagonal_0] GKO_KERNEL(auto irow, auto ocolidxs, auto ovals,
+                                      auto ostride, auto omax_nnz,
+                                      auto xcol_idxs, auto xvalues) {
             // Compute row's 1-norm
             auto rnorm = static_cast<d_real_type>(0);
             for (int j = 0; j < omax_nnz; j++) {
@@ -236,7 +243,8 @@ void generate_ell_scatter_bins(
                 const auto jcol = ocolidxs[oloc];
                 const int ibin = get_adjusted_bin<d_real_type>(
                     min_bin, min_repr, abs(ovals[oloc]),
-                    jcol == static_cast<IndexType>(irow), max_bin);
+                    force_diagonal_0 & (jcol == static_cast<IndexType>(irow)),
+                    max_bin);
                 if (ibin >= 0) {
                     const auto nzloc =
                         ixj[ibin] * static_cast<ptrdiff_t>(bin_strides[ibin]) +

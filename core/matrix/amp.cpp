@@ -240,6 +240,7 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
     const auto tol = parameters_.tolerance;
     const auto ratio = parameters_.bin_foldup_nnz_ratio;
+    const bool force_diagonal_0 = parameters_.high_precision_diagonal;
 
     std::array<gko::array<IndexType>, num_precisions> row_sizes;
 
@@ -256,7 +257,7 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     // that would land in a bin above max_bin are clamped down to it.
     auto compute_row_sizes = [&](int max_bin) {
         exec->run(amp::make_generate_cwise_csr_calculate_row_sizes(
-            mtx, tol, max_bin, bin_row_sizes));
+            mtx, tol, max_bin, force_diagonal_0, bin_row_sizes));
         exec->run(amp::make_reduce_bins_max(mtx, row_sizes, max_nnz_per_row_));
         for (int k = 0; k < q; k++) {
             exec->run(
@@ -299,8 +300,8 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     gko::constexpr_for<0, num_bins, 1>(
         [&](auto k) { amat[k] = abins[k].get(); });
 
-    exec->run(amp::make_generate_cwise_csr_scatter_bins(mtx, tol, fold_max_bin,
-                                                        amat));
+    exec->run(amp::make_generate_cwise_csr_scatter_bins(
+        mtx, tol, fold_max_bin, force_diagonal_0, amat));
 
     gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType> cabins;
     for (int i = 0; i < q; i++) {
@@ -319,13 +320,15 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     constexpr int q = AMP<ValueType, IndexType>::num_precisions;
     const auto tol = parameters_.tolerance;
     const auto ratio = parameters_.bin_foldup_nnz_ratio;
+    const bool force_diagonal_0 = parameters_.high_precision_diagonal;
 
     // Computes max_nnz_per_row_ and bin_nnz for the given max_bin. Entries
     // that would land in a bin above max_bin are clamped down to it.
     gko::amp::precision_array<int64, ValueType> bin_nnz_dev;
     auto compute_max_nnz = [&](int max_bin) {
         exec->run(amp::make_generate_cwise_ell_max_nnz_per_row(
-            mtx, tol, max_bin, max_nnz_per_row_, bin_nnz_dev));
+            mtx, tol, max_bin, force_diagonal_0, max_nnz_per_row_,
+            bin_nnz_dev));
         exec->synchronize();
     };
 
@@ -364,8 +367,8 @@ AMP<ValueType, IndexType>::generate_amp_impl(
     gko::constexpr_for<0, num_bins, 1>(
         [&](auto k) { amat[k] = abins[k].get(); });
 
-    exec->run(
-        amp::make_generate_ell_scatter_bins(mtx, tol, fold_max_bin, amat));
+    exec->run(amp::make_generate_ell_scatter_bins(mtx, tol, fold_max_bin,
+                                                  force_diagonal_0, amat));
 
     gko::amp::precision_array<std::unique_ptr<const LinOp>, ValueType> cabins;
     for (int i = 0; i < matrix::AMP<ValueType, IndexType>::num_precisions;
