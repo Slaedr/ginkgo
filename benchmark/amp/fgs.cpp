@@ -259,7 +259,7 @@ int main(int argc, char* argv[])
                         {"time_ms", ms},
                         {"gflops", gflops},
                         {"speedup", baseline_ms / ms},
-                        {"rel_error_vs_ell_double", err}});
+                        {"rel_error_vs_double", err}});
         amp_details = compute_amp_details(cfg, mat.get(), amp_setup_ms, rows);
     }
 
