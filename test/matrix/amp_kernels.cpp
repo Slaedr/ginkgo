@@ -56,8 +56,11 @@ TEST_F(Amp, CanBeClonedToAnotherExecutor)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto ell = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(ell)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(ell)));
 
     auto amp_exec = gko::clone(exec, amp_ref);
 
@@ -92,14 +95,42 @@ TEST_F(Amp, GenerateEllRownormsStorageIsEquivalentToRef)
     auto dmtx = gko::clone(exec, mtx);
     gko::amp::precision_array<IndexType, T> ref_max_nnz;
     gko::amp::precision_array<IndexType, T> dev_max_nnz;
+    gko::amp::precision_array<gko::int64, T> ref_bin_nnz;
+    gko::amp::precision_array<gko::int64, T> dev_bin_nnz;
 
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
-        ref, mtx.get(), tol, ref_max_nnz);
+        ref, mtx.get(), tol, q - 1, true, ref_max_nnz, ref_bin_nnz);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_cwise_ell_max_nnz_per_row(
-        exec, dmtx.get(), tol, dev_max_nnz);
+        exec, dmtx.get(), tol, q - 1, true, dev_max_nnz, dev_bin_nnz);
 
     for (int k = 0; k < q; k++) {
         EXPECT_EQ(dev_max_nnz[k], ref_max_nnz[k]);
+        EXPECT_EQ(dev_bin_nnz[k], ref_bin_nnz[k]);
+    }
+}
+
+
+TEST_F(Amp, GenerateEllRownormsStorageIsEquivalentToRefWithoutForcedDiagonal)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto mtx = gen_mtx(532, 231);
+    auto dmtx = gko::clone(exec, mtx);
+    gko::amp::precision_array<IndexType, T> ref_max_nnz;
+    gko::amp::precision_array<IndexType, T> dev_max_nnz;
+    gko::amp::precision_array<gko::int64, T> ref_bin_nnz;
+    gko::amp::precision_array<gko::int64, T> dev_bin_nnz;
+
+    gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
+        ref, mtx.get(), tol, q - 1, false, ref_max_nnz, ref_bin_nnz);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_cwise_ell_max_nnz_per_row(
+        exec, dmtx.get(), tol, q - 1, false, dev_max_nnz, dev_bin_nnz);
+
+    for (int k = 0; k < q; k++) {
+        EXPECT_EQ(dev_max_nnz[k], ref_max_nnz[k]);
+        EXPECT_EQ(dev_bin_nnz[k], ref_bin_nnz[k]);
     }
 }
 
@@ -114,8 +145,9 @@ TEST_F(Amp, GenerateEllScatterBinsIsEquivalentToRef)
     auto dmtx = gko::clone(exec, mtx);
     // Compute max_nnz per bin using reference kernel
     gko::amp::precision_array<IndexType, T> max_nnz;
+    gko::amp::precision_array<gko::int64, T> bin_nnz;
     gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
-        ref, mtx.get(), tol, max_nnz);
+        ref, mtx.get(), tol, q - 1, true, max_nnz, bin_nnz);
     // Allocate bins on ref and exec with the same max_nnz
     auto ref_bins =
         gko::amp::allocate_bins<T, IndexType>(ref, mtx->get_size(), max_nnz);
@@ -131,10 +163,58 @@ TEST_F(Amp, GenerateEllScatterBinsIsEquivalentToRef)
     }
 
     // Run kernel on ref and exec
-    gko::kernels::reference::amp::generate_ell_scatter_bins(ref, mtx.get(), tol,
-                                                            ref_amat);
+    gko::kernels::reference::amp::generate_ell_scatter_bins(
+        ref, mtx.get(), tol, q - 1, true, ref_amat);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_ell_scatter_bins(
-        exec, dmtx.get(), tol, exec_amat);
+        exec, dmtx.get(), tol, q - 1, true, exec_amat);
+
+    // Compare each bin
+    using types_list = typename gko::amp::narrow_types<T>::type;
+    gko::constexpr_for<0, num_bins, 1>([&](auto k) {
+        using vt = typename std::tuple_element<k, types_list>::type;
+        auto ref_ell =
+            dynamic_cast<gko::matrix::Ell<vt, IndexType>*>(ref_amat[k]);
+        auto exec_ell =
+            dynamic_cast<gko::matrix::Ell<vt, IndexType>*>(exec_amat[k]);
+        ASSERT_TRUE(ref_ell);
+        ASSERT_TRUE(exec_ell);
+        GKO_ASSERT_MTX_NEAR(ref_ell, exec_ell, 0);
+    });
+}
+
+
+TEST_F(Amp, GenerateEllScatterBinsIsEquivalentToRefWithoutForcedDiagonal)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto mtx = gen_mtx(532, 231);
+    auto dmtx = gko::clone(exec, mtx);
+    // Compute max_nnz per bin using reference kernel
+    gko::amp::precision_array<IndexType, T> max_nnz;
+    gko::amp::precision_array<gko::int64, T> bin_nnz;
+    gko::kernels::reference::amp::generate_cwise_ell_max_nnz_per_row(
+        ref, mtx.get(), tol, q - 1, false, max_nnz, bin_nnz);
+    // Allocate bins on ref and exec with the same max_nnz
+    auto ref_bins =
+        gko::amp::allocate_bins<T, IndexType>(ref, mtx->get_size(), max_nnz);
+    auto exec_bins =
+        gko::amp::allocate_bins<T, IndexType>(exec, dmtx->get_size(), max_nnz);
+    constexpr auto num_bins = std::tuple_size<decltype(ref_bins)>::value;
+    static_assert(num_bins == q, "Wrong number of bins!");
+    gko::amp::precision_array<gko::LinOp*, T> ref_amat;
+    gko::amp::precision_array<gko::LinOp*, T> exec_amat;
+    for (int k = 0; k < num_bins; k++) {
+        ref_amat[k] = ref_bins[k].get();
+        exec_amat[k] = exec_bins[k].get();
+    }
+
+    // Run kernel on ref and exec
+    gko::kernels::reference::amp::generate_ell_scatter_bins(
+        ref, mtx.get(), tol, q - 1, false, ref_amat);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_ell_scatter_bins(
+        exec, dmtx.get(), tol, q - 1, false, exec_amat);
 
     // Compare each bin
     using types_list = typename gko::amp::narrow_types<T>::type;
@@ -157,8 +237,11 @@ TEST_F(Amp, SpmvIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto ell = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(ell)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(ell)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -180,8 +263,11 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto ell = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(ell)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(ell)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -208,8 +294,11 @@ TEST_F(Amp, SpmvWithMultipleRHSIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto ell = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(ell)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(ell)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 4);
     auto b_d = gko::clone(exec, b_ref);
@@ -231,8 +320,11 @@ TEST_F(Amp, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto ell = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(ell)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(ell)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 4);
     auto b_d = gko::clone(exec, b_ref);
@@ -262,6 +354,7 @@ TEST_F(Amp, IndependentBucketsSpmvIsEquivalentToRef)
     auto amp_ref =
         AmpMtx::build()
             .with_tolerance(tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(AmpMtx::strategy_type::independent_buckets)
             .on(ref)
             ->generate(gko::share(std::move(ell)));
@@ -287,6 +380,7 @@ TEST_F(Amp, IndependentBucketsAdvancedSpmvIsEquivalentToRef)
     auto amp_ref =
         AmpMtx::build()
             .with_tolerance(tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(AmpMtx::strategy_type::independent_buckets)
             .on(ref)
             ->generate(gko::share(std::move(ell)));
@@ -315,8 +409,11 @@ TEST_F(Amp, FillInDenseIsEquivalentToRef)
     const float tol = 1e-10;
     auto ell = gen_mtx(532, 231);
     // Build AMP matrix on ref, then clone to exec
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(ell)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(ell)));
     auto amp_exec = gko::clone(exec, amp_ref);
     auto result_ref = Vec::create(ref, amp_ref->get_size());
     auto result_exec = Vec::create(exec, amp_exec->get_size());
@@ -339,8 +436,11 @@ TEST_F(Amp, ExtractDiagonalIsEquivalentToRef)
     const float tol = 1e-10;
     auto ell = gen_mtx(532, 231);
     // Build AMP matrix on ref, then clone to exec
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(ell)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(ell)));
     auto amp_exec = gko::clone(exec, amp_ref);
     const auto diag_size =
         std::min(amp_ref->get_size()[0], amp_ref->get_size()[1]);
@@ -374,8 +474,11 @@ TEST_F(Amp, SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
     }
     auto ell_ref = Mtx::create(ref);
     dns_ref->convert_to(ell_ref.get());
-    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
-        gko::share(ell_ref->clone()));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(0.01f)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(ell_ref->clone()));
     // Verify bin 0 contains only the diagonals (one entry per row).
     auto bin0 = dynamic_cast<const Mtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
@@ -409,8 +512,11 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
     }
     auto ell_ref = Mtx::create(ref);
     dns_ref->convert_to(ell_ref.get());
-    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
-        gko::share(ell_ref->clone()));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(0.01f)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(ell_ref->clone()));
     // Verify bin 0 contains only the diagonals (one entry per row).
     auto bin0 = dynamic_cast<const Mtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
@@ -449,13 +555,19 @@ TEST_F(Amp, ReadfromDeviceProducesSameResultAsFactoryGenerate)
 
     // Method 1: read directly (via empty factory-generated AMP)
     auto ell_empty = gko::share(Ell::create(this->exec));
-    auto mtx_read = AmpMtx::build().on(this->exec)->generate(ell_empty);
+    auto mtx_read = AmpMtx::build()
+                        .with_bin_foldup_nnz_ratio(0.0f)
+                        .on(this->exec)
+                        ->generate(ell_empty);
     mtx_read->read(data);
 
     // Method 2: factory generate from ELL
     auto ell = gko::share(Ell::create(this->exec));
     ell->read(data);
-    auto mtx_gen = AmpMtx::build().on(this->exec)->generate(ell);
+    auto mtx_gen = AmpMtx::build()
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(this->exec)
+                       ->generate(ell);
 
     // Both should produce the same dense result
     auto dense_read = Dense::create(this->exec);
@@ -481,7 +593,10 @@ TEST_F(Amp, MoveReadFromDeviceProducesSameResultAsFactoryGenerate)
 
     // Method 1: read directly (via empty factory-generated AMP)
     auto ell_empty = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
-    auto mtx_read = AmpMtx::build().on(this->exec)->generate(ell_empty);
+    auto mtx_read = AmpMtx::build()
+                        .with_bin_foldup_nnz_ratio(0.0f)
+                        .on(this->exec)
+                        ->generate(ell_empty);
     mtx_read->read(std::move(data));
     EXPECT_EQ(data.get_num_stored_elements(), 0);
     auto zero_sz = gko::dim<2>{0, 0};
@@ -490,7 +605,10 @@ TEST_F(Amp, MoveReadFromDeviceProducesSameResultAsFactoryGenerate)
     // Method 2: factory generate from ELL
     auto ell = gko::share(Ell::create(this->exec));
     ell->read(h_data);
-    auto mtx_gen = AmpMtx::build().on(this->exec)->generate(ell);
+    auto mtx_gen = AmpMtx::build()
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(this->exec)
+                       ->generate(ell);
 
     // Both should produce the same dense result
     auto dense_read = Dense::create(this->exec);
@@ -560,10 +678,39 @@ TEST_F(AmpCsr, GenerateCsrRownormsStorageIsEquivalentToRef)
         gko::amp::get_pointer_array<IndexType, T>(dev_bins_rowptrs);
 
     gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
-        ref, mtx.get(), tol, ref_rowptrs);
+        ref, mtx.get(), tol, q - 1, true, ref_rowptrs);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::
-        generate_cwise_csr_calculate_row_sizes(exec, dmtx.get(), tol,
-                                               dev_rowptrs);
+        generate_cwise_csr_calculate_row_sizes(exec, dmtx.get(), tol, q - 1,
+                                               true, dev_rowptrs);
+
+    for (int k = 0; k < q; k++) {
+        GKO_ASSERT_ARRAY_NEAR(dev_bins_rowptrs[k], ref_bins_rowptrs[k], 0);
+    }
+}
+
+
+TEST_F(AmpCsr, GenerateCsrRownormsStorageIsEquivalentToRefWithoutForcedDiagonal)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto mtx = gen_mtx(532, 231);
+    auto dmtx = gko::clone(exec, mtx);
+    auto ref_bins_rowptrs =
+        create_row_sizes<T, IndexType>(ref, mtx->get_size()[0]);
+    auto dev_bins_rowptrs =
+        create_row_sizes<T, IndexType>(exec, dmtx->get_size()[0]);
+    auto ref_rowptrs =
+        gko::amp::get_pointer_array<IndexType, T>(ref_bins_rowptrs);
+    auto dev_rowptrs =
+        gko::amp::get_pointer_array<IndexType, T>(dev_bins_rowptrs);
+
+    gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
+        ref, mtx.get(), tol, q - 1, false, ref_rowptrs);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::
+        generate_cwise_csr_calculate_row_sizes(exec, dmtx.get(), tol, q - 1,
+                                               false, dev_rowptrs);
 
     for (int k = 0; k < q; k++) {
         GKO_ASSERT_ARRAY_NEAR(dev_bins_rowptrs[k], ref_bins_rowptrs[k], 0);
@@ -586,7 +733,7 @@ TEST_F(AmpCsr, GenerateCsrScatterBinsIsEquivalentToRef)
     auto ref_rowptrs =
         gko::amp::get_pointer_array<IndexType, T>(ref_bins_rowptrs);
     gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
-        ref, mtx.get(), tol, ref_rowptrs);
+        ref, mtx.get(), tol, q - 1, true, ref_rowptrs);
     for (int k = 0; k < q; k++) {
         std::exclusive_scan(ref_rowptrs[k], ref_rowptrs[k] + nrows + 1,
                             ref_rowptrs[k], 0);
@@ -608,9 +755,65 @@ TEST_F(AmpCsr, GenerateCsrScatterBinsIsEquivalentToRef)
 
     // Run kernel on ref and exec
     gko::kernels::reference::amp::generate_cwise_csr_scatter_bins(
-        ref, mtx.get(), tol, ref_amat);
+        ref, mtx.get(), tol, q - 1, true, ref_amat);
     gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_cwise_csr_scatter_bins(
-        exec, dmtx.get(), tol, exec_amat);
+        exec, dmtx.get(), tol, q - 1, true, exec_amat);
+
+    // Compare each bin
+    using types_list = typename gko::amp::narrow_types<T>::type;
+    gko::constexpr_for<0, num_bins, 1>([&](auto k) {
+        using vt = typename std::tuple_element<k, types_list>::type;
+        auto ref_csr =
+            dynamic_cast<gko::matrix::Csr<vt, IndexType>*>(ref_amat[k]);
+        auto exec_csr =
+            dynamic_cast<gko::matrix::Csr<vt, IndexType>*>(exec_amat[k]);
+        ASSERT_TRUE(ref_csr);
+        ASSERT_TRUE(exec_csr);
+        GKO_ASSERT_MTX_NEAR(ref_csr, exec_csr, 0);
+    });
+}
+
+
+TEST_F(AmpCsr, GenerateCsrScatterBinsIsEquivalentToRefWithoutForcedDiagonal)
+{
+    using T = value_type;
+    using IndexType = index_type;
+    constexpr int q = gko::matrix::AMP<T, IndexType>::num_precisions;
+    const float tol = 1e-10;
+    auto mtx = gen_mtx(532, 231);
+    auto dmtx = gko::clone(exec, mtx);
+    const auto nrows = mtx->get_size()[0];
+    // Compute total_nnz per bin using reference kernel
+    auto ref_bins_rowptrs = create_row_sizes<T, IndexType>(ref, nrows + 1);
+    auto dev_bins_rowptrs = create_row_sizes<T, IndexType>(exec, nrows + 1);
+    auto ref_rowptrs =
+        gko::amp::get_pointer_array<IndexType, T>(ref_bins_rowptrs);
+    gko::kernels::reference::amp::generate_cwise_csr_calculate_row_sizes(
+        ref, mtx.get(), tol, q - 1, false, ref_rowptrs);
+    for (int k = 0; k < q; k++) {
+        std::exclusive_scan(ref_rowptrs[k], ref_rowptrs[k] + nrows + 1,
+                            ref_rowptrs[k], 0);
+    }
+    dev_bins_rowptrs = ref_bins_rowptrs;
+    // Allocate bins on ref and exec with the same total_nnz
+    auto ref_bins = gko::amp::allocate_csr_bins<T, IndexType>(
+        ref, mtx->get_size(), ref_bins_rowptrs);
+    auto exec_bins = gko::amp::allocate_csr_bins<T, IndexType>(
+        exec, dmtx->get_size(), dev_bins_rowptrs);
+    constexpr auto num_bins = std::tuple_size<decltype(ref_bins)>::value;
+    static_assert(num_bins == q, "Wrong number of bins!");
+    gko::amp::precision_array<gko::LinOp*, T> ref_amat;
+    gko::amp::precision_array<gko::LinOp*, T> exec_amat;
+    for (int k = 0; k < num_bins; k++) {
+        ref_amat[k] = ref_bins[k].get();
+        exec_amat[k] = exec_bins[k].get();
+    }
+
+    // Run kernel on ref and exec
+    gko::kernels::reference::amp::generate_cwise_csr_scatter_bins(
+        ref, mtx.get(), tol, q - 1, false, ref_amat);
+    gko::kernels::GKO_DEVICE_NAMESPACE::amp::generate_cwise_csr_scatter_bins(
+        exec, dmtx.get(), tol, q - 1, false, exec_amat);
 
     // Compare each bin
     using types_list = typename gko::amp::narrow_types<T>::type;
@@ -637,10 +840,16 @@ TEST_F(AmpCsr, MaxNNZPerRowsAreEquivalentToRef)
     auto d_csr = gko::clone(exec, csr);
     auto nnz_csr = csr->get_num_stored_elements();
 
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(csr)));
-    auto amp_d = AmpMtx::build().with_tolerance(tol).on(exec)->generate(
-        gko::share(std::move(d_csr)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(csr)));
+    auto amp_d = AmpMtx::build()
+                     .with_tolerance(tol)
+                     .with_bin_foldup_nnz_ratio(0.0f)
+                     .on(exec)
+                     ->generate(gko::share(std::move(d_csr)));
 
     for (int k = 0; k < q; k++) {
         EXPECT_LT(amp_ref->get_max_nnz_per_row_for_bin(k), nnz_csr);
@@ -656,8 +865,11 @@ TEST_F(AmpCsr, SpmvIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto csr = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(csr)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(csr)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -679,8 +891,11 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto csr = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(csr)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(csr)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 1);
     auto b_d = gko::clone(exec, b_ref);
@@ -708,8 +923,11 @@ TEST_F(AmpCsr, SpmvWithMultipleRHSIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto csr = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(csr)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(csr)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 4);
     auto b_d = gko::clone(exec, b_ref);
@@ -731,8 +949,11 @@ TEST_F(AmpCsr, AdvancedSpmvWithMultipleRHSIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto csr = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(csr)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(csr)));
     auto amp_d = gko::clone(exec, amp_ref);
     auto b_ref = gen_vec(amp_ref->get_size()[1], 4);
     auto b_d = gko::clone(exec, b_ref);
@@ -763,6 +984,7 @@ TEST_F(AmpCsr, IndependentBucketsSpmvIsEquivalentToRef)
     auto amp_ref =
         AmpMtx::build()
             .with_tolerance(tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(AmpMtx::strategy_type::independent_buckets)
             .on(ref)
             ->generate(gko::share(std::move(csr)));
@@ -788,6 +1010,7 @@ TEST_F(AmpCsr, IndependentBucketsAdvancedSpmvIsEquivalentToRef)
     auto amp_ref =
         AmpMtx::build()
             .with_tolerance(tol)
+            .with_bin_foldup_nnz_ratio(0.0f)
             .with_strategy(AmpMtx::strategy_type::independent_buckets)
             .on(ref)
             ->generate(gko::share(std::move(csr)));
@@ -815,8 +1038,11 @@ TEST_F(AmpCsr, FillInDenseIsEquivalentToRef)
     using IndexType = index_type;
     const float tol = 1e-10;
     auto csr = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(csr)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(csr)));
     auto amp_exec = gko::clone(exec, amp_ref);
     auto result_ref = Vec::create(ref, amp_ref->get_size());
     auto result_exec = Vec::create(exec, amp_exec->get_size());
@@ -838,8 +1064,11 @@ TEST_F(AmpCsr, ExtractDiagonalIsEquivalentToRef)
     using Diag = gko::matrix::Diagonal<T>;
     const float tol = 1e-10;
     auto csr = gen_mtx(532, 231);
-    auto amp_ref = AmpMtx::build().with_tolerance(tol).on(ref)->generate(
-        gko::share(std::move(csr)));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(tol)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(std::move(csr)));
     auto amp_exec = gko::clone(exec, amp_ref);
     const auto diag_size =
         std::min(amp_ref->get_size()[0], amp_ref->get_size()[1]);
@@ -872,8 +1101,11 @@ TEST_F(AmpCsr, SpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
     }
     auto csr_ref = CsrMtx::create(ref);
     dns_ref->convert_to(csr_ref.get());
-    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
-        gko::share(csr_ref->clone()));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(0.01f)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(csr_ref->clone()));
     // Verify bin 0 contains only the diagonals (n entries).
     auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);
@@ -907,8 +1139,11 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
     }
     auto csr_ref = CsrMtx::create(ref);
     dns_ref->convert_to(csr_ref.get());
-    auto amp_ref = AmpMtx::build().with_tolerance(0.01f).on(ref)->generate(
-        gko::share(csr_ref->clone()));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(0.01f)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(gko::share(csr_ref->clone()));
     // Verify bin 0 contains only the diagonals (n entries).
     auto bin0 = dynamic_cast<const CsrMtx*>(amp_ref->get_bin_matrix(0));
     ASSERT_NE(bin0, nullptr);

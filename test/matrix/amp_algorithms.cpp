@@ -90,18 +90,18 @@ void adjust_bin_underflow(std::shared_ptr<gko::EXEC_TYPE> exec,
 template <typename highest_real_type>
 void adjusted_bin(std::shared_ptr<gko::EXEC_TYPE> exec, const double rownorm,
                   const float tol, const highest_real_type abs_number,
-                  gko::array<int>& result_array)
+                  const int max_bin, gko::array<int>& result_array)
 {
     gko::kernels::GKO_DEVICE_NAMESPACE::run_kernel(
         exec,
-        [rownorm, tol, abs_number] GKO_KERNEL(auto i, auto result) {
+        [rownorm, tol, abs_number, max_bin] GKO_KERNEL(auto i, auto result) {
             const auto lbs =
                 gkda::get_bins_precision_lower_bounds<highest_real_type>(
                     rownorm, tol);
             const auto mins =
                 gkda::get_bins_min_representable<highest_real_type>();
             result[i] = gkda::get_adjusted_bin<highest_real_type>(
-                lbs, mins, abs_number, false);
+                lbs, mins, abs_number, false, max_bin);
         },
         result_array.get_size(), result_array);
 }
@@ -366,6 +366,7 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinDouble)
 {
     const double rownorm = 1.0;
     const float tol = 1e-10;
+    constexpr int q = gkda::narrow_types<double>::num_types;
     // Get device-computed lower bounds and min representable
     gko::array<float> lbs_arr(exec, 3);
     bins_precision_lower_bounds<double>(exec, rownorm, tol, lbs_arr);
@@ -380,7 +381,7 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinDouble)
 
     // Large value goes to bin 0
     expected_arr.get_data()[0] = 0;
-    adjusted_bin<double>(exec, rownorm, tol, lb[0] * 2.0, result_arr);
+    adjusted_bin<double>(exec, rownorm, tol, lb[0] * 2.0, q - 1, result_arr);
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 
     // Values just smaller than half min
@@ -390,12 +391,12 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinDouble)
 #else
     expected_arr.get_data()[0] = -1;
 #endif
-    adjusted_bin<double>(exec, rownorm, tol, val_under, result_arr);
+    adjusted_bin<double>(exec, rownorm, tol, val_under, q - 1, result_arr);
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 
     // Very small value gets dropped
     expected_arr.get_data()[0] = -1;
-    adjusted_bin<double>(exec, rownorm, tol, lb[2] * 0.5, result_arr);
+    adjusted_bin<double>(exec, rownorm, tol, lb[2] * 0.5, q - 1, result_arr);
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 }
 
@@ -403,6 +404,7 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinFloat)
 {
     const double rownorm = 1.0;
     const float tol = 1e-10;
+    constexpr int q = gkda::narrow_types<float>::num_types;
     // Get device-computed lower bounds
     gko::array<float> lbs_arr(exec, 2);
     bins_precision_lower_bounds<float>(exec, rownorm, tol, lbs_arr);
@@ -412,11 +414,11 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinFloat)
     gko::array<int> expected_arr(ref, 1);
 
     expected_arr.get_data()[0] = 0;
-    adjusted_bin<float>(exec, rownorm, tol, lb[0] * 2.0f, result_arr);
+    adjusted_bin<float>(exec, rownorm, tol, lb[0] * 2.0f, q - 1, result_arr);
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 
     expected_arr.get_data()[0] = -1;
-    adjusted_bin<float>(exec, rownorm, tol, lb[1] * 0.5f, result_arr);
+    adjusted_bin<float>(exec, rownorm, tol, lb[1] * 0.5f, q - 1, result_arr);
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 }
 
@@ -568,6 +570,7 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinDouble)
 {
     const double rownorm = 1.0;
     const float tol = 1e-10;
+    constexpr int q = gkda::narrow_types<double>::num_types;
     // Get device-computed lower bounds and min representable
     gko::array<float> lbs_arr(exec, 2);
     bins_precision_lower_bounds<double>(exec, rownorm, tol, lbs_arr);
@@ -582,20 +585,20 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinDouble)
 
     // Large value goes to bin 0
     expected_arr.get_data()[0] = 0;
-    adjusted_bin<double>(exec, rownorm, tol, lb[0] * 2.0, result_arr);
+    adjusted_bin<double>(exec, rownorm, tol, lb[0] * 2.0, q - 1, result_arr);
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 
     // Value that would go to bin 1 and is representable stays in bin 1
     const double val_bin1 = (double{lb[0]} + lb[1]) / 2.0;
     if (val_bin1 >= mins[1]) {
         expected_arr.get_data()[0] = 1;
-        adjusted_bin<double>(exec, rownorm, tol, val_bin1, result_arr);
+        adjusted_bin<double>(exec, rownorm, tol, val_bin1, q - 1, result_arr);
         GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
     }
 
     // Very small value gets dropped
     expected_arr.get_data()[0] = -1;
-    adjusted_bin<double>(exec, rownorm, tol, lb[1] * 0.5, result_arr);
+    adjusted_bin<double>(exec, rownorm, tol, lb[1] * 0.5, q - 1, result_arr);
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 }
 

@@ -562,8 +562,10 @@ template <int q, typename ValueType, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     const float tolerance, const size_type nrows, const size_type ostride,
     const size_type omax_nnz, const ValueType* const __restrict__ ovals,
-    const IndexType* const __restrict__ ocolids,
-    IndexType* const __restrict__ max_bin_nnzs_blocks)
+    const IndexType* const __restrict__ ocolids, const int max_bin,
+    const bool force_diagonal_0,
+    IndexType* const __restrict__ max_bin_nnzs_blocks,
+    int64* const __restrict__ sum_bin_nnzs_blocks)
 {
     using real_type = remove_complex<ValueType>;
     // Compute minimum representable values for each bin
@@ -572,9 +574,11 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
 
     // thread-level reduction
     IndexType max_nnz_thread[q];
+    int64 sum_nnz_thread[q];
 #pragma unroll
     for (int i = 0; i < q; i++) {
         max_nnz_thread[i] = 0;
+        sum_nnz_thread[i] = 0;
     }
 
     const int start_row = thread::get_thread_id_flat();
@@ -603,7 +607,8 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
                 min_bin, min_repr, abs(ovals[j * ostride + irow]),
-                jcol == static_cast<IndexType>(irow));
+                force_diagonal_0 & (jcol == static_cast<IndexType>(irow)),
+                max_bin);
             if (ibin >= 0) {
                 row_nnz[ibin]++;
             }
@@ -611,6 +616,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
 #pragma unroll
         for (int k = 0; k < q; k++) {
             max_nnz_thread[k] = max(max_nnz_thread[k], row_nnz[k]);
+            sum_nnz_thread[k] += row_nnz[k];
         }
     }
 
@@ -621,42 +627,56 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
         // warp-reduce
         max_nnz_thread[k] = reduce(warp_tile, max_nnz_thread[k],
                                    [](int a, int b) { return a < b ? b : a; });
+        sum_nnz_thread[k] = reduce(warp_tile, sum_nnz_thread[k],
+                                   [](int64 a, int64 b) { return a + b; });
     }
 
     // copy warp sums into shared memory
     const auto warp_id = threadIdx.x / config::warp_size;
     constexpr auto num_warps = default_block_size / config::warp_size;
     __shared__ IndexType warp_max[num_warps * q];
+    __shared__ int64 warp_sum[num_warps * q];
     __syncthreads();
     if (threadIdx.x % config::warp_size == 0) {
 #pragma unroll
         for (int k = 0; k < q; k++) {
             warp_max[warp_id + k * num_warps] = max_nnz_thread[k];
+            warp_sum[warp_id + k * num_warps] = sum_nnz_thread[k];
         }
     }
     __syncthreads();
 
     // block reduction: one warp handles the reduction for one precision bucket
     for (int k = warp_id; k < q; k += num_warps) {
-        int local = warp_tile.thread_rank() < num_warps
-                        ? warp_max[warp_tile.thread_rank() + k * num_warps]
-                        : 0;
-        local = reduce(warp_tile, local,
-                       [](int a, int b) { return a < b ? b : a; });
+        int local_max = warp_tile.thread_rank() < num_warps
+                            ? warp_max[warp_tile.thread_rank() + k * num_warps]
+                            : 0;
+        local_max = reduce(warp_tile, local_max,
+                           [](int a, int b) { return a < b ? b : a; });
+        int64 local_sum =
+            warp_tile.thread_rank() < num_warps
+                ? warp_sum[warp_tile.thread_rank() + k * num_warps]
+                : int64{0};
+        local_sum = reduce(warp_tile, local_sum,
+                           [](int64 a, int64 b) { return a + b; });
         if (warp_tile.thread_rank() == 0) {
-            warp_max[k * num_warps] = local;
+            warp_max[k * num_warps] = local_max;
+            warp_sum[k * num_warps] = local_sum;
         }
     }
     __syncthreads();
     if (threadIdx.x < q) {
         max_bin_nnzs_blocks[blockIdx.x + threadIdx.x * gridDim.x] =
             warp_max[threadIdx.x * num_warps];
+        sum_bin_nnzs_blocks[blockIdx.x + threadIdx.x * gridDim.x] =
+            warp_sum[threadIdx.x * num_warps];
     }
 }
 
 template <int q, typename IndexType>
 __global__ __launch_bounds__(default_block_size) void finish_reduce(
-    IndexType* const __restrict__ data, const int len, const int stride)
+    IndexType* const __restrict__ max_data, int64* const __restrict__ sum_data,
+    const int len, const int stride)
 {
     const auto group = group::this_thread_block();
     const auto local_id = group.thread_rank();
@@ -667,10 +687,13 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
     if (len > block_size) {
         for (int j = 0; j < q; j++) {
             IndexType local_max = 0;
+            int64 local_sum = 0;
             for (int idx = local_id; idx < len; idx += block_size) {
-                local_max = max(local_max, data[j * stride + idx]);
+                local_max = max(local_max, max_data[j * stride + idx]);
+                local_sum += sum_data[j * stride + idx];
             }
-            data[j * stride + local_id] = local_max;
+            max_data[j * stride + local_id] = local_max;
+            sum_data[j * stride + local_id] = local_sum;
         }
         group.sync();
     }
@@ -681,11 +704,17 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
         group.sync();
         if (local_id < k && local_id < reduced_len) {
             for (int j = 0; j < q; j++) {
-                const IndexType a = data[j * stride + local_id];
+                const IndexType a = max_data[j * stride + local_id];
                 const IndexType b = (local_id + k < reduced_len)
-                                        ? data[j * stride + local_id + k]
+                                        ? max_data[j * stride + local_id + k]
                                         : 0;
-                data[j * stride + local_id] = max(a, b);
+                max_data[j * stride + local_id] = max(a, b);
+
+                const int64 sa = sum_data[j * stride + local_id];
+                const int64 sb = (local_id + k < reduced_len)
+                                     ? sum_data[j * stride + local_id + k]
+                                     : int64{0};
+                sum_data[j * stride + local_id] = sa + sb;
             }
         }
     }
@@ -699,12 +728,18 @@ __global__ __launch_bounds__(default_block_size) void finish_reduce(
     }
     for (int j = 0; j < q; j++) {
         auto val = warp.thread_rank() < reduced_len
-                       ? data[j * stride + warp.thread_rank()]
+                       ? max_data[j * stride + warp.thread_rank()]
                        : 0;
         auto result = reduce(
             warp, val, [](IndexType a, IndexType b) { return max(a, b); });
+        auto sval = warp.thread_rank() < reduced_len
+                        ? sum_data[j * stride + warp.thread_rank()]
+                        : int64{0};
+        auto sresult =
+            reduce(warp, sval, [](int64 a, int64 b) { return a + b; });
         if (warp.thread_rank() == 0) {
-            data[j * stride] = result;
+            max_data[j * stride] = result;
+            sum_data[j * stride] = sresult;
         }
     }
 }
@@ -713,7 +748,9 @@ template <typename ValueType, typename IndexType>
 void generate_cwise_ell_max_nnz_per_row(
     std::shared_ptr<const DefaultExecutor> exec,
     const matrix::Ell<ValueType, IndexType>* a, const float tolerance,
-    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
+    const int max_bin, const bool force_diagonal_0,
+    gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row,
+    gko::amp::precision_array<int64, ValueType>& bin_nnz)
 {
     using real_type = remove_complex<ValueType>;
     constexpr int q = matrix::AMP<ValueType, IndexType>::num_precisions;
@@ -729,20 +766,26 @@ void generate_cwise_ell_max_nnz_per_row(
     // const auto grid_size = ceildiv(nrows, block_size);
     const auto block_size = default_block_size;
     gko::array<IndexType> max_nnz_arr(exec, q * num_blocks);
+    gko::array<int64> sum_nnz_arr(exec, q * num_blocks);
     thrust::fill(thrust::device, max_nnz_arr.get_data(),
                  max_nnz_arr.get_data() + q * num_blocks, 0);
+    thrust::fill(thrust::device, sum_nnz_arr.get_data(),
+                 sum_nnz_arr.get_data() + q * num_blocks, int64{0});
     const auto max_nnz_ptr = max_nnz_arr.get_data();
+    const auto sum_nnz_ptr = sum_nnz_arr.get_data();
 
     compute_max_nnzs<q><<<num_blocks, block_size, 0, exec->get_stream()>>>(
         tolerance, nrows, ostride, omax_nnz, as_device_type(ovals), ocolids,
-        max_nnz_ptr);
+        max_bin, force_diagonal_0, max_nnz_ptr, sum_nnz_ptr);
     finish_reduce<q><<<1, block_size, 0, exec->get_stream()>>>(
-        max_nnz_ptr, num_blocks, num_blocks);
+        max_nnz_ptr, sum_nnz_ptr, num_blocks, num_blocks);
     exec->synchronize();
 
     std::vector<IndexType> max_nnz_host = max_nnz_arr.copy_to_host();
+    std::vector<int64> sum_nnz_host = sum_nnz_arr.copy_to_host();
     for (int k = 0; k < q; k++) {
         max_nnz_per_row[k] = max_nnz_host[k * num_blocks];
+        bin_nnz[k] = sum_nnz_host[k * num_blocks];
     }
 }
 

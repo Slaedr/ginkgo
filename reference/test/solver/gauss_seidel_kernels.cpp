@@ -283,8 +283,11 @@ protected:
             exec);
         // tolerance 1e-6: all O(1) integer values land in the
         // highest-precision bin, so no accuracy is lost.
-        mtx = AMPMtx::build().with_tolerance(1e-6f).on(exec)->generate(
-            gko::share(std::move(ell)));
+        mtx = AMPMtx::build()
+                  .with_tolerance(1e-6f)
+                  .with_bin_foldup_nnz_ratio(0.0f)
+                  .on(exec)
+                  ->generate(gko::share(std::move(ell)));
     }
 
     std::shared_ptr<const gko::ReferenceExecutor> exec;
@@ -431,6 +434,7 @@ TYPED_TEST(FwdGaussSeidelAMP, DiagonalOnlyMatrixSolvesExactlyInOneStep)
         {{4.0, 0.0, 0.0}, {0.0, 2.0, 0.0}, {0.0, 0.0, 5.0}}, this->exec);
     auto diag_amp = AMPMtx::build()
                         .with_tolerance(1e-6f)
+                        .with_bin_foldup_nnz_ratio(0.0f)
                         .on(this->exec)
                         ->generate(gko::share(std::move(diag_ell)));
     auto b = gko::initialize<Vec>({8.0, 6.0, 10.0}, this->exec);
@@ -522,8 +526,11 @@ protected:
         // clang-format on
         // Clone the ELL matrix so that mtx_ell stays accessible for
         // the ELL kernel calls inside the tests.
-        mtx_amp = AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(
-            gko::share(mtx_ell->clone()));
+        mtx_amp = AMPMtx::build()
+                      .with_tolerance(amp_tol)
+                      .with_bin_foldup_nnz_ratio(0.0f)
+                      .on(exec)
+                      ->generate(gko::share(mtx_ell->clone()));
     }
 
     std::shared_ptr<const gko::ReferenceExecutor> exec;
@@ -882,8 +889,11 @@ protected:
              {3e-4, 0.7,  0.0,  3.0 }},
             // clang-format on
             exec);
-        mtx = AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(
-            gko::share(std::move(csr)));
+        mtx = AMPMtx::build()
+                  .with_tolerance(amp_tol)
+                  .with_bin_foldup_nnz_ratio(0.0f)
+                  .on(exec)
+                  ->generate(gko::share(std::move(csr)));
     }
 
     std::shared_ptr<const gko::ReferenceExecutor> exec;
@@ -1195,8 +1205,11 @@ TEST_F(FwdGaussSeidelMulticolor, SweepMatchesSequentialSweepEll)
 TEST_F(FwdGaussSeidelMulticolor, SweepMatchesSequentialSweepWithinTolAMPCsr)
 {
     auto x_seq = sequential_sweep_from_zero();
-    auto amp = gko::share(
-        AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(mtx));
+    auto amp = gko::share(AMPMtx::build()
+                              .with_tolerance(amp_tol)
+                              .with_bin_foldup_nnz_ratio(0.0f)
+                              .on(exec)
+                              ->generate(mtx));
 
     auto x_mc = single_sweep(amp);
 
@@ -1209,8 +1222,11 @@ TEST_F(FwdGaussSeidelMulticolor, SweepMatchesSequentialSweepWithinTolAMPEll)
     auto x_seq = sequential_sweep_from_zero();
     auto ell = gko::share(EllMtx::create(exec));
     mtx->convert_to(ell);
-    auto amp = gko::share(
-        AMPMtx::build().with_tolerance(amp_tol).on(exec)->generate(ell));
+    auto amp = gko::share(AMPMtx::build()
+                              .with_tolerance(amp_tol)
+                              .with_bin_foldup_nnz_ratio(0.0f)
+                              .on(exec)
+                              ->generate(ell));
 
     auto x_mc = single_sweep(amp);
 

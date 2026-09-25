@@ -19,6 +19,50 @@ namespace amp {
 
 
 /**
+ * Determines the lowest-precision bin that should still be generated on its
+ * own (the "last active bin"), folding sparse trailing bins into higher
+ * precision as needed.
+ *
+ * Starting from the lowest-precision bin (index `q - 1`), a bin is folded
+ * into the next higher precision bin (its count added to `bin_nnz[k - 1]`,
+ * and its own count zeroed) whenever its nonzero count is below `ratio *
+ * total_nnz`. The check then repeats for the new last bin, using its
+ * (possibly already merged) count, until a bin meets the threshold or bin 0
+ * is reached. Bin 0 is never folded away.
+ *
+ * @tparam CountType  Integer type used to count nonzeros per bin.
+ * @tparam q  Number of precision bins.
+ *
+ * @param bin_nnz  Nonzero count for each bin, updated in place to reflect any
+ *                 folding: entries above the returned index are zeroed out
+ *                 and merged into the entry at the returned index.
+ * @param total_nnz  Total number of nonzeros in the original (un-binned)
+ *                   matrix; the folding threshold is `ratio * total_nnz`.
+ * @param ratio  Folding threshold, as a ratio of `total_nnz`. A value <= 0
+ *              disables folding.
+ * @return  The index of the lowest-precision bin that remains active, i.e.
+ *          all bins above it are empty.
+ */
+template <typename CountType, int q>
+inline int compute_last_active_bin(std::array<CountType, q>& bin_nnz,
+                                   CountType total_nnz, float ratio)
+{
+    int last = q - 1;
+    if (ratio <= 0.0f) {
+        return last;
+    }
+    const auto threshold =
+        static_cast<double>(ratio) * static_cast<double>(total_nnz);
+    while (last > 0 && static_cast<double>(bin_nnz[last]) < threshold) {
+        bin_nnz[last - 1] += bin_nnz[last];
+        bin_nnz[last] = CountType{};
+        last--;
+    }
+    return last;
+}
+
+
+/**
  * Allocate an Ell matrix for each precision bin supported, starting at the
  * precision of the parameter ValueType.
  *

@@ -94,6 +94,8 @@ struct Config {
     int bench_reps = 20;
     int solver_reps = 3;
     float amp_tolerance = 0.01f;
+    float amp_bin_foldup_nnz_ratio = 0.01f;
+    bool amp_high_precision_diagonal = true;
     double gmres_tol = 1e-8;
     int gmres_max_iters = 1000;
     int gmres_krylov_dim = 50;
@@ -141,6 +143,9 @@ inline std::string strategy_suffix(const Config& cfg)
     default:
         break;
     }
+    if (!cfg.amp_high_precision_diagonal) {
+        suffix += "_nhpd";
+    }
     return suffix;
 }
 
@@ -166,6 +171,12 @@ inline Config load_config(const std::string& path)
     }
     if (j.contains("amp_tolerance"))
         cfg.amp_tolerance = j["amp_tolerance"].get<float>();
+    if (j.contains("amp_bin_foldup_nnz_ratio"))
+        cfg.amp_bin_foldup_nnz_ratio =
+            j["amp_bin_foldup_nnz_ratio"].get<float>();
+    if (j.contains("amp_high_precision_diagonal"))
+        cfg.amp_high_precision_diagonal =
+            j["amp_high_precision_diagonal"].get<bool>();
     if (j.contains("gmres_tol")) cfg.gmres_tol = j["gmres_tol"];
     if (j.contains("gmres_max_iters"))
         cfg.gmres_max_iters = j["gmres_max_iters"];
@@ -400,6 +411,8 @@ inline std::string compute_amp_details(
     using Csr = gko::matrix::Csr<double, int>;
     constexpr int q = gko::matrix::AMP<double, int>::num_precisions;
     sstream << "\nAMP details";
+    sstream << "\n  Non-empty precision buckets: "
+            << mtx->get_num_nonempty_bins() << " / " << q << "\n";
     sstream << "\n  AMP matrix precision buckets:\n";
     json amps = json::array();
     for (int k = 0; k < q; k++) {
@@ -423,6 +436,7 @@ inline std::string compute_amp_details(
         }
     }
     amps.push_back({"amp_setup_ms", amp_setup_ms});
+    rows.back()["num_nonempty_bins"] = mtx->get_num_nonempty_bins();
     sstream << "  AMP setup time (ms) = " << std::setprecision(3)
             << amp_setup_ms << "\n";
     rows.back()["amp_details"] = amps;
@@ -553,14 +567,17 @@ create_amp_dist_matrix(std::shared_ptr<const gko::Executor> exec, comm_t comm,
         using Ell = gko::matrix::Ell<ValueType, LocalIndexType>;
         base_empty = gko::share(Ell::create(exec, gko::dim<2>{0, 0}));
     }
-    auto amp_template = Amp::build()
-                            .with_tolerance(cfg.amp_tolerance)
-                            .with_criterion(Amp::criterion_type::componentwise)
-                            .with_strategy(cfg.amp_spmv_strategy)
-                            .with_subwarp_size(cfg.amp_subwarp_size)
-                            .with_csr_strategy(cfg.amp_csr_strategy)
-                            .on(exec)
-                            ->generate(base_empty);
+    auto amp_template =
+        Amp::build()
+            .with_tolerance(cfg.amp_tolerance)
+            .with_criterion(Amp::criterion_type::componentwise)
+            .with_strategy(cfg.amp_spmv_strategy)
+            .with_subwarp_size(cfg.amp_subwarp_size)
+            .with_csr_strategy(cfg.amp_csr_strategy)
+            .with_bin_foldup_nnz_ratio(cfg.amp_bin_foldup_nnz_ratio)
+            .with_high_precision_diagonal(cfg.amp_high_precision_diagonal)
+            .on(exec)
+            ->generate(base_empty);
     auto csr_template = Csr::create(exec);
     return DistMtx::create(exec, comm, amp_template.get(), csr_template.get());
 }
@@ -574,6 +591,10 @@ inline void print_config(const Config& cfg)
               << "  Base format: " << cfg.amp_base_format << "\n"
               << "  SpMV strategy: " << to_string(cfg.amp_spmv_strategy) << "\n"
               << "  AMP tolerance: " << cfg.amp_tolerance << "\n"
+              << "  AMP bin foldup nnz ratio: " << cfg.amp_bin_foldup_nnz_ratio
+              << "\n"
+              << "  AMP high precision diagonal: "
+              << (cfg.amp_high_precision_diagonal ? "true" : "false") << "\n"
               << "  Warmup / bench reps: " << cfg.warmup_reps << " / "
               << cfg.bench_reps << "\n";
 }

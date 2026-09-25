@@ -57,18 +57,22 @@ namespace kernels {
     void generate_cwise_ell_max_nnz_per_row(                                  \
         std::shared_ptr<const DefaultExecutor> exec,                          \
         const matrix::Ell<ValueType, IndexType>* a, const float tolerance,    \
-        gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row)
+        const int max_bin, const bool force_diagonal_0,                       \
+        gko::amp::precision_array<IndexType, ValueType>& max_nnz_per_row,     \
+        gko::amp::precision_array<int64, ValueType>& bin_nnz)
 
 #define GKO_DECLARE_AMP_GENERATE_ELL_SCATTER_BINS_KERNEL(ValueType, IndexType) \
     void generate_ell_scatter_bins(                                            \
         std::shared_ptr<const DefaultExecutor> exec,                           \
         const matrix::Ell<ValueType, IndexType>* a, const float tolerance,     \
+        const int max_bin, const bool force_diagonal_0,                        \
         gko::amp::precision_array<LinOp*, ValueType>& amat)
 
 #define GKO_DECLARE_AMP_GENERATE_CWISE_CSR_STEP1_KERNEL(ValueType, IndexType) \
     void generate_cwise_csr_calculate_row_sizes(                              \
         std::shared_ptr<const DefaultExecutor> exec,                          \
         const matrix::Csr<ValueType, IndexType>* a, const float tolerance,    \
+        const int max_bin, const bool force_diagonal_0,                       \
         gko::amp::precision_array<IndexType*, ValueType>& bin_row_sizes)
 
 #define GKO_DECLARE_AMP_GENERATE_CWISE_CSR_SCATTER_BINS_KERNEL(ValueType,  \
@@ -76,6 +80,7 @@ namespace kernels {
     void generate_cwise_csr_scatter_bins(                                  \
         std::shared_ptr<const DefaultExecutor> exec,                       \
         const matrix::Csr<ValueType, IndexType>* a, const float tolerance, \
+        const int max_bin, const bool force_diagonal_0,                    \
         gko::amp::precision_array<LinOp*, ValueType>& amat)
 
 #define GKO_DECLARE_AMP_REDUCE_BINS_MAX_KERNEL(ValueType, IndexType)       \

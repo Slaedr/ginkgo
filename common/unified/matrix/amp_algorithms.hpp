@@ -134,16 +134,11 @@ GKO_INLINE GKO_KERNEL int adjust_bin_for_underflow(
 /**
  * Get the precision bin for an entry that may be a diagonal.
  *
- * Diagonal entries are placed unconditionally in bin 0 (the highest
- * precision) regardless of magnitude.  This protects iterative methods that
- * divide by the diagonal (e.g., Gauss-Seidel, ILU sweeps) from accumulating
- * the bin's quantization error in the divisor, and decouples the per-row
- * error bound from the user's choice of AMP tolerance @c tau.  Off-diagonal
- * entries are binned according to their magnitude.
- *
- * The storage cost of this override is at most one extra FP64 entry per row
- * compared to the pure binning rule, which will typically be negligible
- * relative to total matrix storage.
+ * If `is_diagonal` is true, the entry is placed unconditionally in bin 0
+ * (the highest precision) regardless of magnitude; otherwise it is binned
+ * according to its magnitude as usual. Callers pass
+ * `force_diagonal_0 & (row == col)`, so a diagonal entry is only forced to
+ * bin 0 when the `high_precision_diagonal` AMP parameter is enabled.
  *
  * @tparam RealType  Highest precision real type.
  *
@@ -152,21 +147,26 @@ GKO_INLINE GKO_KERNEL int adjust_bin_for_underflow(
  * @param min_representable  Minimum value that can be represented in each
  *                           precision bin. @see get_bins_min_representable.
  * @param abs_number  Absolute value of the entry to be classified.
- * @param is_diagonal  True iff the entry sits on the matrix diagonal
- *                     (i.e., its row and column indices are equal).
+ * @param is_diagonal  True iff the entry should be forced into bin 0.
+ * @param max_bin  Highest bin index that may still be generated on its own;
+ *                 any bin assignment below this bin (i.e. a lower precision
+ *                 than `max_bin`) is clamped up to `max_bin`. Used to fold
+ *                 sparse trailing bins into a higher precision one. A
+ *                 dropped entry (return value -1) is never clamped.
  */
 template <typename RealType>
 GKO_INLINE GKO_KERNEL int get_adjusted_bin(
     const precision_array<float, RealType>& lower_bounds,
     const precision_array<RealType, RealType>& min_representable,
-    const RealType abs_number, const bool is_diagonal)
+    const RealType abs_number, const bool is_diagonal, const int max_bin)
 {
     if (is_diagonal) {
         return 0;
     }
     const int ibin = get_precision_bin<RealType>(lower_bounds, abs_number);
-    return adjust_bin_for_underflow<RealType>(min_representable, abs_number,
-                                              ibin);
+    const int adjusted =
+        adjust_bin_for_underflow<RealType>(min_representable, abs_number, ibin);
+    return adjusted > max_bin ? max_bin : adjusted;
 }
 
 /**

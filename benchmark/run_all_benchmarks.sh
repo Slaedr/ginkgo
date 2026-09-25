@@ -98,6 +98,25 @@ if [ ! "${AMP_TOLERANCE}" ]; then
     print_default AMP_TOLERANCE
 fi
 
+# Unlike the other AMP_* variables above, this one has no default here: if
+# unset, the flag is simply omitted, and the benchmark falls back to the
+# default declared on the AMP class itself.
+if [ "${AMP_BIN_FOLDUP_NNZ_RATIO}" ]; then
+    AMP_BIN_FOLDUP_NNZ_RATIO_FLAG="--amp_bin_foldup_nnz_ratio=${AMP_BIN_FOLDUP_NNZ_RATIO}"
+else
+    echo "AMP_BIN_FOLDUP_NNZ_RATIO environment variable not set - using the AMP class's own default" 1>&2
+    AMP_BIN_FOLDUP_NNZ_RATIO_FLAG=""
+fi
+
+# Same convention as AMP_BIN_FOLDUP_NNZ_RATIO above: no default here, so an
+# unset variable falls back to the AMP class's own default.
+if [ "${AMP_HIGH_PRECISION_DIAGONAL}" ]; then
+    AMP_HIGH_PRECISION_DIAGONAL_FLAG="--amp_high_precision_diagonal=${AMP_HIGH_PRECISION_DIAGONAL}"
+else
+    echo "AMP_HIGH_PRECISION_DIAGONAL environment variable not set - using the AMP class's own default" 1>&2
+    AMP_HIGH_PRECISION_DIAGONAL_FLAG=""
+fi
+
 if [ ! "${SOLVERS}" ]; then
     SOLVERS="bicgstab,cg,cgs,fcg,gmres,cb_gmres_reduce1,idr"
     print_default SOLVERS
@@ -291,6 +310,8 @@ run_conversion_benchmarks() {
                 --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
                 --amp_tolerance="${AMP_TOLERANCE}" \
                 --amp_csr_strategy="${AMP_CSR_STRATEGY}" \
+                ${AMP_BIN_FOLDUP_NNZ_RATIO_FLAG} \
+                ${AMP_HIGH_PRECISION_DIAGONAL_FLAG} \
                 <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }
@@ -313,6 +334,8 @@ run_spmv_benchmarks() {
                 --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
                 --amp_tolerance="${AMP_TOLERANCE}" \
                 --amp_csr_strategy="${AMP_CSR_STRATEGY}" \
+                ${AMP_BIN_FOLDUP_NNZ_RATIO_FLAG} \
+                ${AMP_HIGH_PRECISION_DIAGONAL_FLAG} \
                 <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
 }
@@ -339,6 +362,8 @@ run_solver_benchmarks() {
                     --amp_tolerance_type="${AMP_TOLERANCE_TYPE}" \
                     --amp_tolerance="${AMP_TOLERANCE}" \
                     --amp_csr_strategy="${AMP_CSR_STRATEGY}" \
+                    ${AMP_BIN_FOLDUP_NNZ_RATIO_FLAG} \
+                    ${AMP_HIGH_PRECISION_DIAGONAL_FLAG} \
                     --reorder="${SOLVERS_REORDER}" \
                     --fgs_sweeps="${SOLVERS_FGS_SWEEPS}" \
                     <"$1.imd" 2>&1 >"$1"

@@ -71,8 +71,12 @@ std::string format_description =
     "     different precisions (FP64/FP32/BF16/FP16). Base format is\n"
     "     controlled by --amp_base_type (ell or csr), tolerance type by\n"
     "     --amp_tolerance_type (componentwise or normwise), and tolerance\n"
-    "     value by --amp_tolerance. Uses the monolithic_classical SpMV\n"
-    "     strategy: a single kernel reads all precision buckets and\n"
+    "     value by --amp_tolerance. A sparse trailing (lowest-precision)\n"
+    "     bin is folded into the next higher precision bin below the\n"
+    "     --amp_bin_foldup_nnz_ratio threshold. Diagonal entries are always\n"
+    "     placed in the highest precision (FP64) bin unless\n"
+    "     --amp_high_precision_diagonal=false. Uses the monolithic_classical\n"
+    "     SpMV strategy: a single kernel reads all precision buckets and\n"
     "     accumulates each row.\n"
     "     Note: AMP[CSR] uses a classical-style SpMV kernel internally, so\n"
     "     compare against csrc (classical) rather than csr (automatical)\n"
@@ -154,6 +158,18 @@ DEFINE_string(amp_csr_strategy, "automatical",
               "\"merge_path\". Only has an effect for the \"ampib\" format "
               "with --amp_base_type=csr; the monolithic kernel used by "
               "\"amp\" never consults the buckets' strategies.");
+
+DEFINE_double(amp_bin_foldup_nnz_ratio, 0.01,
+              "Threshold, as a ratio of the original matrix's number of "
+              "nonzeros, below which a trailing (lowest-precision) bin of "
+              "an AMP matrix is folded into the next higher precision bin "
+              "instead of being generated on its own. 0 disables folding.");
+
+DEFINE_bool(amp_high_precision_diagonal, true,
+            "Whether diagonal entries of an AMP matrix are always placed in "
+            "the highest precision (FP64) bin regardless of magnitude. If "
+            "false, diagonal entries are binned by magnitude like any other "
+            "entry.");
 
 
 namespace formats {
@@ -386,6 +402,9 @@ std::unique_ptr<gko::LinOp> matrix_factory(
             .with_strategy(strategy)
             .with_csr_strategy(parse_amp_csr_strategy(FLAGS_amp_csr_strategy))
             .with_tolerance(static_cast<float>(FLAGS_amp_tolerance))
+            .with_bin_foldup_nnz_ratio(
+                static_cast<float>(FLAGS_amp_bin_foldup_nnz_ratio))
+            .with_high_precision_diagonal(FLAGS_amp_high_precision_diagonal)
             .on(exec)
             ->generate(std::move(base_mat));
     }
