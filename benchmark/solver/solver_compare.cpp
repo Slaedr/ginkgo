@@ -290,7 +290,7 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     auto A =
         gko::share(formats::matrix_factory(FLAGS_formats, exec, *data_ptr));
     if (formats::is_amp_format(FLAGS_formats)) {
-        formats::write_amp_bin_info(A.get(), r.detail);
+        formats::write_amp_info(A.get(), r.detail);
     }
 
     auto b = gko::clone(b_orig);

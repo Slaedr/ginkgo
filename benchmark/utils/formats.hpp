@@ -435,12 +435,21 @@ std::unique_ptr<gko::LinOp> matrix_factory(
 
 
 /**
- * If the given LinOp is an AMP matrix, writes per-bin nonzero metadata
- * into the provided JSON object under an "amp_bins" key.
- * For AMP[CSR], records total nonzeros per bin.
- * For AMP[ELL], records max nonzeros per row per bin.
+ * If the given LinOp is an AMP matrix, writes per-bin nonzero metadata into
+ * the provided JSON object under an "amp_bins" key, and the full set of
+ * explicitly requested/effective AMP factory parameters under an
+ * "amp_config" key.
+ *
+ * "amp_bins": for AMP[CSR], records total nonzeros per bin; for AMP[ELL],
+ * records max nonzeros per row per bin.
+ *
+ * "amp_config" is read back from the generated matrix's own
+ * get_parameters() rather than from the --amp_* flags directly, so that it
+ * always reflects exactly what this matrix was built with (this matters in
+ * particular for amp_subwarp_size, which is normalized at generation time
+ * and so may differ from the value requested on the command line).
  */
-void write_amp_bin_info(const gko::LinOp* mtx, json& format_case)
+void write_amp_info(const gko::LinOp* mtx, json& format_case)
 {
     const auto* amp_mat = dynamic_cast<const amp_type*>(mtx);
     if (!amp_mat) {
@@ -469,6 +478,22 @@ void write_amp_bin_info(const gko::LinOp* mtx, json& format_case)
     bins_json["csr_strategy"] =
         to_string(amp_mat->get_parameters().csr_strategy);
     format_case["amp_bins"] = std::move(bins_json);
+
+    const auto& p = amp_mat->get_parameters();
+    format_case["amp_config"] = {
+        {"amp_tolerance", p.tolerance},
+        {"amp_tolerance_type", p.criterion == amp_type::criterion_type::normwise
+                                   ? "normwise"
+                                   : "componentwise"},
+        {"amp_base_type", is_csr ? "csr" : "ell"},
+        {"amp_strategy",
+         p.strategy == amp_type::strategy_type::independent_buckets
+             ? "independent_buckets"
+             : "monolithic_classical"},
+        {"amp_csr_strategy", to_string(p.csr_strategy)},
+        {"amp_subwarp_size", p.subwarp_size},
+        {"amp_bin_foldup_nnz_ratio", p.bin_foldup_nnz_ratio},
+        {"amp_high_precision_diagonal", p.high_precision_diagonal}};
 }
 
 

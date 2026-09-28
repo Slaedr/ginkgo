@@ -516,8 +516,7 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             state.system_matrix = generator.generate_matrix_with_format(
                 exec, spmv_format, data, size);
             if (formats::is_amp_format(spmv_format)) {
-                formats::write_amp_bin_info(state.system_matrix.get(),
-                                            test_case);
+                formats::write_amp_info(state.system_matrix.get(), test_case);
             }
             // For single-GPU benchmarks, which default to using itype as the
             //  index type, store color_ptrs for multicolor ordering.
