@@ -6,6 +6,10 @@
 #define GINKGO_BENCHMARK_SOLVER_SOLVER_COMMON_HPP
 
 
+#include <any>
+#include <map>
+#include <string>
+
 #include "benchmark/utils/formats.hpp"
 #include "benchmark/utils/general.hpp"
 #include "benchmark/utils/general_matrix.hpp"
@@ -44,9 +48,11 @@ DEFINE_string(solvers, "cg",
               "Supported values are: bicgstab, bicg, cb_gmres_keep, "
               "cb_gmres_reduce1, cb_gmres_reduce2, cb_gmres_integer, "
               "cb_gmres_ireduce1, cb_gmres_ireduce2, cg, cgs, direct, fcg, "
-              "pipe_cg, gmres, idr, lower_trs, minres, near_symm_direct, "
+              "fgs, pipe_cg, gmres, idr, lower_trs, minres, near_symm_direct, "
               "upper_trs, spd_direct, symm_direct, "
-              "overhead");
+              "overhead. `fgs` (FwdGaussSeidel run as a standalone iterative "
+              "solver rather than a preconditioner) requires "
+              "--reorder=multicolor.");
 
 DEFINE_uint32(
     nrhs, 1,
@@ -151,10 +157,20 @@ std::unique_ptr<gko::LinOpFactory> add_criteria_precond_finalize(
 }
 
 
+// `extra_args` is a generic, opt-in side channel for solver-specific
+// construction parameters that don't apply to solvers in general (unlike
+// `exec`/`precond`/`max_iters`, which every solver either uses or ignores
+// uniformly). Only the branch for a given `description` knows which keys,
+// if any, to look for and how to interpret them; e.g. "fgs" looks for a
+// "color_ptrs" entry holding a `std::vector<itype>`. This keeps
+// generate_solver's signature stable as more solver-specific parameters are
+// added, rather than growing a new positional parameter (used by exactly
+// one branch) every time.
 std::unique_ptr<gko::LinOpFactory> generate_solver(
     const std::shared_ptr<const gko::Executor>& exec,
     std::shared_ptr<const gko::LinOpFactory> precond,
-    const std::string& description, std::uint32_t max_iters)
+    const std::string& description, std::uint32_t max_iters,
+    const std::map<std::string, std::any>& extra_args)
 {
     std::string cb_gmres_prefix("cb_gmres_");
     if (description.find(cb_gmres_prefix) == 0) {
@@ -229,6 +245,27 @@ std::unique_ptr<gko::LinOpFactory> generate_solver(
     } else if (description == "minres") {
         return add_criteria_precond_finalize<gko::solver::Minres<etype>>(
             exec, precond, max_iters);
+    } else if (description == "fgs") {
+        // FwdGaussSeidel run here as an independent solver (as opposed to its
+        // use as a preconditioner in benchmark/utils/preconditioners.hpp,
+        // where a fixed small number of sweeps -- FLAGS_fgs_sweeps -- is used
+        // per apply). As a standalone solver it runs to the same convergence
+        // criteria as the other iterative solvers above, and, like
+        // lower_trs/upper_trs/direct below, it does not accept a
+        // preconditioner: FwdGaussSeidel only derives from
+        // EnableIterativeBase, not the preconditioned variant, so `precond`
+        // is intentionally unused here.
+        std::vector<itype> color_ptrs;
+        if (auto it = extra_args.find("color_ptrs"); it != extra_args.end()) {
+            color_ptrs = std::any_cast<std::vector<itype>>(it->second);
+        }
+        if (color_ptrs.empty()) {
+            throw std::range_error("fgs solver requires --reorder=multicolor");
+        }
+        return gko::solver::FwdGaussSeidel<etype, itype>::build()
+            .with_criteria(create_criterion(exec, max_iters))
+            .with_color_ptrs(color_ptrs)
+            .on(exec);
     } else if (description == "lower_trs") {
         return gko::solver::LowerTrs<etype>::build()
             .with_num_rhs(FLAGS_nrhs)
@@ -533,6 +570,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
 
         IterationControl ic{timer};
         const PrecondArgs prec_args{exec, state.color_ptrs};
+        const std::map<std::string, std::any> solver_extra_args{
+            {"color_ptrs", state.color_ptrs}};
 
         // warm run
         std::shared_ptr<gko::LinOp> solver;
@@ -541,9 +580,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             for (auto _ : ic.warmup_run()) {
                 auto x_clone = clone(state.x);
                 auto precond = precond_factory.at(precond_name)(prec_args);
-                auto solver = generate_solver(exec, give(precond), solver_name,
-                                              FLAGS_warmup_max_iters)
-                                  ->generate(state.system_matrix);
+                auto solver =
+                    generate_solver(exec, give(precond), solver_name,
+                                    FLAGS_warmup_max_iters, solver_extra_args)
+                        ->generate(state.system_matrix);
                 solver->apply(state.b, x_clone);
                 exec->synchronize();
             }
@@ -564,9 +604,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
 
                 {
                     auto precond = precond_factory.at(precond_name)(prec_args);
-                    auto solver = generate_solver(exec, give(precond),
-                                                  solver_name, FLAGS_max_iters)
-                                      ->generate(state.system_matrix);
+                    auto solver =
+                        generate_solver(exec, give(precond), solver_name,
+                                        FLAGS_max_iters, solver_extra_args)
+                            ->generate(state.system_matrix);
                 }
 
                 exec->remove_logger(gen_logger);
@@ -577,9 +618,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
 
             // generate it for apply usage
             auto precond = precond_factory.at(precond_name)(prec_args);
-            auto detailed_solver = generate_solver(exec, give(precond),
-                                                   solver_name, FLAGS_max_iters)
-                                       ->generate(state.system_matrix);
+            auto detailed_solver =
+                generate_solver(exec, give(precond), solver_name,
+                                FLAGS_max_iters, solver_extra_args)
+                    ->generate(state.system_matrix);
 
             if (auto prec = dynamic_cast<const gko::Preconditionable*>(
                     detailed_solver.get())) {
@@ -634,9 +676,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
         // different iteration criterion.
         if (!FLAGS_benchmark_from_scratch) {
             auto precond = precond_factory.at(precond_name)(prec_args);
-            solver = gko::share(generate_solver(exec, give(precond),
-                                                solver_name, FLAGS_max_iters)
-                                    ->generate(state.system_matrix));
+            solver =
+                gko::share(generate_solver(exec, give(precond), solver_name,
+                                           FLAGS_max_iters, solver_extra_args)
+                               ->generate(state.system_matrix));
             solver->apply(state.b, x_clone);
         }
         for (auto status : ic.run(false)) {
@@ -647,10 +690,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 exec->synchronize();
                 generate_timer->tic();
                 auto precond = precond_factory.at(precond_name)(prec_args);
-                auto generated_solver =
-                    gko::share(generate_solver(exec, give(precond), solver_name,
-                                               FLAGS_max_iters)
-                                   ->generate(state.system_matrix));
+                auto generated_solver = gko::share(
+                    generate_solver(exec, give(precond), solver_name,
+                                    FLAGS_max_iters, solver_extra_args)
+                        ->generate(state.system_matrix));
                 generate_timer->toc();
                 // when it is not from scratch, we always generate it explicitly
                 // before for-loop

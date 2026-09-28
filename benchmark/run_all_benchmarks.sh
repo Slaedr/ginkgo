@@ -147,6 +147,21 @@ if [ ! "${SOLVERS_REORDER}" ]; then
     print_default SOLVERS_REORDER
 fi
 
+# "fgs" in SOLVERS runs FwdGaussSeidel as a standalone iterative solver
+# (as opposed to the "fgs" *preconditioner* in PRECONDS, which applies a
+# fixed, small number of sweeps per apply). As a standalone solver it
+# requires a multicolor-ordered matrix; the benchmark itself exits with an
+# explanatory error if this is missing, but warn here too, since that error
+# would otherwise only surface partway through a potentially long sweep over
+# many matrices.
+case ",${SOLVERS}," in
+    *,fgs,*)
+        if [ "${SOLVERS_REORDER}" != "multicolor" ]; then
+            echo "WARNING: SOLVERS includes \"fgs\" but SOLVERS_REORDER=\"${SOLVERS_REORDER}\" - the fgs solver requires SOLVERS_REORDER=multicolor and will fail otherwise." 1>&2
+        fi
+        ;;
+esac
+
 if [ ! "${SOLVERS_FGS_SWEEPS}" ]; then
     SOLVERS_FGS_SWEEPS=1
     print_default SOLVERS_FGS_SWEEPS

@@ -301,6 +301,8 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     }
 
     const PrecondArgs prec_args{exec, ro.color_ptrs};
+    const std::map<std::string, std::any> solver_extra_args{
+        {"color_ptrs", ro.color_ptrs}};
 
     IterationControl ic{get_timer(exec, FLAGS_gpu_timer)};
     auto generate_timer = get_timer(exec, FLAGS_gpu_timer);
@@ -312,9 +314,10 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     for (auto _ : ic.warmup_run()) {
         auto x_clone = gko::clone(x0);
         auto precond = precond_factory.at(FLAGS_preconditioners)(prec_args);
-        auto warmup_solver = generate_solver(exec, give(precond), FLAGS_solvers,
-                                             FLAGS_warmup_max_iters)
-                                 ->generate(A);
+        auto warmup_solver =
+            generate_solver(exec, give(precond), FLAGS_solvers,
+                            FLAGS_warmup_max_iters, solver_extra_args)
+                ->generate(A);
         warmup_solver->apply(b, x_clone);
         exec->synchronize();
     }
@@ -328,9 +331,9 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     auto x = gko::clone(x0);
     if (!FLAGS_benchmark_from_scratch) {
         auto precond = precond_factory.at(FLAGS_preconditioners)(prec_args);
-        solver = gko::share(
-            generate_solver(exec, give(precond), FLAGS_solvers, FLAGS_max_iters)
-                ->generate(A));
+        solver = gko::share(generate_solver(exec, give(precond), FLAGS_solvers,
+                                            FLAGS_max_iters, solver_extra_args)
+                                ->generate(A));
         solver->apply(b, x);
     }
     for (auto status : ic.run(false)) {
@@ -341,7 +344,7 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
             auto precond = precond_factory.at(FLAGS_preconditioners)(prec_args);
             auto generated_solver =
                 gko::share(generate_solver(exec, give(precond), FLAGS_solvers,
-                                           FLAGS_max_iters)
+                                           FLAGS_max_iters, solver_extra_args)
                                ->generate(A));
             generate_timer->toc();
             if (FLAGS_benchmark_from_scratch) {
