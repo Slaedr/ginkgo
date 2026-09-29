@@ -344,6 +344,23 @@ case "${BENCHMARK}" in
         require_executables matrix_statistics/matrix_statistics spmv/spmv ;;
 esac
 
+# By default, each SuiteSparse matrix is removed from ssget's cache once it has
+# been benchmarked ("ssget -c"). Set KEEP_MATRICES=true to keep it instead. This
+# is required when running several jobs at the same time (e.g. different AMP
+# tolerances) or when using a pre-populated, shared collection: otherwise one job
+# deletes a matrix that another job is still reading, or that others still need.
+if [ ! "${KEEP_MATRICES}" ]; then
+    KEEP_MATRICES="false"
+    print_default KEEP_MATRICES
+fi
+
+# Removes the downloaded copy of SuiteSparse problem $1 unless KEEP_MATRICES=true.
+clean_suite_sparse_problem() {
+    [ "${DRY_RUN}" == "true" ] && return
+    [ "${KEEP_MATRICES}" == "true" ] && return
+    ${SSGET} -i "$1" -c >/dev/null
+}
+
 # Returns success if $1 or any of its intermediate files already exists. Only
 # used when RESULTS_DIR is set, to avoid clobbering earlier results.
 result_exists() {
@@ -557,7 +574,7 @@ for (( p=${LOOP_START}; p < ${LOOP_END}; ++p )); do
         break
     fi
     if [ "$(${SSGET} -i "$i" -preal)" = "0" ]; then
-        [ "${DRY_RUN}" != "true" ] && ${SSGET} -i "$i" -c >/dev/null
+        clean_suite_sparse_problem "$i"
         continue
     fi
     RESULT_DIR="${SUITESPARSE_RESULT_DIR}"
@@ -586,7 +603,7 @@ for (( p=${LOOP_START}; p < ${LOOP_END}; ++p )); do
 
     if [ "${BENCHMARK}" != "solver" -o \
          "$(${SSGET} -i "$i" -prows)" != "$(${SSGET} -i "$i" -pcols)" ]; then
-        [ "${DRY_RUN}" != "true" ] && ${SSGET} -i "$i" -c >/dev/null
+        clean_suite_sparse_problem "$i"
         continue
     fi
 
@@ -594,7 +611,7 @@ for (( p=${LOOP_START}; p < ${LOOP_END}; ++p )); do
     run_solver_benchmarks "${RESULT_FILE}"
 
     echo -e "${PREFIX}Cleaning up problem ${GROUP}/${NAME}" 1>&2
-    [ "${DRY_RUN}" != "true" ] && ${SSGET} -i "$i" -c >/dev/null
+    clean_suite_sparse_problem "$i"
 done
 
 
