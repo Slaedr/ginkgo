@@ -270,6 +270,91 @@ else
     exit 1
 fi
 
+# Location handling. This makes the script usable from any working directory.
+#
+#   GINKGO_BUILD_DIR  Root of the Ginkgo build tree (the directory that contains
+#                     "benchmark/"). If unset, executables are looked up relative
+#                     to the current directory (the original behavior: run the
+#                     script from <build>/benchmark).
+#   RESULTS_DIR       If set, results are written directly to
+#                     $RESULTS_DIR/<group>/<name>.json (SYSTEM_NAME, EXECUTOR
+#                     and the collection name are not part of the path). If
+#                     unset, the original tree
+#                     results/<SYSTEM_NAME>/<EXECUTOR>/<collection>/<group>/<name>.json
+#                     is created in the current directory.
+#                     When RESULTS_DIR is set, existing files are never
+#                     overwritten or deleted: a problem whose result file (or
+#                     leftover .imd/.bkp/.bkp2/.tmp file) already exists is
+#                     skipped.
+if [ "${GINKGO_BUILD_DIR}" ]; then
+    BENCH_BIN_DIR="${GINKGO_BUILD_DIR}/benchmark"
+    if [ ! -d "${BENCH_BIN_DIR}" ]; then
+        echo "GINKGO_BUILD_DIR is set to \"${GINKGO_BUILD_DIR}\", but \"${BENCH_BIN_DIR}\" is not a directory." 1>&2
+        exit 1
+    fi
+else
+    BENCH_BIN_DIR="."
+    echo "GINKGO_BUILD_DIR environment variable not set - using executables relative to the current directory" 1>&2
+fi
+
+if [ "${RESULTS_DIR}" ]; then
+    RESULTS_BASE="${RESULTS_DIR%/}"
+    SUITESPARSE_RESULT_DIR="${RESULTS_BASE}"
+    GENERATED_RESULT_DIR="${RESULTS_BASE}"
+    NO_CLOBBER=1
+    if [ "${DRY_RUN}" != "true" ]; then
+        if ! mkdir -p "${RESULTS_BASE}" || [ ! -w "${RESULTS_BASE}" ]; then
+            echo "RESULTS_DIR \"${RESULTS_DIR}\" cannot be created or is not writable." 1>&2
+            exit 1
+        fi
+    fi
+else
+    RESULTS_BASE="results"
+    SUITESPARSE_RESULT_DIR="${RESULTS_BASE}/${SYSTEM_NAME}/${EXECUTOR}/SuiteSparse"
+    GENERATED_RESULT_DIR="${RESULTS_BASE}/${SYSTEM_NAME}/${EXECUTOR}/Generated"
+    NO_CLOBBER=0
+    echo "RESULTS_DIR environment variable not set - assuming \"${RESULTS_BASE}/${SYSTEM_NAME}/${EXECUTOR}/<collection>\" in the current directory" 1>&2
+fi
+
+# Aborts early if an executable required by the selected benchmark is missing,
+# instead of failing partway through a long sweep.
+require_executables() {
+    [ "${DRY_RUN}" == "true" ] && return
+    local exe missing=0
+    for exe in "$@"; do
+        if [ ! -x "${BENCH_BIN_DIR}/${exe}${BENCH_SUFFIX}" ]; then
+            echo "Missing executable: ${BENCH_BIN_DIR}/${exe}${BENCH_SUFFIX}" 1>&2
+            missing=1
+        fi
+    done
+    [ "${missing}" -eq 0 ] || exit 1
+}
+
+case "${BENCHMARK}" in
+    preconditioner)
+        require_executables matrix_generator/matrix_generator \
+            matrix_statistics/matrix_statistics preconditioner/preconditioner ;;
+    conversions)
+        require_executables matrix_statistics/matrix_statistics spmv/spmv \
+            conversions/conversions ;;
+    solver)
+        require_executables matrix_statistics/matrix_statistics spmv/spmv \
+            solver/solver ;;
+    *)
+        require_executables matrix_statistics/matrix_statistics spmv/spmv ;;
+esac
+
+# Returns success if $1 or any of its intermediate files already exists. Only
+# used when RESULTS_DIR is set, to avoid clobbering earlier results.
+result_exists() {
+    [ "${NO_CLOBBER}" -eq 1 ] || return 1
+    local suffix
+    for suffix in "" .imd .bkp .bkp2 .tmp; do
+        [ -e "$1${suffix}" ] && return 0
+    done
+    return 1
+}
+
 
 ################################################################################
 # Utilities
@@ -301,7 +386,7 @@ keep_latest() {
 compute_matrix_statistics() {
     [ "${DRY_RUN}" == "true" ] && return
     cp "$1" "$1.imd" # make sure we're not losing the original input
-    ./matrix_statistics/matrix_statistics${BENCH_SUFFIX} \
+    "${BENCH_BIN_DIR}"/matrix_statistics/matrix_statistics${BENCH_SUFFIX} \
         --backup="$1.bkp" --double_buffer="$1.bkp2" \
         <"$1.imd" 2>&1 >"$1"
     keep_latest "$1" "$1.bkp" "$1.bkp2" "$1.imd"
@@ -316,7 +401,7 @@ compute_matrix_statistics() {
 run_conversion_benchmarks() {
     [ "${DRY_RUN}" == "true" ] && return
     cp "$1" "$1.imd" # make sure we're not losing the original input
-    ./conversions/conversions${BENCH_SUFFIX} --backup="$1.bkp" --double_buffer="$1.bkp2" \
+    "${BENCH_BIN_DIR}"/conversions/conversions${BENCH_SUFFIX} --backup="$1.bkp" --double_buffer="$1.bkp2" \
                 --executor="${EXECUTOR}" --formats="${FORMATS}" \
                 --device_id="${DEVICE_ID}" --gpu_timer=${GPU_TIMER} --timer_method=${TIMER_OUTPUT} \
                 --repetitions="${REPETITIONS}" \
@@ -340,7 +425,7 @@ run_conversion_benchmarks() {
 run_spmv_benchmarks() {
     [ "${DRY_RUN}" == "true" ] && return
     cp "$1" "$1.imd" # make sure we're not losing the original input
-    ./spmv/spmv${BENCH_SUFFIX} --backup="$1.bkp" --double_buffer="$1.bkp2" \
+    "${BENCH_BIN_DIR}"/spmv/spmv${BENCH_SUFFIX} --backup="$1.bkp" --double_buffer="$1.bkp2" \
                 --executor="${EXECUTOR}" --formats="${FORMATS}" \
                 --device_id="${DEVICE_ID}" --gpu_timer=${GPU_TIMER} --timer_method=${TIMER_OUTPUT} \
                 --repetitions="${REPETITIONS}" \
@@ -364,7 +449,7 @@ run_spmv_benchmarks() {
 run_solver_benchmarks() {
     [ "${DRY_RUN}" == "true" ] && return
     cp "$1" "$1.imd" # make sure we're not losing the original input
-    ./solver/solver${BENCH_SUFFIX} --backup="$1.bkp" --double_buffer="$1.bkp2" \
+    "${BENCH_BIN_DIR}"/solver/solver${BENCH_SUFFIX} --backup="$1.bkp" --double_buffer="$1.bkp2" \
                     --executor="${EXECUTOR}" --solvers="${SOLVERS}" \
                     --preconditioners="${PRECONDS}" \
                     --max_iters=${SOLVERS_MAX_ITERATIONS} --rel_res_goal=${SOLVERS_PRECISION} \
@@ -401,7 +486,7 @@ run_preconditioner_benchmarks() {
         for prec in ${PRECISIONS}; do
             echo -e "\t\t running jacobi ($prec) for block size ${bsize}" 1>&2
             cp "$1" "$1.imd" # make sure we're not losing the original input
-            ./preconditioner/preconditioner${BENCH_SUFFIX} \
+            "${BENCH_BIN_DIR}"/preconditioner/preconditioner${BENCH_SUFFIX} \
                 --backup="$1.bkp" --double_buffer="$1.bkp2" \
                 --executor="${EXECUTOR}" --preconditioners="jacobi" \
                 --jacobi_max_block_size="${bsize}" \
@@ -475,11 +560,15 @@ for (( p=${LOOP_START}; p < ${LOOP_END}; ++p )); do
         [ "${DRY_RUN}" != "true" ] && ${SSGET} -i "$i" -c >/dev/null
         continue
     fi
-    RESULT_DIR="results/${SYSTEM_NAME}/${EXECUTOR}/SuiteSparse"
+    RESULT_DIR="${SUITESPARSE_RESULT_DIR}"
     GROUP=$(${SSGET} -i "$i" -pgroup)
     NAME=$(${SSGET} -i "$i" -pname)
     RESULT_FILE="${RESULT_DIR}/${GROUP}/${NAME}.json"
     PREFIX="($i/${NUM_PROBLEMS}):\t"
+    if result_exists "${RESULT_FILE}"; then
+        echo -e "${PREFIX}Skipping ${GROUP}/${NAME}: ${RESULT_FILE} (or its intermediate files) already exists" 1>&2
+        continue
+    fi
     mkdir -p "$(dirname "${RESULT_FILE}")"
     generate_suite_sparse_input "$i" >"${RESULT_FILE}"
 
@@ -556,7 +645,7 @@ EOT
 generate_problem() {
     [ "${DRY_RUN}" == "true" ] && return
     cp "$1" "$1.tmp"
-    ./matrix_generator/matrix_generator${BENCH_SUFFIX} <"$1.tmp" 2>&1 >"$1"
+    "${BENCH_BIN_DIR}"/matrix_generator/matrix_generator${BENCH_SUFFIX} <"$1.tmp" 2>&1 >"$1"
     keep_latest "$1" "$1.tmp"
 }
 
@@ -572,11 +661,15 @@ for bsize in ${BLOCK_SIZES}; do
         if [ "${ID}" -lt "${LOOP_START}" ]; then
             continue
         fi
-        RESULT_DIR="results/${SYSTEM_NAME}/${EXECUTOR}/Generated"
+        RESULT_DIR="${GENERATED_RESULT_DIR}"
         GROUP="block-diagonal"
         NAME="${nblocks}-${bsize}"
         RESULT_FILE="${RESULT_DIR}/${GROUP}/${NAME}.json"
         PREFIX="(${ID}/${NUM_PROBLEMS}):\t"
+        if result_exists "${RESULT_FILE}"; then
+            echo -e "${PREFIX}Skipping ${GROUP}/${NAME}: ${RESULT_FILE} (or its intermediate files) already exists" 1>&2
+            continue
+        fi
         mkdir -p "$(dirname "${RESULT_FILE}")"
         mkdir -p "/tmp/${GROUP}"
         generate_block_diagonal_input \
