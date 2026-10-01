@@ -525,7 +525,15 @@ NUM_PROBLEMS="$(${SSGET} -n)"
 
 # Creates an input file for $1-th problem in the SuiteSparse collection
 generate_suite_sparse_input() {
-    INPUT=$(${SSGET} -i "$1" -e)
+    # `ssget -e` re-extracts the archive on every call, which breaks other
+    # processes reading the same matrix. Only extract if the .mtx is missing;
+    # an existing .mtx is assumed to be correct. (`ssget -f` prints the archive
+    # path, downloading the archive only if it is missing, but never extracts.)
+    INPUT="$(${SSGET} -i "$1" -f)"
+    INPUT="${INPUT%.tar.gz}/$(${SSGET} -i "$1" -pname).mtx"
+    if [ ! -e "${INPUT}" ]; then
+        INPUT=$(${SSGET} -i "$1" -e)
+    fi
     cat << EOT
 [{
     "filename": "${INPUT}",
