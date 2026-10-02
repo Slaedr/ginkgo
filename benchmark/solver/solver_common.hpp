@@ -156,6 +156,41 @@ std::unique_ptr<gko::LinOpFactory> add_criteria_precond_finalize(
                                          max_iters);
 }
 
+gko::solver::gmres::ortho_method get_gmres_ortho_method()
+{
+    if (FLAGS_gmres_ortho_method == "mgs") {
+        return gko::solver::gmres::ortho_method::mgs;
+    } else if (FLAGS_gmres_ortho_method == "cgs") {
+        return gko::solver::gmres::ortho_method::cgs;
+    } else if (FLAGS_gmres_ortho_method == "cgs2") {
+        return gko::solver::gmres::ortho_method::cgs2;
+    } else {
+        throw std::range_error(
+            std::string(
+                "GMRES doesn't support the orthogonalization method <") +
+            FLAGS_gmres_ortho_method + ">!");
+    }
+}
+
+/*
+ * Builds a GMRES factory for use in GMRES-IR.
+ *
+ * @tparam ValueType  Scalar type of inner GMRES.
+ */
+template <typename ValueType>
+std::unique_ptr<gko::LinOpFactory> build_gmres_for_ir(
+    const std::shared_ptr<const gko::Executor>& exec,
+    std::shared_ptr<const gko::LinOpFactory> precond,
+    const std::map<std::string, std::any>& extra_args)
+{
+    auto ortho_method = get_gmres_ortho_method();
+    return add_criteria_precond_finalize(
+        gko::solver::Gmres<ValueType>::build()
+            .with_krylov_dim(FLAGS_gmres_restart)
+            .with_ortho_method(ortho_method),
+        exec, precond, FLAGS_gmres_restart);
+}
+
 
 // `extra_args` is a generic, opt-in side channel for solver-specific
 // construction parameters that don't apply to solvers in general (unlike
@@ -224,24 +259,16 @@ std::unique_ptr<gko::LinOpFactory> generate_solver(
                 .with_kappa(static_cast<rc_etype>(FLAGS_idr_kappa)),
             exec, precond, max_iters);
     } else if (description == "gmres") {
-        gko::solver::gmres::ortho_method ortho_method;
-        if (FLAGS_gmres_ortho_method == "mgs") {
-            ortho_method = gko::solver::gmres::ortho_method::mgs;
-        } else if (FLAGS_gmres_ortho_method == "cgs") {
-            ortho_method = gko::solver::gmres::ortho_method::cgs;
-        } else if (FLAGS_gmres_ortho_method == "cgs2") {
-            ortho_method = gko::solver::gmres::ortho_method::cgs2;
-        } else {
-            throw std::range_error(
-                std::string(
-                    "GMRES doesn't support the orthogonalization method <") +
-                FLAGS_gmres_ortho_method + ">!");
-        }
+        auto ortho_method = get_gmres_ortho_method();
         return add_criteria_precond_finalize(
             gko::solver::Gmres<etype>::build()
                 .with_krylov_dim(FLAGS_gmres_restart)
                 .with_ortho_method(ortho_method),
             exec, precond, max_iters);
+    } else if (description == "gmres_ir") {
+        auto ir_factory = gko::solver::Ir<etype>::build()
+                              .with_criteria(create_criterion(exec, max_iters))
+                              .on(exec);
     } else if (description == "minres") {
         return add_criteria_precond_finalize<gko::solver::Minres<etype>>(
             exec, precond, max_iters);
