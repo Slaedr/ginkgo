@@ -70,6 +70,9 @@ DEFINE_string(gmres_ortho_method, "mgs",
 DEFINE_uint32(idr_subspace_dim, 2,
               "What dimension of the subspace to use in IDR");
 
+DEFINE_string(ir_inner_precision, "double",
+              "Precision used by inner solver of IR");
+
 DEFINE_double(
     idr_kappa, 0.7,
     "the number to check whether Av_n and v_n are too close or not in IDR");
@@ -109,7 +112,7 @@ std::string solver_example_config = R"(
 )";
 
 
-std::shared_ptr<const gko::stop::CriterionFactory> create_criterion(
+inline std::shared_ptr<const gko::stop::CriterionFactory> create_criterion(
     std::shared_ptr<const gko::Executor> exec, std::uint32_t max_iters)
 {
     std::shared_ptr<const gko::stop::CriterionFactory> residual_stop;
@@ -156,7 +159,7 @@ std::unique_ptr<gko::LinOpFactory> add_criteria_precond_finalize(
                                          max_iters);
 }
 
-gko::solver::gmres::ortho_method get_gmres_ortho_method()
+inline gko::solver::gmres::ortho_method get_gmres_ortho_method()
 {
     if (FLAGS_gmres_ortho_method == "mgs") {
         return gko::solver::gmres::ortho_method::mgs;
@@ -178,7 +181,7 @@ gko::solver::gmres::ortho_method get_gmres_ortho_method()
  * @tparam ValueType  Scalar type of inner GMRES.
  */
 template <typename ValueType>
-std::unique_ptr<gko::LinOpFactory> build_gmres_for_ir(
+inline std::unique_ptr<gko::LinOpFactory> build_gmres_for_ir(
     const std::shared_ptr<const gko::Executor>& exec,
     std::shared_ptr<const gko::LinOpFactory> precond,
     const std::map<std::string, std::any>& extra_args)
@@ -201,7 +204,7 @@ std::unique_ptr<gko::LinOpFactory> build_gmres_for_ir(
 // generate_solver's signature stable as more solver-specific parameters are
 // added, rather than growing a new positional parameter (used by exactly
 // one branch) every time.
-std::unique_ptr<gko::LinOpFactory> generate_solver(
+inline std::unique_ptr<gko::LinOpFactory> generate_solver(
     const std::shared_ptr<const gko::Executor>& exec,
     std::shared_ptr<const gko::LinOpFactory> precond,
     const std::string& description, std::uint32_t max_iters,
@@ -266,9 +269,9 @@ std::unique_ptr<gko::LinOpFactory> generate_solver(
                 .with_ortho_method(ortho_method),
             exec, precond, max_iters);
     } else if (description == "gmres_ir") {
-        auto ir_factory = gko::solver::Ir<etype>::build()
-                              .with_criteria(create_criterion(exec, max_iters))
-                              .on(exec);
+        return gko::solver::Ir<etype>::build()
+            .with_criteria(create_criterion(exec, max_iters))
+            .on(exec);
     } else if (description == "minres") {
         return add_criteria_precond_finalize<gko::solver::Minres<etype>>(
             exec, precond, max_iters);
@@ -335,7 +338,7 @@ std::unique_ptr<gko::LinOpFactory> generate_solver(
 }
 
 
-void write_precond_info(const gko::LinOp* precond, json& precond_info)
+inline void write_precond_info(const gko::LinOp* precond, json& precond_info)
 {
     if (const auto jacobi =
             dynamic_cast<const gko::preconditioner::Jacobi<etype>*>(precond)) {
@@ -543,7 +546,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             state.system_matrix = generator.generate_matrix_with_format(
                 exec, spmv_format, data, size);
             if (formats::is_amp_format(spmv_format)) {
-                formats::write_amp_info(state.system_matrix.get(), test_case);
+                formats::write_amp_info<etype>(state.system_matrix.get(),
+                                               test_case);
             }
             // For single-GPU benchmarks, which default to using itype as the
             //  index type, store color_ptrs for multicolor ordering.
@@ -581,6 +585,9 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
         const auto decoded_pair = decoder.at(encoded_solver_name);
         auto& solver_name = decoded_pair.first;
         auto& precond_name = decoded_pair.second;
+        const bool solver_is_ir =
+            (solver_name.find("_ir") != std::string::npos);
+        // std::cout << "  >>(debug) Solver is IR." << std::endl;
         solver_case["recurrent_residuals"] = json::array();
         solver_case["true_residuals"] = json::array();
         solver_case["implicit_residuals"] = json::array();
@@ -597,7 +604,7 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
         IterationControl ic{timer};
         const PrecondArgs prec_args{exec, state.color_ptrs};
         const std::map<std::string, std::any> solver_extra_args{
-            {"color_ptrs", state.color_ptrs}};
+            {"color_ptrs", state.color_ptrs}, {"solver_is_ir", solver_is_ir}};
 
         // warm run
         std::shared_ptr<gko::LinOp> solver;
@@ -605,7 +612,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             auto range = annotate("warmup", FLAGS_warmup > 0);
             for (auto _ : ic.warmup_run()) {
                 auto x_clone = clone(state.x);
-                auto precond = precond_factory.at(precond_name)(prec_args);
+                auto precond =
+                    get_precond_factory<etype>(precond_name)(prec_args);
                 auto solver =
                     generate_solver(exec, give(precond), solver_name,
                                     FLAGS_warmup_max_iters, solver_extra_args)
@@ -629,7 +637,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 }
 
                 {
-                    auto precond = precond_factory.at(precond_name)(prec_args);
+                    auto precond =
+                        get_precond_factory<etype>(precond_name)(prec_args);
                     auto solver =
                         generate_solver(exec, give(precond), solver_name,
                                         FLAGS_max_iters, solver_extra_args)
@@ -643,7 +652,7 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             }
 
             // generate it for apply usage
-            auto precond = precond_factory.at(precond_name)(prec_args);
+            auto precond = get_precond_factory<etype>(precond_name)(prec_args);
             auto detailed_solver =
                 generate_solver(exec, give(precond), solver_name,
                                 FLAGS_max_iters, solver_extra_args)
@@ -701,7 +710,7 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
         // operations once. we can not rely on the warmup one because it uses
         // different iteration criterion.
         if (!FLAGS_benchmark_from_scratch) {
-            auto precond = precond_factory.at(precond_name)(prec_args);
+            auto precond = get_precond_factory<etype>(precond_name)(prec_args);
             solver =
                 gko::share(generate_solver(exec, give(precond), solver_name,
                                            FLAGS_max_iters, solver_extra_args)
@@ -715,7 +724,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             {
                 exec->synchronize();
                 generate_timer->tic();
-                auto precond = precond_factory.at(precond_name)(prec_args);
+                auto precond =
+                    get_precond_factory<etype>(precond_name)(prec_args);
                 auto generated_solver = gko::share(
                     generate_solver(exec, give(precond), solver_name,
                                     FLAGS_max_iters, solver_extra_args)

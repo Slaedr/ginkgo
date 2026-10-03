@@ -176,12 +176,15 @@ namespace formats {
 
 
 // some shortcuts
-using hybrid = gko::matrix::Hybrid<etype, itype>;
-using csr = gko::matrix::Csr<etype, itype>;
-using coo = gko::matrix::Coo<etype, itype>;
-using ell = gko::matrix::Ell<etype, itype>;
-using ell_mixed = gko::matrix::Ell<gko::next_precision_base<etype>, itype>;
-using amp_type = gko::matrix::AMP<etype, itype>;
+// using hybrid = gko::matrix::Hybrid<etype, itype>;
+template <typename vtype>
+using csr = gko::matrix::Csr<vtype, itype>;
+// using coo = gko::matrix::Coo<etype, itype>;
+// using ell = gko::matrix::Ell<etype, itype>;
+// using ell_mixed = gko::matrix::Ell<gko::next_precision_base<etype>, itype>;
+
+template <typename vtype>
+using amp_type = gko::matrix::AMP<vtype, itype>;
 
 
 /**
@@ -195,16 +198,18 @@ using amp_type = gko::matrix::AMP<etype, itype>;
  *
  * @throws gko::Error if the string does not match a supported value.
  */
-amp_type::csr_strategy_type parse_amp_csr_strategy(const std::string& s)
+template <typename ValueType>
+typename amp_type<ValueType>::csr_strategy_type parse_amp_csr_strategy(
+    const std::string& s)
 {
     if (s == "automatical") {
-        return amp_type::csr_strategy_type::automatical;
+        return amp_type<ValueType>::csr_strategy_type::automatical;
     } else if (s == "classical") {
-        return amp_type::csr_strategy_type::classical;
+        return amp_type<ValueType>::csr_strategy_type::classical;
     } else if (s == "load_balance") {
-        return amp_type::csr_strategy_type::load_balance;
+        return amp_type<ValueType>::csr_strategy_type::load_balance;
     } else if (s == "merge_path") {
-        return amp_type::csr_strategy_type::merge_path;
+        return amp_type<ValueType>::csr_strategy_type::merge_path;
     } else {
         throw gko::Error(__FILE__, __LINE__,
                          "Invalid amp_csr_strategy '" + s +
@@ -214,18 +219,19 @@ amp_type::csr_strategy_type parse_amp_csr_strategy(const std::string& s)
 }
 
 
-std::string to_string(amp_type::csr_strategy_type s)
+template <typename ValueType>
+std::string to_string(typename amp_type<ValueType>::csr_strategy_type s)
 {
     switch (s) {
-    case amp_type::csr_strategy_type::classical:
+    case amp_type<ValueType>::csr_strategy_type::classical:
         return "classical";
-    case amp_type::csr_strategy_type::load_balance:
+    case amp_type<ValueType>::csr_strategy_type::load_balance:
         return "load_balance";
-    case amp_type::csr_strategy_type::merge_path:
+    case amp_type<ValueType>::csr_strategy_type::merge_path:
         return "merge_path";
-    case amp_type::csr_strategy_type::sparselib:
+    case amp_type<ValueType>::csr_strategy_type::sparselib:
         return "sparselib";
-    case amp_type::csr_strategy_type::automatical:
+    case amp_type<ValueType>::csr_strategy_type::automatical:
     default:
         return "automatical";
     }
@@ -238,8 +244,8 @@ std::string to_string(amp_type::csr_strategy_type s)
  *
  * @tparam Strategy  one of csr::automatical or csr::load_balance
  */
-template <typename Strategy>
-std::shared_ptr<csr::strategy_type> create_gpu_strategy(
+template <typename Strategy, typename ValueType>
+std::shared_ptr<typename csr<ValueType>::strategy_type> create_gpu_strategy(
     std::shared_ptr<const gko::Executor> exec)
 {
     if (auto cuda = dynamic_cast<const gko::CudaExecutor*>(exec.get())) {
@@ -250,7 +256,7 @@ std::shared_ptr<csr::strategy_type> create_gpu_strategy(
                    dynamic_cast<const gko::DpcppExecutor*>(exec.get())) {
         return std::make_shared<Strategy>(dpcpp->shared_from_this());
     } else {
-        return std::make_shared<csr::classical>();
+        return std::make_shared<typename csr<ValueType>::classical>();
     }
 }
 
@@ -261,7 +267,8 @@ std::shared_ptr<csr::strategy_type> create_gpu_strategy(
  *
  * @throws gko::Error if the imbalance limit is exceeded
  */
-void check_ell_admissibility(const gko::matrix_data<etype, itype>& data)
+template <typename ValueType>
+void check_ell_admissibility(const gko::matrix_data<ValueType, itype>& data)
 {
     if (data.size[0] == 0 || FLAGS_ell_imbalance_limit < 0) {
         return;
@@ -292,17 +299,133 @@ auto create_matrix_type(Args&&... args)
 template <typename MatrixType, typename Strategy>
 auto create_matrix_type_with_gpu_strategy()
 {
+    using vtype = typename MatrixType::value_type;
     return [&](std::shared_ptr<const gko::Executor> exec)
                -> std::unique_ptr<MatrixType> {
-        return MatrixType::create(exec, create_gpu_strategy<Strategy>(exec));
+        return MatrixType::create(exec,
+                                  create_gpu_strategy<Strategy, vtype>(exec));
     };
 }
 
 
+template <typename ValueType>
+std::function<std::unique_ptr<gko::LinOp>(std::shared_ptr<const gko::Executor>)>
+get_matrix_factory(const std::string& mattype)
+{
+    using hybrid = gko::matrix::Hybrid<ValueType, itype>;
+    using csr = gko::matrix::Csr<ValueType, itype>;
+    using coo = gko::matrix::Coo<ValueType, itype>;
+    using ell = gko::matrix::Ell<ValueType, itype>;
+    using ell_mixed =
+        gko::matrix::Ell<gko::next_precision_base<ValueType>, itype>;
+    using amp_type = gko::matrix::AMP<ValueType, itype>;
+
+    if (mattype == "csr") {
+        return create_matrix_type_with_gpu_strategy<
+            csr, typename csr::automatical>();
+    } else if (mattype == "csri") {
+        return create_matrix_type_with_gpu_strategy<
+            csr, typename csr::load_balance>();
+    } else if (mattype == "csrm") {
+        return create_matrix_type<csr>(
+            std::make_shared<typename csr::merge_path>());
+    } else if (mattype == "csrc") {
+        return create_matrix_type<csr>(
+            std::make_shared<typename csr::classical>());
+    } else if (mattype == "csrs") {
+        return create_matrix_type<csr>(
+            std::make_shared<typename csr::sparselib>());
+    } else if (mattype == "coo") {
+        return create_matrix_type<coo>();
+    } else if (mattype == "ell") {
+        return create_matrix_type<ell>();
+    } else if (mattype == "ell_mixed") {
+        return create_matrix_type<ell_mixed>();
+#ifdef HAS_CUDA
+    } else if (mattype == "cusparse_csr") {
+        return create_sparselib_linop<cusparse_csr>;
+    } else if (mattype == "cusparse_csrmp") {
+        return create_sparselib_linop<cusparse_csrmp>;
+    } else if (mattype == "cusparse_csrmm") {
+        return create_sparselib_linop<cusparse_csrmm>;
+    } else if (mattype == "cusparse_hybrid") {
+        return create_sparselib_linop<cusparse_hybrid>;
+    } else if (mattype == "cusparse_coo") {
+        return create_sparselib_linop<cusparse_coo>;
+    } else if (mattype == "cusparse_ell") {
+        return create_sparselib_linop<cusparse_ell>;
+    } else if (mattype == "cusparse_csrex") {
+        return create_sparselib_linop<cusparse_csrex>;
+    } else if (mattype == "cusparse_gcsr") {
+        return create_sparselib_linop<cusparse_gcsr>;
+    } else if (mattype == "cusparse_gcsr2") {
+        return create_sparselib_linop<cusparse_gcsr2>;
+    } else if (mattype == "cusparse_gcoo") {
+        return create_sparselib_linop<cusparse_gcoo>;
+#endif  // HAS_CUDA
+#ifdef HAS_HIP
+    } else if (mattype == "hipsparse_csr") {
+        return create_sparselib_linop<hipsparse_csr>;
+    } else if (mattype == "hipsparse_csrmm") {
+        return create_sparselib_linop<hipsparse_csrmm>;
+    } else if (mattype == "hipsparse_hybrid") {
+        return create_sparselib_linop<hipsparse_hybrid>;
+    } else if (mattype == "hipsparse_coo") {
+        return create_sparselib_linop<hipsparse_coo>;
+    } else if (mattype == "hipsparse_ell") {
+        return create_sparselib_linop<hipsparse_ell>;
+#endif  // HAS_HIP
+#ifdef HAS_DPCPP
+    } else if (mattype == "onemkl_csr") {
+        return create_sparselib_linop<onemkl_csr>;
+    } else if (mattype == "onemkl_optimized_csr") {
+        return create_sparselib_linop<onemkl_optimized_csr>;
+#endif  // HAS_DPCPP
+    } else if (mattype == "hybrid") {
+        return create_matrix_type<hybrid>();
+    } else if (mattype == "hybrid0") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_limit>(0));
+    } else if (mattype == "hybrid25") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_limit>(0.25));
+    } else if (mattype == "hybrid33") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_limit>(1.0 / 3.0));
+    } else if (mattype == "hybrid40") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_limit>(0.4));
+    } else if (mattype == "hybrid60") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_limit>(0.6));
+    } else if (mattype == "hybrid80") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_limit>(0.8));
+    } else if (mattype == "hybridlimit0") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_bounded_limit>(0));
+    } else if (mattype == "hybridlimit25") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_bounded_limit>(0.25));
+    } else if (mattype == "hybridlimit33") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::imbalance_bounded_limit>(1.0 /
+                                                                       3.0));
+    } else if (mattype == "hybridminstorage") {
+        return create_matrix_type<hybrid>(
+            std::make_shared<typename hybrid::minimal_storage_limit>());
+    } else if (mattype == "sellp") {
+        return create_matrix_type<gko::matrix::Sellp<ValueType, itype>>();
+    }
+    throw std::invalid_argument("Unknown matrix format: " + mattype);
+}
+
+
 // clang-format off
+#if 0
 const std::map<std::string, std::function<std::unique_ptr<gko::LinOp>(
                                 std::shared_ptr<const gko::Executor>)>>
-    matrix_type_factory{
+    matrix_type_map{
         {"csr", create_matrix_type_with_gpu_strategy<csr, csr::automatical>()},
         {"csri", create_matrix_type_with_gpu_strategy<csr, csr::load_balance>()},
         {"csrm", create_matrix_type<csr>(std::make_shared<csr::merge_path>())},
@@ -363,22 +486,31 @@ const std::map<std::string, std::function<std::unique_ptr<gko::LinOp>(
         {"sellp", create_matrix_type<gko::matrix::Sellp<etype, itype>>()}
 };
 // clang-format on
+#endif
 
 
 /**
  * Returns true if the given format string names one of the AMP formats
  * ("amp": monolithic_classical, "ampib": independent_buckets).
  */
-bool is_amp_format(const std::string& format)
+inline bool is_amp_format(const std::string& format)
 {
     return format == "amp" || format == "ampib";
 }
 
 
-std::unique_ptr<gko::LinOp> matrix_factory(
+template <typename ValueType>
+std::unique_ptr<gko::LinOp> matrix_factory_generic(
     const std::string& format, std::shared_ptr<const gko::Executor> exec,
-    const gko::matrix_data<etype, itype>& data)
+    const gko::matrix_data<ValueType, itype>& data)
 {
+    using hybrid = gko::matrix::Hybrid<ValueType, itype>;
+    using csr = gko::matrix::Csr<ValueType, itype>;
+    using coo = gko::matrix::Coo<ValueType, itype>;
+    using ell = gko::matrix::Ell<ValueType, itype>;
+    using ell_mixed =
+        gko::matrix::Ell<gko::next_precision_base<ValueType>, itype>;
+    using amp_type = gko::matrix::AMP<ValueType, itype>;
     if (is_amp_format(format)) {
         const auto criterion = (FLAGS_amp_tolerance_type == "normwise")
                                    ? amp_type::criterion_type::normwise
@@ -400,7 +532,8 @@ std::unique_ptr<gko::LinOp> matrix_factory(
         return amp_type::build()
             .with_criterion(criterion)
             .with_strategy(strategy)
-            .with_csr_strategy(parse_amp_csr_strategy(FLAGS_amp_csr_strategy))
+            .with_csr_strategy(
+                parse_amp_csr_strategy<ValueType>(FLAGS_amp_csr_strategy))
             .with_tolerance(static_cast<float>(FLAGS_amp_tolerance))
             .with_bin_foldup_nnz_ratio(
                 static_cast<float>(FLAGS_amp_bin_foldup_nnz_ratio))
@@ -408,12 +541,12 @@ std::unique_ptr<gko::LinOp> matrix_factory(
             .on(exec)
             ->generate(std::move(base_mat));
     }
-    auto mat = matrix_type_factory.at(format)(exec);
+    auto mat = get_matrix_factory<ValueType>(format)(exec);
     if (format == "ell" || format == "ell_mixed") {
         check_ell_admissibility(data);
     }
     if (format == "ell_mixed") {
-        gko::matrix_data<gko::next_precision_base<etype>, itype> conv_data;
+        gko::matrix_data<gko::next_precision_base<ValueType>, itype> conv_data;
         conv_data.size = data.size;
         conv_data.nonzeros.resize(data.nonzeros.size());
         auto it = conv_data.nonzeros.begin();
@@ -423,14 +556,21 @@ std::unique_ptr<gko::LinOp> matrix_factory(
             it->value = el.value;
             ++it;
         }
-        gko::as<gko::ReadableFromMatrixData<gko::next_precision_base<etype>,
+        gko::as<gko::ReadableFromMatrixData<gko::next_precision_base<ValueType>,
                                             itype>>(mat.get())
             ->read(conv_data);
     } else {
-        gko::as<gko::ReadableFromMatrixData<etype, itype>>(mat.get())->read(
+        gko::as<gko::ReadableFromMatrixData<ValueType, itype>>(mat.get())->read(
             data);
     }
     return mat;
+}
+
+std::unique_ptr<gko::LinOp> matrix_factory(
+    const std::string& format, std::shared_ptr<const gko::Executor> exec,
+    const gko::matrix_data<etype, itype>& data)
+{
+    return matrix_factory_generic<etype>(format, exec, data);
 }
 
 
@@ -449,48 +589,50 @@ std::unique_ptr<gko::LinOp> matrix_factory(
  * particular for amp_subwarp_size, which is normalized at generation time
  * and so may differ from the value requested on the command line).
  */
+template <typename ValueType>
 void write_amp_info(const gko::LinOp* mtx, json& format_case)
 {
-    const auto* amp_mat = dynamic_cast<const amp_type*>(mtx);
+    const auto* amp_mat = dynamic_cast<const amp_type<ValueType>*>(mtx);
     if (!amp_mat) {
         return;
     }
-    using csr_double = gko::matrix::Csr<double, itype>;
-    using ell_double = gko::matrix::Ell<double, itype>;
+    using csr = gko::matrix::Csr<ValueType, itype>;
+    using ell = gko::matrix::Ell<ValueType, itype>;
     const bool is_csr =
-        dynamic_cast<const csr_double*>(amp_mat->get_bin_matrix(0)) != nullptr;
+        dynamic_cast<const csr*>(amp_mat->get_bin_matrix(0)) != nullptr;
     auto bins_json = json::object();
-    for (int k = 0; k < amp_type::num_precisions; ++k) {
+    for (int k = 0; k < amp_type<ValueType>::num_precisions; ++k) {
         const auto* bin = amp_mat->get_bin_matrix(k);
         if (!bin) {
             continue;
         }
         const auto key = "bin_" + std::to_string(k);
         if (is_csr) {
-            const auto* bin_csr = static_cast<const csr_double*>(bin);
+            const auto* bin_csr = static_cast<const csr*>(bin);
             bins_json[key] = bin_csr->get_num_stored_elements();
         } else {
-            const auto* bin_ell = static_cast<const ell_double*>(bin);
+            const auto* bin_ell = static_cast<const ell*>(bin);
             bins_json[key] = bin_ell->get_num_stored_elements_per_row();
         }
     }
     bins_json["base_type"] = is_csr ? "csr" : "ell";
     bins_json["csr_strategy"] =
-        to_string(amp_mat->get_parameters().csr_strategy);
+        to_string<ValueType>(amp_mat->get_parameters().csr_strategy);
     format_case["amp_bins"] = std::move(bins_json);
 
     const auto& p = amp_mat->get_parameters();
     format_case["amp_config"] = {
         {"amp_tolerance", p.tolerance},
-        {"amp_tolerance_type", p.criterion == amp_type::criterion_type::normwise
-                                   ? "normwise"
-                                   : "componentwise"},
+        {"amp_tolerance_type",
+         p.criterion == amp_type<ValueType>::criterion_type::normwise
+             ? "normwise"
+             : "componentwise"},
         {"amp_base_type", is_csr ? "csr" : "ell"},
         {"amp_strategy",
-         p.strategy == amp_type::strategy_type::independent_buckets
+         p.strategy == amp_type<ValueType>::strategy_type::independent_buckets
              ? "independent_buckets"
              : "monolithic_classical"},
-        {"amp_csr_strategy", to_string(p.csr_strategy)},
+        {"amp_csr_strategy", to_string<ValueType>(p.csr_strategy)},
         {"amp_subwarp_size", p.subwarp_size},
         {"amp_bin_foldup_nnz_ratio", p.bin_foldup_nnz_ratio},
         {"amp_high_precision_diagonal", p.high_precision_diagonal}};

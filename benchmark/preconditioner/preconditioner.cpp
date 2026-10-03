@@ -188,8 +188,8 @@ struct PreconditionerBenchmark : Benchmark<preconditioner_benchmark_state> {
             // fast run, gets total time
             auto x_clone = clone(state.x);
 
-            auto precond =
-                precond_factory.at(decoded_precond_name)(PrecondArgs{exec, {}});
+            auto precond = get_precond_factory<etype>(decoded_precond_name)(
+                PrecondArgs{exec, {}});
 
             {
                 auto range = annotate("warmup", FLAGS_warmup > 0);
@@ -224,8 +224,8 @@ struct PreconditionerBenchmark : Benchmark<preconditioner_benchmark_state> {
         if (FLAGS_detailed) {
             // slow run, times each component separately
             auto x_clone = clone(state.x);
-            auto precond =
-                precond_factory.at(decoded_precond_name)(PrecondArgs{exec, {}});
+            auto precond = get_precond_factory<etype>(decoded_precond_name)(
+                PrecondArgs{exec, {}});
 
             {
                 auto gen_logger = create_operations_logger(

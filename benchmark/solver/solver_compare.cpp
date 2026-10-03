@@ -101,7 +101,6 @@
 
 #include "benchmark/solver/solver_common.hpp"
 #include "benchmark/utils/general_matrix.hpp"
-#include "benchmark/utils/generator.hpp"
 
 
 namespace {
@@ -348,96 +347,43 @@ const char* supported_solvers =
     "bicg, bicgstab, cg, cgs, fcg, fgs, gmres, minres";
 
 
-// Mirrors formats::create_gpu_strategy for Csr<float>.
-template <typename Strategy>
-std::shared_ptr<csr::strategy_type> create_gpu_strategy(
-    std::shared_ptr<const gko::Executor> exec)
-{
-    if (auto cuda = dynamic_cast<const gko::CudaExecutor*>(exec.get())) {
-        return std::make_shared<Strategy>(cuda->shared_from_this());
-    } else if (auto hip = dynamic_cast<const gko::HipExecutor*>(exec.get())) {
-        return std::make_shared<Strategy>(hip->shared_from_this());
-    } else if (auto dpcpp =
-                   dynamic_cast<const gko::DpcppExecutor*>(exec.get())) {
-        return std::make_shared<Strategy>(dpcpp->shared_from_this());
-    } else {
-        return std::make_shared<csr::classical>();
-    }
-}
-
-
-std::unique_ptr<gko::LinOp> matrix_factory(
-    const std::string& format, std::shared_ptr<const gko::Executor> exec,
-    const gko::matrix_data<value_type, itype>& data)
-{
-    std::unique_ptr<gko::LinOp> mat;
-    if (format == "csr") {
-        mat = csr::create(exec, create_gpu_strategy<csr::automatical>(exec));
-    } else if (format == "csri") {
-        mat = csr::create(exec, create_gpu_strategy<csr::load_balance>(exec));
-    } else if (format == "csrm") {
-        mat = csr::create(exec, std::make_shared<csr::merge_path>());
-    } else if (format == "csrc") {
-        mat = csr::create(exec, std::make_shared<csr::classical>());
-    } else if (format == "csrs") {
-        mat = csr::create(exec, std::make_shared<csr::sparselib>());
-    } else if (format == "coo") {
-        mat = gko::matrix::Coo<value_type, itype>::create(exec);
-    } else if (format == "ell") {
-        mat = gko::matrix::Ell<value_type, itype>::create(exec);
-    } else if (format == "sellp") {
-        mat = gko::matrix::Sellp<value_type, itype>::create(exec);
-    } else if (format == "hybrid") {
-        mat = gko::matrix::Hybrid<value_type, itype>::create(exec);
-    } else {
-        throw std::runtime_error(
-            "format '" + format +
-            "' is not available with precision \"single\" (supported: " +
-            supported_formats + ")");
-    }
-    gko::as<gko::ReadableFromMatrixData<value_type, itype>>(mat.get())->read(
-        data);
-    return mat;
-}
-
-
-std::shared_ptr<const gko::LinOpFactory> precond_factory(
-    const std::string& name, std::shared_ptr<const gko::Executor> exec,
-    const std::vector<itype>& color_ptrs)
-{
-    if (name == "none") {
-        return gko::matrix::IdentityFactory<value_type>::create(exec);
-    } else if (name == "jacobi") {
-        return gko::preconditioner::Jacobi<value_type, itype>::build()
-            .with_max_block_size(FLAGS_jacobi_max_block_size)
-            .with_storage_optimization(
-                parse_storage_optimization(FLAGS_jacobi_storage))
-            .with_accuracy(static_cast<value_type>(FLAGS_jacobi_accuracy))
-            .with_skip_sorting(true)
-            .on(exec);
-    } else if (name == "fgs") {
-        if (color_ptrs.empty()) {
-            throw std::runtime_error(
-                "fgs preconditioner requires --reorder=multicolor");
-        }
-        return gko::solver::FwdGaussSeidel<value_type, itype>::build()
-            .with_criteria(gko::stop::Iteration::build()
-                               .with_max_iters(FLAGS_fgs_sweeps)
-                               .on(exec))
-            .with_color_ptrs(color_ptrs)
-            .on(exec);
-    } else if (name == "sor") {
-        return gko::preconditioner::Sor<value_type, itype>::build()
-            .with_relaxation_factor(
-                static_cast<value_type>(FLAGS_sor_relaxation_factor))
-            .with_symmetric(FLAGS_sor_symmetric)
-            .on(exec);
-    }
-    throw std::runtime_error(
-        "preconditioner '" + name +
-        "' is not available with precision \"single\" (supported: " +
-        supported_preconditioners + ")");
-}
+// std::shared_ptr<const gko::LinOpFactory> precond_factory(
+//     const std::string& name, std::shared_ptr<const gko::Executor> exec,
+//     const std::vector<itype>& color_ptrs)
+//{
+//     if (name == "none") {
+//         return gko::matrix::IdentityFactory<value_type>::create(exec);
+//     } else if (name == "jacobi") {
+//         return gko::preconditioner::Jacobi<value_type, itype>::build()
+//             .with_max_block_size(FLAGS_jacobi_max_block_size)
+//             .with_storage_optimization(
+//                 parse_storage_optimization(FLAGS_jacobi_storage))
+//             .with_accuracy(static_cast<value_type>(FLAGS_jacobi_accuracy))
+//             .with_skip_sorting(true)
+//             .on(exec);
+//     } else if (name == "fgs") {
+//         if (color_ptrs.empty()) {
+//             throw std::runtime_error(
+//                 "fgs preconditioner requires --reorder=multicolor");
+//         }
+//         return gko::solver::FwdGaussSeidel<value_type, itype>::build()
+//             .with_criteria(gko::stop::Iteration::build()
+//                                .with_max_iters(FLAGS_fgs_sweeps)
+//                                .on(exec))
+//             .with_color_ptrs(color_ptrs)
+//             .on(exec);
+//     } else if (name == "sor") {
+//         return gko::preconditioner::Sor<value_type, itype>::build()
+//             .with_relaxation_factor(
+//                 static_cast<value_type>(FLAGS_sor_relaxation_factor))
+//             .with_symmetric(FLAGS_sor_symmetric)
+//             .on(exec);
+//     }
+//     throw std::runtime_error(
+//         "preconditioner '" + name +
+//         "' is not available with precision \"single\" (supported: " +
+//         supported_preconditioners + ")");
+// }
 
 
 template <typename SolverBuilder>
@@ -622,7 +568,9 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
             "a configuration must select exactly one format");
     }
     if constexpr (is_base_precision) {
-        if (!precond_factory.count(FLAGS_preconditioners)) {
+        try {
+            get_precond_factory<ValueType>(FLAGS_preconditioners);
+        } catch (const std::out_of_range&) {
             throw std::runtime_error("unknown preconditioner '" +
                                      FLAGS_preconditioners + "'");
         }
@@ -649,18 +597,14 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     }
     r.num_colors = ro.color_ptrs.empty() ? 0 : ro.color_ptrs.size() - 1;
 
-    std::shared_ptr<gko::LinOp> A;
-    if constexpr (is_base_precision) {
-        A = gko::share(formats::matrix_factory(FLAGS_formats, exec, *data_ptr));
-        if (formats::is_amp_format(FLAGS_formats)) {
-            formats::write_amp_info(A.get(), r.detail);
-        }
-    } else {
-        if (FLAGS_formats == "ell") {
-            formats::check_ell_admissibility(*data_ptr);
-        }
-        A = gko::share(single_precision::matrix_factory(
+    if (FLAGS_formats == "ell") {
+        formats::check_ell_admissibility(*data_ptr);
+    }
+    std::shared_ptr<gko::LinOp> A =
+        gko::share(formats::matrix_factory_generic<ValueType>(
             FLAGS_formats, exec, convert_matrix_data<ValueType>(*data_ptr)));
+    if (formats::is_amp_format(FLAGS_formats)) {
+        formats::write_amp_info<ValueType>(A.get(), r.detail);
     }
 
     auto b = to_precision<ValueType>(b_orig);
@@ -677,17 +621,18 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     // Builds the (preconditioned) solver factory in this config's precision.
     auto make_solver_factory =
         [&](std::uint32_t max_iters) -> std::unique_ptr<gko::LinOpFactory> {
-        if constexpr (is_base_precision) {
-            auto precond = precond_factory.at(FLAGS_preconditioners)(prec_args);
-            return generate_solver(exec, give(precond), FLAGS_solvers,
-                                   max_iters, solver_extra_args);
-        } else {
-            return single_precision::generate_solver(
-                exec,
-                single_precision::precond_factory(FLAGS_preconditioners, exec,
-                                                  ro.color_ptrs),
-                FLAGS_solvers, max_iters, ro.color_ptrs);
-        }
+        // if constexpr (is_base_precision) {
+        auto precond =
+            get_precond_factory<ValueType>(FLAGS_preconditioners)(prec_args);
+        return generate_solver(exec, give(precond), FLAGS_solvers, max_iters,
+                               solver_extra_args);
+        //} else {
+        //    return single_precision::generate_solver(
+        //        exec,
+        //        single_precision::precond_factory(FLAGS_preconditioners, exec,
+        //                                          ro.color_ptrs),
+        //        FLAGS_solvers, max_iters, ro.color_ptrs);
+        //}
     };
 
     IterationControl ic{get_timer(exec, FLAGS_gpu_timer)};
