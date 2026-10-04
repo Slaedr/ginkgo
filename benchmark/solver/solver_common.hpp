@@ -73,6 +73,11 @@ DEFINE_uint32(idr_subspace_dim, 2,
 DEFINE_string(ir_inner_precision, "double",
               "Precision used by inner solver of IR");
 
+DEFINE_string(ir_inner_format, "",
+              "Matrix format used by inner solver of IR, e.g. amp. If empty, "
+              "the format of the system matrix (--formats) is used. The outer "
+              "IR iteration always uses the system matrix in --formats.");
+
 DEFINE_double(
     idr_kappa, 0.7,
     "the number to check whether Av_n and v_n are too close or not in IDR");
