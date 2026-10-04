@@ -28,6 +28,16 @@ add_benchmark_test(matrix_statistics)
 add_benchmark_test(preconditioner)
 add_benchmark_test(solver)
 add_benchmark_test(sparse_blas)
+# solver_compare writes its results to a file and has no complex variant, so it
+# has its own test script that checks the results instead of reference output.
+configure_file(solver_compare.py solver_compare.py COPYONLY)
+add_test(
+    NAME benchmark_solver_compare
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/solver_compare.py
+        $<TARGET_FILE:solver_compare>
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:ginkgo>"
+)
 add_benchmark_test(spmv)
 if(GINKGO_BUILD_MPI)
     add_benchmark_test(multi_vector_distributed)

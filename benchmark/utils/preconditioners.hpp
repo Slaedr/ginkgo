@@ -99,7 +99,7 @@ gko::precision_reduction parse_storage_optimization(const std::string& flag)
 
 
 /**
- * Arguments passed to each entry in precond_factory.
+ * Arguments passed to each factory returned by get_precond_factory.
  *
  * Most preconditioners only use exec; some, like FGS, additionally require
  * color_ptrs from a prior multicolor reordering.
@@ -110,384 +110,360 @@ struct PrecondArgs {
 };
 
 
-const std::map<std::string, std::function<std::unique_ptr<gko::LinOpFactory>(
-                                const PrecondArgs&)>>
-    precond_factory{
-        {"none",
-         [](const PrecondArgs& args) {
-             return gko::matrix::IdentityFactory<etype>::create(args.exec);
-         }},
-        {"jacobi",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             return gko::preconditioner::Jacobi<etype, itype>::build()
-                 .with_max_block_size(FLAGS_jacobi_max_block_size)
-                 .with_storage_optimization(
-                     parse_storage_optimization(FLAGS_jacobi_storage))
-                 .with_accuracy(static_cast<rc_etype>(FLAGS_jacobi_accuracy))
-                 .with_skip_sorting(true)
-                 .on(exec);
-         }},
-        {"paric",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact =
-                 gko::share(gko::factorization::ParIc<etype, itype>::build()
-                                .with_iterations(FLAGS_parilu_iterations)
-                                .with_skip_sorting(true)
-                                .on(exec));
-             return gko::preconditioner::Ic<gko::solver::LowerTrs<etype, itype>,
-                                            itype>::build()
-                 .with_factorization(fact)
-                 .on(exec);
-         }},
-        {"parict",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::ParIct<etype, itype>::build()
-                     .with_iterations(FLAGS_parilu_iterations)
-                     .with_approximate_select(FLAGS_parilut_approx_select)
-                     .with_fill_in_limit(FLAGS_parilut_limit)
-                     .with_skip_sorting(true)
-                     .on(exec));
-             return gko::preconditioner::
-                 Ilu<gko::solver::LowerTrs<etype, itype>,
-                     gko::solver::UpperTrs<etype, itype>, false, itype>::build()
-                     .with_factorization(fact)
-                     .on(exec);
-         }},
-        {"parilu",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact =
-                 gko::share(gko::factorization::ParIlu<etype, itype>::build()
-                                .with_iterations(FLAGS_parilu_iterations)
-                                .with_skip_sorting(true)
-                                .on(exec));
-             return gko::preconditioner::
-                 Ilu<gko::solver::LowerTrs<etype, itype>,
-                     gko::solver::UpperTrs<etype, itype>, false, itype>::build()
-                     .with_factorization(fact)
-                     .on(exec);
-         }},
-        {"parilut",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::ParIlut<etype, itype>::build()
-                     .with_iterations(FLAGS_parilu_iterations)
-                     .with_approximate_select(FLAGS_parilut_approx_select)
-                     .with_fill_in_limit(FLAGS_parilut_limit)
-                     .with_skip_sorting(true)
-                     .on(exec));
-             return gko::preconditioner::
-                 Ilu<gko::solver::LowerTrs<etype, itype>,
-                     gko::solver::UpperTrs<etype, itype>, false, itype>::build()
-                     .with_factorization(fact)
-                     .on(exec);
-         }},
-        {"ic",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::Ic<etype, itype>::build().on(exec));
-             return gko::preconditioner::Ic<gko::solver::LowerTrs<etype, itype>,
-                                            itype>::build()
-                 .with_factorization(fact)
-                 .on(exec);
-         }},
-        {"ilu",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::Ilu<etype, itype>::build().on(exec));
-             return gko::preconditioner::
-                 Ilu<gko::solver::LowerTrs<etype, itype>,
-                     gko::solver::UpperTrs<etype, itype>, false, itype>::build()
-                     .with_factorization(fact)
-                     .on(exec);
-         }},
-        {"paric-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact =
-                 gko::share(gko::factorization::ParIc<etype, itype>::build()
-                                .with_iterations(FLAGS_parilu_iterations)
-                                .with_skip_sorting(true)
-                                .on(exec));
-             auto lisai = gko::share(
-                 gko::preconditioner::LowerIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             return gko::preconditioner::Ic<
-                        gko::preconditioner::LowerIsai<etype, itype>,
-                        itype>::build()
-                 .with_factorization(fact)
-                 .with_l_solver(lisai)
-                 .on(exec);
-         }},
-        {"parict-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::ParIct<etype, itype>::build()
-                     .with_iterations(FLAGS_parilu_iterations)
-                     .with_approximate_select(FLAGS_parilut_approx_select)
-                     .with_fill_in_limit(FLAGS_parilut_limit)
-                     .with_skip_sorting(true)
-                     .on(exec));
-             auto lisai = gko::share(
-                 gko::preconditioner::LowerIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             return gko::preconditioner::Ic<
-                        gko::preconditioner::LowerIsai<etype, itype>,
-                        itype>::build()
-                 .with_factorization(fact)
-                 .with_l_solver(lisai)
-                 .on(exec);
-         }},
-        {"parilu-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact =
-                 gko::share(gko::factorization::ParIlu<etype, itype>::build()
-                                .with_iterations(FLAGS_parilu_iterations)
-                                .with_skip_sorting(true)
-                                .on(exec));
-             auto lisai = gko::share(
-                 gko::preconditioner::LowerIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             auto uisai = gko::share(
-                 gko::preconditioner::UpperIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             return gko::preconditioner::Ilu<
-                        gko::preconditioner::LowerIsai<etype, itype>,
-                        gko::preconditioner::UpperIsai<etype, itype>, false,
-                        itype>::build()
-                 .with_factorization(fact)
-                 .with_l_solver(lisai)
-                 .with_u_solver(uisai)
-                 .on(exec);
-         }},
-        {"parilut-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::ParIlut<etype, itype>::build()
-                     .with_iterations(FLAGS_parilu_iterations)
-                     .with_approximate_select(FLAGS_parilut_approx_select)
-                     .with_fill_in_limit(FLAGS_parilut_limit)
-                     .with_skip_sorting(true)
-                     .on(exec));
-             auto lisai = gko::share(
-                 gko::preconditioner::LowerIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             auto uisai = gko::share(
-                 gko::preconditioner::UpperIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             return gko::preconditioner::Ilu<
-                        gko::preconditioner::LowerIsai<etype, itype>,
-                        gko::preconditioner::UpperIsai<etype, itype>, false,
-                        itype>::build()
-                 .with_factorization(fact)
-                 .with_l_solver(lisai)
-                 .with_u_solver(uisai)
-                 .on(exec);
-         }},
-        {"ic-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::Ic<etype, itype>::build().on(exec));
-             auto lisai = gko::share(
-                 gko::preconditioner::LowerIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             return gko::preconditioner::Ic<
-                        gko::preconditioner::LowerIsai<etype, itype>,
-                        itype>::build()
-                 .with_factorization(fact)
-                 .with_l_solver(lisai)
-                 .on(exec);
-         }},
-        {"ilu-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::factorization::Ilu<etype, itype>::build().on(exec));
-             auto lisai = gko::share(
-                 gko::preconditioner::LowerIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             auto uisai = gko::share(
-                 gko::preconditioner::UpperIsai<etype, itype>::build()
-                     .with_sparsity_power(FLAGS_isai_power)
-                     .on(exec));
-             return gko::preconditioner::Ilu<
-                        gko::preconditioner::LowerIsai<etype, itype>,
-                        gko::preconditioner::UpperIsai<etype, itype>, false,
-                        itype>::build()
-                 .with_factorization(fact)
-                 .with_l_solver(lisai)
-                 .with_u_solver(uisai)
-                 .on(exec);
-         }},
-        {"general-isai",
-         [](const PrecondArgs& args) {
-             return gko::preconditioner::GeneralIsai<etype, itype>::build()
-                 .with_sparsity_power(FLAGS_isai_power)
-                 .on(args.exec);
-         }},
-        {"spd-isai",
-         [](const PrecondArgs& args) {
-             return gko::preconditioner::SpdIsai<etype, itype>::build()
-                 .with_sparsity_power(FLAGS_isai_power)
-                 .on(args.exec);
-         }},
-        {"fgs",
-         [](const PrecondArgs& args) {
-             if (args.color_ptrs.empty()) {
-                 throw std::runtime_error{
-                     "fgs preconditioner requires --reorder=multicolor"};
-             }
-             return gko::solver::FwdGaussSeidel<etype, itype>::build()
-                 .with_criteria(gko::stop::Iteration::build()
-                                    .with_max_iters(FLAGS_fgs_sweeps)
-                                    .on(args.exec))
-                 .with_color_ptrs(args.color_ptrs)
-                 .on(args.exec);
-         }},
-        {"sor",
-         [](const PrecondArgs& args) {
-             return gko::preconditioner::Sor<etype, itype>::build()
-                 .with_relaxation_factor(
-                     static_cast<gko::remove_complex<etype>>(
-                         FLAGS_sor_relaxation_factor))
-                 .with_symmetric(FLAGS_sor_symmetric)
-                 .on(args.exec);
-         }},
-        {"overhead",
-         [](const PrecondArgs& args) {
-             return gko::Overhead<etype>::build()
-                 .with_criteria(gko::stop::ResidualNorm<etype>::build()
-                                    .with_reduction_factor(rc_etype{}))
-                 .on(args.exec);
-         }},
-        {"mg",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             using ir = gko::solver::Ir<etype>;
-             auto iter_stop = gko::share(gko::stop::Iteration::build()
-                                             .with_max_iters(FLAGS_mg_max_iters)
-                                             .on(exec));
-             auto tol_stop =
-                 gko::share(gko::stop::ResidualNorm<etype>::build()
-                                .with_baseline(gko::stop::mode::absolute)
-                                .with_reduction_factor(FLAGS_mg_tolerance)
-                                .on(exec));
-             return gko::solver::Multigrid::build()
-                 .with_mg_level(
-                     gko::multigrid::Pgm<etype, itype>::build()
-                         .with_deterministic(FLAGS_pgm_deterministic))
-                 .with_criteria(iter_stop, tol_stop)
-                 .with_max_levels(FLAGS_mg_max_num_levels)
-                 .on(exec);
-         }}
-#if GINKGO_BUILD_MPI
-        ,
-        {"schwarz-jacobi",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             return gko::experimental::distributed::preconditioner::Schwarz<
-                        etype>::build()
-                 .with_local_solver(
-                     gko::preconditioner::Jacobi<etype>::build()
-                         .with_max_block_size(FLAGS_jacobi_max_block_size)
-                         .with_storage_optimization(
-                             parse_storage_optimization(FLAGS_jacobi_storage))
-                         .with_accuracy(
-                             static_cast<rc_etype>(FLAGS_jacobi_accuracy))
-                         .with_skip_sorting(true)
-                         .on(exec))
-                 .on(exec);
-         }},
-        {"schwarz-general-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             return gko::experimental::distributed::preconditioner::Schwarz<
-                        etype, itype>::build()
-                 .with_local_solver(
-                     gko::preconditioner::GeneralIsai<etype, itype>::build()
-                         .with_sparsity_power(FLAGS_isai_power)
-                         .on(exec))
-                 .on(exec);
-         }},
-        {"schwarz-spd-isai",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             return gko::experimental::distributed::preconditioner::Schwarz<
-                        etype, itype>::build()
-                 .with_local_solver(
-                     gko::preconditioner::SpdIsai<etype, itype>::build()
-                         .with_sparsity_power(FLAGS_isai_power)
-                         .on(exec))
-                 .on(exec);
-         }},
-        {"schwarz-ilu",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact =
-                 gko::share(gko::factorization::Ilu<etype, itype>::build()
-                                .with_skip_sorting(true)
-                                .on(exec));
-             return gko::experimental::distributed::preconditioner::Schwarz<
-                        etype, itype>::build()
-                 .with_local_solver(gko::preconditioner::Ilu<
-                                        gko::solver::LowerTrs<etype, itype>,
-                                        gko::solver::UpperTrs<etype, itype>,
-                                        false, itype>::build()
-                                        .with_factorization(fact)
-                                        .on(exec))
-                 .on(exec);
-         }},
-        {"schwarz-ic",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact =
-                 gko::share(gko::factorization::Ic<etype, itype>::build()
-                                .with_skip_sorting(true)
-                                .on(exec));
-             return gko::experimental::distributed::preconditioner::Schwarz<
-                        etype, itype>::build()
-                 .with_local_solver(
-                     gko::preconditioner::Ic<
-                         gko::solver::LowerTrs<etype, itype>, itype>::build()
-                         .with_factorization(fact)
-                         .on(exec))
-                 .on(exec);
-         }},
-        {"schwarz-lu",
-         [](const PrecondArgs& args) {
-             const auto& exec = args.exec;
-             auto fact = gko::share(
-                 gko::experimental::factorization::Lu<etype, itype>::build().on(
-                     exec));
-             return gko::experimental::distributed::preconditioner::Schwarz<
-                        etype, itype>::build()
-                 .with_local_solver(
-                     gko::experimental::solver::Direct<etype, itype>::build()
-                         .with_factorization(fact)
-                         .on(exec))
-                 .on(exec);
-         }}
-#endif
-    };
+template <typename ValueType>
+std::function<std::unique_ptr<gko::LinOpFactory>(const PrecondArgs&)>
+get_precond_factory(const std::string& prec)
+{
+    using rc_type = gko::remove_complex<ValueType>;
+    using lower_trs = gko::solver::LowerTrs<ValueType, itype>;
+    using upper_trs = gko::solver::UpperTrs<ValueType, itype>;
+    using lower_isai = gko::preconditioner::LowerIsai<ValueType, itype>;
+    using upper_isai = gko::preconditioner::UpperIsai<ValueType, itype>;
 
+    if (prec == "none") {
+        return [](const PrecondArgs& args) {
+            return gko::matrix::IdentityFactory<ValueType>::create(args.exec);
+        };
+    } else if (prec == "jacobi") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            return gko::preconditioner::Jacobi<ValueType, itype>::build()
+                .with_max_block_size(FLAGS_jacobi_max_block_size)
+                .with_storage_optimization(
+                    parse_storage_optimization(FLAGS_jacobi_storage))
+                .with_accuracy(static_cast<rc_type>(FLAGS_jacobi_accuracy))
+                .with_skip_sorting(true)
+                .on(exec);
+        };
+    } else if (prec == "paric") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact =
+                gko::share(gko::factorization::ParIc<ValueType, itype>::build()
+                               .with_iterations(FLAGS_parilu_iterations)
+                               .with_skip_sorting(true)
+                               .on(exec));
+            return gko::preconditioner::Ic<lower_trs, itype>::build()
+                .with_factorization(fact)
+                .on(exec);
+        };
+    } else if (prec == "parict") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::ParIct<ValueType, itype>::build()
+                    .with_iterations(FLAGS_parilu_iterations)
+                    .with_approximate_select(FLAGS_parilut_approx_select)
+                    .with_fill_in_limit(FLAGS_parilut_limit)
+                    .with_skip_sorting(true)
+                    .on(exec));
+            return gko::preconditioner::Ilu<lower_trs, upper_trs, false,
+                                            itype>::build()
+                .with_factorization(fact)
+                .on(exec);
+        };
+    } else if (prec == "parilu") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact =
+                gko::share(gko::factorization::ParIlu<ValueType, itype>::build()
+                               .with_iterations(FLAGS_parilu_iterations)
+                               .with_skip_sorting(true)
+                               .on(exec));
+            return gko::preconditioner::Ilu<lower_trs, upper_trs, false,
+                                            itype>::build()
+                .with_factorization(fact)
+                .on(exec);
+        };
+    } else if (prec == "parilut") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::ParIlut<ValueType, itype>::build()
+                    .with_iterations(FLAGS_parilu_iterations)
+                    .with_approximate_select(FLAGS_parilut_approx_select)
+                    .with_fill_in_limit(FLAGS_parilut_limit)
+                    .with_skip_sorting(true)
+                    .on(exec));
+            return gko::preconditioner::Ilu<lower_trs, upper_trs, false,
+                                            itype>::build()
+                .with_factorization(fact)
+                .on(exec);
+        };
+    } else if (prec == "ic") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::Ic<ValueType, itype>::build().on(exec));
+            return gko::preconditioner::Ic<lower_trs, itype>::build()
+                .with_factorization(fact)
+                .on(exec);
+        };
+    } else if (prec == "ilu") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::Ilu<ValueType, itype>::build().on(exec));
+            return gko::preconditioner::Ilu<lower_trs, upper_trs, false,
+                                            itype>::build()
+                .with_factorization(fact)
+                .on(exec);
+        };
+    } else if (prec == "paric-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact =
+                gko::share(gko::factorization::ParIc<ValueType, itype>::build()
+                               .with_iterations(FLAGS_parilu_iterations)
+                               .with_skip_sorting(true)
+                               .on(exec));
+            auto lisai = gko::share(lower_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            return gko::preconditioner::Ic<lower_isai, itype>::build()
+                .with_factorization(fact)
+                .with_l_solver(lisai)
+                .on(exec);
+        };
+    } else if (prec == "parict-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::ParIct<ValueType, itype>::build()
+                    .with_iterations(FLAGS_parilu_iterations)
+                    .with_approximate_select(FLAGS_parilut_approx_select)
+                    .with_fill_in_limit(FLAGS_parilut_limit)
+                    .with_skip_sorting(true)
+                    .on(exec));
+            auto lisai = gko::share(lower_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            return gko::preconditioner::Ic<lower_isai, itype>::build()
+                .with_factorization(fact)
+                .with_l_solver(lisai)
+                .on(exec);
+        };
+    } else if (prec == "parilu-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact =
+                gko::share(gko::factorization::ParIlu<ValueType, itype>::build()
+                               .with_iterations(FLAGS_parilu_iterations)
+                               .with_skip_sorting(true)
+                               .on(exec));
+            auto lisai = gko::share(lower_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            auto uisai = gko::share(upper_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            return gko::preconditioner::Ilu<lower_isai, upper_isai, false,
+                                            itype>::build()
+                .with_factorization(fact)
+                .with_l_solver(lisai)
+                .with_u_solver(uisai)
+                .on(exec);
+        };
+    } else if (prec == "parilut-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::ParIlut<ValueType, itype>::build()
+                    .with_iterations(FLAGS_parilu_iterations)
+                    .with_approximate_select(FLAGS_parilut_approx_select)
+                    .with_fill_in_limit(FLAGS_parilut_limit)
+                    .with_skip_sorting(true)
+                    .on(exec));
+            auto lisai = gko::share(lower_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            auto uisai = gko::share(upper_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            return gko::preconditioner::Ilu<lower_isai, upper_isai, false,
+                                            itype>::build()
+                .with_factorization(fact)
+                .with_l_solver(lisai)
+                .with_u_solver(uisai)
+                .on(exec);
+        };
+    } else if (prec == "ic-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::Ic<ValueType, itype>::build().on(exec));
+            auto lisai = gko::share(lower_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            return gko::preconditioner::Ic<lower_isai, itype>::build()
+                .with_factorization(fact)
+                .with_l_solver(lisai)
+                .on(exec);
+        };
+    } else if (prec == "ilu-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::factorization::Ilu<ValueType, itype>::build().on(exec));
+            auto lisai = gko::share(lower_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            auto uisai = gko::share(upper_isai::build()
+                                        .with_sparsity_power(FLAGS_isai_power)
+                                        .on(exec));
+            return gko::preconditioner::Ilu<lower_isai, upper_isai, false,
+                                            itype>::build()
+                .with_factorization(fact)
+                .with_l_solver(lisai)
+                .with_u_solver(uisai)
+                .on(exec);
+        };
+    } else if (prec == "general-isai") {
+        return [](const PrecondArgs& args) {
+            return gko::preconditioner::GeneralIsai<ValueType, itype>::build()
+                .with_sparsity_power(FLAGS_isai_power)
+                .on(args.exec);
+        };
+    } else if (prec == "spd-isai") {
+        return [](const PrecondArgs& args) {
+            return gko::preconditioner::SpdIsai<ValueType, itype>::build()
+                .with_sparsity_power(FLAGS_isai_power)
+                .on(args.exec);
+        };
+    } else if (prec == "fgs") {
+        return [](const PrecondArgs& args) {
+            if (args.color_ptrs.empty()) {
+                throw std::runtime_error{
+                    "fgs preconditioner requires --reorder=multicolor"};
+            }
+            return gko::solver::FwdGaussSeidel<ValueType, itype>::build()
+                .with_criteria(gko::stop::Iteration::build()
+                                   .with_max_iters(FLAGS_fgs_sweeps)
+                                   .on(args.exec))
+                .with_color_ptrs(args.color_ptrs)
+                .on(args.exec);
+        };
+    } else if (prec == "sor") {
+        return [](const PrecondArgs& args) {
+            return gko::preconditioner::Sor<ValueType, itype>::build()
+                .with_relaxation_factor(
+                    static_cast<rc_type>(FLAGS_sor_relaxation_factor))
+                .with_symmetric(FLAGS_sor_symmetric)
+                .on(args.exec);
+        };
+    } else if (prec == "overhead") {
+        return [](const PrecondArgs& args) {
+            return gko::Overhead<ValueType>::build()
+                .with_criteria(gko::stop::ResidualNorm<ValueType>::build()
+                                   .with_reduction_factor(rc_type{}))
+                .on(args.exec);
+        };
+    } else if (prec == "mg") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            using ir = gko::solver::Ir<ValueType>;
+            auto iter_stop = gko::share(gko::stop::Iteration::build()
+                                            .with_max_iters(FLAGS_mg_max_iters)
+                                            .on(exec));
+            auto tol_stop =
+                gko::share(gko::stop::ResidualNorm<ValueType>::build()
+                               .with_baseline(gko::stop::mode::absolute)
+                               .with_reduction_factor(FLAGS_mg_tolerance)
+                               .on(exec));
+            return gko::solver::Multigrid::build()
+                .with_mg_level(gko::multigrid::Pgm<ValueType, itype>::build()
+                                   .with_deterministic(FLAGS_pgm_deterministic))
+                .with_criteria(iter_stop, tol_stop)
+                .with_max_levels(FLAGS_mg_max_num_levels)
+                .on(exec);
+        };
+#if GINKGO_BUILD_MPI
+    } else if (prec == "schwarz-jacobi") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            return gko::experimental::distributed::preconditioner::Schwarz<
+                       ValueType>::build()
+                .with_local_solver(
+                    gko::preconditioner::Jacobi<ValueType>::build()
+                        .with_max_block_size(FLAGS_jacobi_max_block_size)
+                        .with_storage_optimization(
+                            parse_storage_optimization(FLAGS_jacobi_storage))
+                        .with_accuracy(
+                            static_cast<rc_type>(FLAGS_jacobi_accuracy))
+                        .with_skip_sorting(true)
+                        .on(exec))
+                .on(exec);
+        };
+    } else if (prec == "schwarz-general-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            return gko::experimental::distributed::preconditioner::Schwarz<
+                       ValueType, itype>::build()
+                .with_local_solver(
+                    gko::preconditioner::GeneralIsai<ValueType, itype>::build()
+                        .with_sparsity_power(FLAGS_isai_power)
+                        .on(exec))
+                .on(exec);
+        };
+    } else if (prec == "schwarz-spd-isai") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            return gko::experimental::distributed::preconditioner::Schwarz<
+                       ValueType, itype>::build()
+                .with_local_solver(
+                    gko::preconditioner::SpdIsai<ValueType, itype>::build()
+                        .with_sparsity_power(FLAGS_isai_power)
+                        .on(exec))
+                .on(exec);
+        };
+    } else if (prec == "schwarz-ilu") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact =
+                gko::share(gko::factorization::Ilu<ValueType, itype>::build()
+                               .with_skip_sorting(true)
+                               .on(exec));
+            return gko::experimental::distributed::preconditioner::Schwarz<
+                       ValueType, itype>::build()
+                .with_local_solver(
+                    gko::preconditioner::Ilu<lower_trs, upper_trs, false,
+                                             itype>::build()
+                        .with_factorization(fact)
+                        .on(exec))
+                .on(exec);
+        };
+    } else if (prec == "schwarz-ic") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact =
+                gko::share(gko::factorization::Ic<ValueType, itype>::build()
+                               .with_skip_sorting(true)
+                               .on(exec));
+            return gko::experimental::distributed::preconditioner::Schwarz<
+                       ValueType, itype>::build()
+                .with_local_solver(
+                    gko::preconditioner::Ic<lower_trs, itype>::build()
+                        .with_factorization(fact)
+                        .on(exec))
+                .on(exec);
+        };
+    } else if (prec == "schwarz-lu") {
+        return [](const PrecondArgs& args) {
+            const auto& exec = args.exec;
+            auto fact = gko::share(
+                gko::experimental::factorization::Lu<ValueType, itype>::build()
+                    .on(exec));
+            return gko::experimental::distributed::preconditioner::Schwarz<
+                       ValueType, itype>::build()
+                .with_local_solver(
+                    gko::experimental::solver::Direct<ValueType, itype>::build()
+                        .with_factorization(fact)
+                        .on(exec))
+                .on(exec);
+        };
+#endif
+    }
+    throw std::out_of_range("Unknown preconditioner: " + prec);
+}
 
 #endif  // GKO_BENCHMARK_UTILS_PRECONDITIONERS_HPP_

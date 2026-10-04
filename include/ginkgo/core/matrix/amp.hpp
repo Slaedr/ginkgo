@@ -242,7 +242,7 @@ public:
          *
          * A value of 0 disables folding.
          */
-        float GKO_FACTORY_PARAMETER_SCALAR(bin_foldup_nnz_ratio, 0.01f);
+        float GKO_FACTORY_PARAMETER_SCALAR(bin_foldup_nnz_ratio, 0.05f);
 
         /**
          * Whether diagonal entries are always placed in bin 0 (the highest
