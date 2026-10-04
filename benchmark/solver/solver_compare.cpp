@@ -100,7 +100,11 @@
 #include <ginkgo/ginkgo.hpp>
 
 #include "benchmark/solver/solver_common.hpp"
+#include "benchmark/utils/formats.hpp"
 #include "benchmark/utils/general_matrix.hpp"
+#include "ginkgo/core/base/executor.hpp"
+#include "ginkgo/core/base/lin_op.hpp"
+#include "ginkgo/core/base/polymorphic_object.hpp"
 
 
 namespace {
@@ -154,6 +158,11 @@ precision_type resolve_precision(const json& common, const json& block)
 std::string to_string(precision_type p)
 {
     return p == precision_type::single_precision ? "single" : "double";
+}
+
+bool is_ir_solver(const std::string& solver_descr)
+{
+    return (solver_descr.find("_ir") != std::string::npos);
 }
 
 
@@ -329,144 +338,14 @@ std::shared_ptr<const gko::stop::CriterionFactory> make_criterion(
 }
 
 
-// Float counterparts of formats::matrix_factory, precond_factory and
-// generate_solver. The shared benchmark helpers are all hard-wired to the
-// benchmark's compile-time etype (double for this driver), so a
-// single-precision solve needs its own -- deliberately small -- set.
-namespace single_precision {
-
-
-using value_type = float;
-using csr = gko::matrix::Csr<value_type, itype>;
-
-
-const char* supported_formats =
-    "csr, csrc, csri, csrm, csrs, coo, ell, sellp, hybrid";
-const char* supported_preconditioners = "none, jacobi, fgs, sor";
-const char* supported_solvers =
-    "bicg, bicgstab, cg, cgs, fcg, fgs, gmres, minres";
-
-
-// std::shared_ptr<const gko::LinOpFactory> precond_factory(
-//     const std::string& name, std::shared_ptr<const gko::Executor> exec,
-//     const std::vector<itype>& color_ptrs)
-//{
-//     if (name == "none") {
-//         return gko::matrix::IdentityFactory<value_type>::create(exec);
-//     } else if (name == "jacobi") {
-//         return gko::preconditioner::Jacobi<value_type, itype>::build()
-//             .with_max_block_size(FLAGS_jacobi_max_block_size)
-//             .with_storage_optimization(
-//                 parse_storage_optimization(FLAGS_jacobi_storage))
-//             .with_accuracy(static_cast<value_type>(FLAGS_jacobi_accuracy))
-//             .with_skip_sorting(true)
-//             .on(exec);
-//     } else if (name == "fgs") {
-//         if (color_ptrs.empty()) {
-//             throw std::runtime_error(
-//                 "fgs preconditioner requires --reorder=multicolor");
-//         }
-//         return gko::solver::FwdGaussSeidel<value_type, itype>::build()
-//             .with_criteria(gko::stop::Iteration::build()
-//                                .with_max_iters(FLAGS_fgs_sweeps)
-//                                .on(exec))
-//             .with_color_ptrs(color_ptrs)
-//             .on(exec);
-//     } else if (name == "sor") {
-//         return gko::preconditioner::Sor<value_type, itype>::build()
-//             .with_relaxation_factor(
-//                 static_cast<value_type>(FLAGS_sor_relaxation_factor))
-//             .with_symmetric(FLAGS_sor_symmetric)
-//             .on(exec);
-//     }
-//     throw std::runtime_error(
-//         "preconditioner '" + name +
-//         "' is not available with precision \"single\" (supported: " +
-//         supported_preconditioners + ")");
-// }
-
-
-template <typename SolverBuilder>
-std::unique_ptr<gko::LinOpFactory> finalize(
-    SolverBuilder builder, std::shared_ptr<const gko::Executor> exec,
-    std::shared_ptr<const gko::LinOpFactory> precond, std::uint32_t max_iters)
-{
-    return builder.with_criteria(make_criterion<value_type>(exec, max_iters))
-        .with_preconditioner(std::move(precond))
-        .on(exec);
-}
-
-
-std::unique_ptr<gko::LinOpFactory> generate_solver(
-    std::shared_ptr<const gko::Executor> exec,
-    std::shared_ptr<const gko::LinOpFactory> precond,
-    const std::string& description, std::uint32_t max_iters,
-    const std::vector<itype>& color_ptrs)
-{
-    namespace solver = gko::solver;
-    if (description == "gmres") {
-        solver::gmres::ortho_method ortho_method;
-        if (FLAGS_gmres_ortho_method == "mgs") {
-            ortho_method = solver::gmres::ortho_method::mgs;
-        } else if (FLAGS_gmres_ortho_method == "cgs") {
-            ortho_method = solver::gmres::ortho_method::cgs;
-        } else if (FLAGS_gmres_ortho_method == "cgs2") {
-            ortho_method = solver::gmres::ortho_method::cgs2;
-        } else {
-            throw std::runtime_error(
-                "GMRES doesn't support the orthogonalization method <" +
-                FLAGS_gmres_ortho_method + ">!");
-        }
-        return finalize(solver::Gmres<value_type>::build()
-                            .with_krylov_dim(FLAGS_gmres_restart)
-                            .with_ortho_method(ortho_method),
-                        exec, precond, max_iters);
-    } else if (description == "cg") {
-        return finalize(solver::Cg<value_type>::build(), exec, precond,
-                        max_iters);
-    } else if (description == "bicgstab") {
-        return finalize(solver::Bicgstab<value_type>::build(), exec, precond,
-                        max_iters);
-    } else if (description == "bicg") {
-        return finalize(solver::Bicg<value_type>::build(), exec, precond,
-                        max_iters);
-    } else if (description == "cgs") {
-        return finalize(solver::Cgs<value_type>::build(), exec, precond,
-                        max_iters);
-    } else if (description == "fcg") {
-        return finalize(solver::Fcg<value_type>::build(), exec, precond,
-                        max_iters);
-    } else if (description == "minres") {
-        return finalize(solver::Minres<value_type>::build(), exec, precond,
-                        max_iters);
-    } else if (description == "fgs") {
-        // As in generate_solver (solver_common.hpp): standalone FGS takes no
-        // preconditioner.
-        if (color_ptrs.empty()) {
-            throw std::runtime_error(
-                "fgs solver requires --reorder=multicolor");
-        }
-        return solver::FwdGaussSeidel<value_type, itype>::build()
-            .with_criteria(make_criterion<value_type>(exec, max_iters))
-            .with_color_ptrs(color_ptrs)
-            .on(exec);
-    }
-    throw std::runtime_error(
-        "solver '" + description +
-        "' is not available with precision \"single\" (supported: " +
-        supported_solvers + ")");
-}
-
-
-}  // namespace single_precision
-
-
 // Result of running one configuration ("a" or "b") on one matrix.
 struct ConfigResult {
     bool ok = false;
     std::string error;
     std::string precision = "double";
     std::string solver;
+    std::string inner_solver = "none";
+    std::string inner_precision = "double";
     std::string preconditioner;
     std::string format;
     std::string reorder = "none";
@@ -509,6 +388,8 @@ struct ConfigResult {
             return j;
         }
         j["solver"] = solver;
+        j["inner_solver"] = inner_solver;
+        j["inner_precision"] = inner_precision;
         j["preconditioner"] = preconditioner;
         j["format"] = format;
         j["reorder"] = reorder;
@@ -532,6 +413,33 @@ struct ConfigResult {
 };
 
 
+void set_inner_solver(
+    std::shared_ptr<const gko::Executor> exec,
+    std::shared_ptr<const gko::LinOp> A,
+    std::shared_ptr<const gko::LinOpFactory> inner_solver_factory,
+    std::shared_ptr<gko::LinOp> solver)
+{
+    if (inner_solver_factory) {
+        std::shared_ptr<const gko::LinOp> inner_solver{};
+        if (FLAGS_ir_inner_precision == "double") {
+            inner_solver = inner_solver_factory->generate(A);
+        } else if (FLAGS_ir_inner_precision == "single") {
+            inner_solver =
+                formats::get_matrix_factory<float>(FLAGS_formats)(exec);
+        } else if (FLAGS_ir_inner_precision == "half") {
+            inner_solver = formats::get_matrix_factory<gko::amp::half>(
+                FLAGS_formats)(exec);
+        } else {
+            GKO_NOT_SUPPORTED(FLAGS_ir_inner_precision);
+        }
+        auto ir_solver =
+            std::dynamic_pointer_cast<gko::solver::Ir<etype>>(solver);
+        assert(ir_solver);
+        ir_solver->set_solver(inner_solver);
+    }
+}
+
+
 // Runs the configuration currently active in the gflags (the caller is
 // expected to have applied "common" and one of "config_a"/"config_b" inside
 // a gflags::FlagSaver scope) on the given matrix, with all matrix, solver
@@ -551,6 +459,7 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     constexpr bool is_base_precision = std::is_same_v<ValueType, etype>;
     ConfigResult r;
     r.precision = is_base_precision ? "double" : "single";
+    r.inner_precision = FLAGS_ir_inner_precision;
     r.solver = FLAGS_solvers;
     r.preconditioner = FLAGS_preconditioners;
     r.format = FLAGS_formats;
@@ -616,24 +525,34 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
 
     const PrecondArgs prec_args{exec, ro.color_ptrs};
     const std::map<std::string, std::any> solver_extra_args{
-        {"color_ptrs", ro.color_ptrs}};
+        {"color_ptrs", ro.color_ptrs}, {"system_matrix", A}};
 
     // Builds the (preconditioned) solver factory in this config's precision.
     auto make_solver_factory =
-        [&](std::uint32_t max_iters) -> std::unique_ptr<gko::LinOpFactory> {
-        // if constexpr (is_base_precision) {
+        [&](std::uint32_t max_iters) -> std::shared_ptr<gko::LinOpFactory> {
         auto precond =
             get_precond_factory<ValueType>(FLAGS_preconditioners)(prec_args);
-        return generate_solver(exec, give(precond), FLAGS_solvers, max_iters,
-                               solver_extra_args);
-        //} else {
-        //    return single_precision::generate_solver(
-        //        exec,
-        //        single_precision::precond_factory(FLAGS_preconditioners, exec,
-        //                                          ro.color_ptrs),
-        //        FLAGS_solvers, max_iters, ro.color_ptrs);
-        //}
+        return generate_solver<ValueType>(exec, give(precond), FLAGS_solvers,
+                                          max_iters, solver_extra_args);
     };
+
+    std::shared_ptr<const gko::LinOpFactory> inner_solver_factory = nullptr;
+    if (is_ir_solver(FLAGS_solvers)) {
+        auto precond =
+            get_precond_factory<ValueType>(FLAGS_preconditioners)(prec_args);
+        if (FLAGS_ir_inner_precision == "double") {
+            inner_solver_factory = build_inner_solver_for_ir<double>(
+                exec, give(precond), FLAGS_solvers, solver_extra_args);
+        } else if (FLAGS_ir_inner_precision == "single") {
+            inner_solver_factory = build_inner_solver_for_ir<float>(
+                exec, give(precond), FLAGS_solvers, solver_extra_args);
+        } else if (FLAGS_ir_inner_precision == "half") {
+            inner_solver_factory = build_inner_solver_for_ir<gko::amp::half>(
+                exec, give(precond), FLAGS_solvers, solver_extra_args);
+        } else {
+            throw std::runtime_error("Invalid inner precision!");
+        }
+    }
 
     IterationControl ic{get_timer(exec, FLAGS_gpu_timer)};
     auto generate_timer = get_timer(exec, FLAGS_gpu_timer);
@@ -644,8 +563,9 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     // SolverBenchmark::run (benchmark/solver/solver_common.hpp).
     for (auto _ : ic.warmup_run()) {
         auto x_clone = gko::clone(x0);
-        auto warmup_solver =
-            make_solver_factory(FLAGS_warmup_max_iters)->generate(A);
+        auto warmup_solver = gko::share(
+            make_solver_factory(FLAGS_warmup_max_iters)->generate(A));
+        set_inner_solver(exec, A, inner_solver_factory, warmup_solver);
         warmup_solver->apply(b, x_clone);
         exec->synchronize();
     }
@@ -659,6 +579,7 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
     auto x = gko::clone(x0);
     if (!FLAGS_benchmark_from_scratch) {
         solver = gko::share(make_solver_factory(FLAGS_max_iters)->generate(A));
+        set_inner_solver(exec, A, inner_solver_factory, solver);
         solver->apply(b, x);
     }
     for (auto status : ic.run(false)) {
@@ -668,6 +589,7 @@ ConfigResult run_config(std::shared_ptr<gko::Executor> exec,
             generate_timer->tic();
             auto generated_solver =
                 gko::share(make_solver_factory(FLAGS_max_iters)->generate(A));
+            set_inner_solver(exec, A, inner_solver_factory, generated_solver);
             generate_timer->toc();
             if (FLAGS_benchmark_from_scratch) {
                 solver = generated_solver;

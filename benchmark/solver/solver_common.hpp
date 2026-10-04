@@ -112,24 +112,27 @@ std::string solver_example_config = R"(
 )";
 
 
+template <typename ValueType>
 inline std::shared_ptr<const gko::stop::CriterionFactory> create_criterion(
     std::shared_ptr<const gko::Executor> exec, std::uint32_t max_iters)
 {
     std::shared_ptr<const gko::stop::CriterionFactory> residual_stop;
     if (FLAGS_rel_residual) {
-        residual_stop =
-            gko::share(gko::stop::ResidualNorm<rc_etype>::build()
-                           .with_baseline(gko::stop::mode::initial_resnorm)
-                           .with_reduction_factor(
-                               static_cast<rc_etype>(FLAGS_rel_res_goal))
-                           .on(exec));
+        residual_stop = gko::share(
+            gko::stop::ResidualNorm<gko::remove_complex<ValueType>>::build()
+                .with_baseline(gko::stop::mode::initial_resnorm)
+                .with_reduction_factor(
+                    static_cast<gko::remove_complex<ValueType>>(
+                        FLAGS_rel_res_goal))
+                .on(exec));
     } else {
-        residual_stop =
-            gko::share(gko::stop::ResidualNorm<rc_etype>::build()
-                           .with_baseline(gko::stop::mode::rhs_norm)
-                           .with_reduction_factor(
-                               static_cast<rc_etype>(FLAGS_rel_res_goal))
-                           .on(exec));
+        residual_stop = gko::share(
+            gko::stop::ResidualNorm<gko::remove_complex<ValueType>>::build()
+                .with_baseline(gko::stop::mode::rhs_norm)
+                .with_reduction_factor(
+                    static_cast<gko::remove_complex<ValueType>>(
+                        FLAGS_rel_res_goal))
+                .on(exec));
     }
     auto iteration_stop = gko::share(
         gko::stop::Iteration::build().with_max_iters(max_iters).on(exec));
@@ -139,24 +142,24 @@ inline std::shared_ptr<const gko::stop::CriterionFactory> create_criterion(
 }
 
 
-template <typename SolverIntermediate>
+template <typename ValueType, typename SolverIntermediate>
 std::unique_ptr<gko::LinOpFactory> add_criteria_precond_finalize(
     SolverIntermediate inter, const std::shared_ptr<const gko::Executor>& exec,
     std::shared_ptr<const gko::LinOpFactory> precond, std::uint32_t max_iters)
 {
-    return inter.with_criteria(create_criterion(exec, max_iters))
+    return inter.with_criteria(create_criterion<ValueType>(exec, max_iters))
         .with_preconditioner(give(precond))
         .on(exec);
 }
 
 
-template <typename Solver>
+template <typename ValueType, typename Solver>
 std::unique_ptr<gko::LinOpFactory> add_criteria_precond_finalize(
     const std::shared_ptr<const gko::Executor>& exec,
     std::shared_ptr<const gko::LinOpFactory> precond, std::uint32_t max_iters)
 {
-    return add_criteria_precond_finalize(Solver::build(), exec, precond,
-                                         max_iters);
+    return add_criteria_precond_finalize<ValueType>(Solver::build(), exec,
+                                                    precond, max_iters);
 }
 
 inline gko::solver::gmres::ortho_method get_gmres_ortho_method()
@@ -181,17 +184,22 @@ inline gko::solver::gmres::ortho_method get_gmres_ortho_method()
  * @tparam ValueType  Scalar type of inner GMRES.
  */
 template <typename ValueType>
-inline std::unique_ptr<gko::LinOpFactory> build_gmres_for_ir(
+inline std::unique_ptr<gko::LinOpFactory> build_inner_solver_for_ir(
     const std::shared_ptr<const gko::Executor>& exec,
-    std::shared_ptr<const gko::LinOpFactory> precond,
+    std::shared_ptr<const gko::LinOpFactory> precond, const std::string& descr,
     const std::map<std::string, std::any>& extra_args)
 {
-    auto ortho_method = get_gmres_ortho_method();
-    return add_criteria_precond_finalize(
-        gko::solver::Gmres<ValueType>::build()
-            .with_krylov_dim(FLAGS_gmres_restart)
-            .with_ortho_method(ortho_method),
-        exec, precond, FLAGS_gmres_restart);
+    if (descr.find("gmres") != std::string::npos) {
+        auto ortho_method = get_gmres_ortho_method();
+        return add_criteria_precond_finalize<ValueType>(
+            gko::solver::Gmres<ValueType>::build()
+                .with_krylov_dim(FLAGS_gmres_restart)
+                .with_ortho_method(ortho_method),
+            exec, precond, FLAGS_gmres_restart);
+    } else {
+        throw std::range_error(std::string("The provided string <") + descr +
+                               "> does not match any inner solver for IR!");
+    }
 }
 
 
@@ -204,6 +212,7 @@ inline std::unique_ptr<gko::LinOpFactory> build_gmres_for_ir(
 // generate_solver's signature stable as more solver-specific parameters are
 // added, rather than growing a new positional parameter (used by exactly
 // one branch) every time.
+template <typename ValueType>
 inline std::unique_ptr<gko::LinOpFactory> generate_solver(
     const std::shared_ptr<const gko::Executor>& exec,
     std::shared_ptr<const gko::LinOpFactory> precond,
@@ -232,48 +241,56 @@ inline std::unique_ptr<gko::LinOpFactory> generate_solver(
                     "CB-GMRES does not have a corresponding solver to <") +
                 description + ">!");
         }
-        return add_criteria_precond_finalize(
-            gko::solver::CbGmres<etype>::build()
+        return add_criteria_precond_finalize<ValueType>(
+            gko::solver::CbGmres<ValueType>::build()
                 .with_krylov_dim(FLAGS_gmres_restart)
                 .with_storage_precision(s_prec),
             exec, precond, max_iters);
     } else if (description == "bicgstab") {
-        return add_criteria_precond_finalize<gko::solver::Bicgstab<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::solver::Bicgstab<ValueType>>(
             exec, precond, max_iters);
     } else if (description == "bicg") {
-        return add_criteria_precond_finalize<gko::solver::Bicg<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::solver::Bicg<ValueType>>(
             exec, precond, max_iters);
     } else if (description == "cg") {
-        return add_criteria_precond_finalize<gko::solver::Cg<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::solver::Cg<ValueType>>(
             exec, precond, max_iters);
     } else if (description == "cgs") {
-        return add_criteria_precond_finalize<gko::solver::Cgs<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::solver::Cgs<ValueType>>(
             exec, precond, max_iters);
     } else if (description == "fcg") {
-        return add_criteria_precond_finalize<gko::solver::Fcg<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::solver::Fcg<ValueType>>(
             exec, precond, max_iters);
     } else if (description == "pipe_cg") {
-        return add_criteria_precond_finalize<gko::solver::PipeCg<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::solver::PipeCg<ValueType>>(
             exec, precond, max_iters);
     } else if (description == "idr") {
-        return add_criteria_precond_finalize(
-            gko::solver::Idr<etype>::build()
+        return add_criteria_precond_finalize<ValueType>(
+            gko::solver::Idr<ValueType>::build()
                 .with_subspace_dim(FLAGS_idr_subspace_dim)
-                .with_kappa(static_cast<rc_etype>(FLAGS_idr_kappa)),
+                .with_kappa(static_cast<gko::remove_complex<ValueType>>(
+                    FLAGS_idr_kappa)),
             exec, precond, max_iters);
     } else if (description == "gmres") {
         auto ortho_method = get_gmres_ortho_method();
-        return add_criteria_precond_finalize(
-            gko::solver::Gmres<etype>::build()
+        return add_criteria_precond_finalize<ValueType>(
+            gko::solver::Gmres<ValueType>::build()
                 .with_krylov_dim(FLAGS_gmres_restart)
                 .with_ortho_method(ortho_method),
             exec, precond, max_iters);
     } else if (description == "gmres_ir") {
-        return gko::solver::Ir<etype>::build()
-            .with_criteria(create_criterion(exec, max_iters))
+        return gko::solver::Ir<ValueType>::build()
+            .with_criteria(create_criterion<ValueType>(exec, max_iters))
             .on(exec);
     } else if (description == "minres") {
-        return add_criteria_precond_finalize<gko::solver::Minres<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::solver::Minres<ValueType>>(
             exec, precond, max_iters);
     } else if (description == "fgs") {
         // FwdGaussSeidel run here as an independent solver (as opposed to its
@@ -292,45 +309,46 @@ inline std::unique_ptr<gko::LinOpFactory> generate_solver(
         if (color_ptrs.empty()) {
             throw std::range_error("fgs solver requires --reorder=multicolor");
         }
-        return gko::solver::FwdGaussSeidel<etype, itype>::build()
-            .with_criteria(create_criterion(exec, max_iters))
+        return gko::solver::FwdGaussSeidel<ValueType, itype>::build()
+            .with_criteria(create_criterion<ValueType>(exec, max_iters))
             .with_color_ptrs(color_ptrs)
             .on(exec);
     } else if (description == "lower_trs") {
-        return gko::solver::LowerTrs<etype>::build()
+        return gko::solver::LowerTrs<ValueType>::build()
             .with_num_rhs(FLAGS_nrhs)
             .on(exec);
     } else if (description == "upper_trs") {
-        return gko::solver::UpperTrs<etype>::build()
+        return gko::solver::UpperTrs<ValueType>::build()
             .with_num_rhs(FLAGS_nrhs)
             .on(exec);
     } else if (description == "spd_direct") {
-        return gko::experimental::solver::Direct<etype, itype>::build()
+        return gko::experimental::solver::Direct<ValueType, itype>::build()
             .with_factorization(
-                gko::experimental::factorization::Cholesky<etype,
+                gko::experimental::factorization::Cholesky<ValueType,
                                                            itype>::build())
             .on(exec);
     } else if (description == "symm_direct") {
-        return gko::experimental::solver::Direct<etype, itype>::build()
+        return gko::experimental::solver::Direct<ValueType, itype>::build()
             .with_factorization(
-                gko::experimental::factorization::Lu<etype, itype>::build()
+                gko::experimental::factorization::Lu<ValueType, itype>::build()
                     .with_symbolic_algorithm(gko::experimental::factorization::
                                                  symbolic_type::symmetric))
             .on(exec);
     } else if (description == "near_symm_direct") {
-        return gko::experimental::solver::Direct<etype, itype>::build()
+        return gko::experimental::solver::Direct<ValueType, itype>::build()
             .with_factorization(
-                gko::experimental::factorization::Lu<etype, itype>::build()
+                gko::experimental::factorization::Lu<ValueType, itype>::build()
                     .with_symbolic_algorithm(gko::experimental::factorization::
                                                  symbolic_type::near_symmetric))
             .on(exec);
     } else if (description == "direct") {
-        return gko::experimental::solver::Direct<etype, itype>::build()
+        return gko::experimental::solver::Direct<ValueType, itype>::build()
             .with_factorization(
-                gko::experimental::factorization::Lu<etype, itype>::build())
+                gko::experimental::factorization::Lu<ValueType, itype>::build())
             .on(exec);
     } else if (description == "overhead") {
-        return add_criteria_precond_finalize<gko::Overhead<etype>>(
+        return add_criteria_precond_finalize<ValueType,
+                                             gko::Overhead<ValueType>>(
             exec, precond, max_iters);
     }
     throw std::range_error(std::string("The provided string <") + description +
@@ -338,10 +356,12 @@ inline std::unique_ptr<gko::LinOpFactory> generate_solver(
 }
 
 
+template <typename ValueType>
 inline void write_precond_info(const gko::LinOp* precond, json& precond_info)
 {
     if (const auto jacobi =
-            dynamic_cast<const gko::preconditioner::Jacobi<etype>*>(precond)) {
+            dynamic_cast<const gko::preconditioner::Jacobi<ValueType>*>(
+                precond)) {
         // extract block sizes
         const auto bdata =
             jacobi->get_parameters().block_pointers.get_const_data();
@@ -614,10 +634,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 auto x_clone = clone(state.x);
                 auto precond =
                     get_precond_factory<etype>(precond_name)(prec_args);
-                auto solver =
-                    generate_solver(exec, give(precond), solver_name,
-                                    FLAGS_warmup_max_iters, solver_extra_args)
-                        ->generate(state.system_matrix);
+                auto solver = generate_solver<etype>(
+                                  exec, give(precond), solver_name,
+                                  FLAGS_warmup_max_iters, solver_extra_args)
+                                  ->generate(state.system_matrix);
                 solver->apply(state.b, x_clone);
                 exec->synchronize();
             }
@@ -639,10 +659,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 {
                     auto precond =
                         get_precond_factory<etype>(precond_name)(prec_args);
-                    auto solver =
-                        generate_solver(exec, give(precond), solver_name,
-                                        FLAGS_max_iters, solver_extra_args)
-                            ->generate(state.system_matrix);
+                    auto solver = generate_solver<etype>(
+                                      exec, give(precond), solver_name,
+                                      FLAGS_max_iters, solver_extra_args)
+                                      ->generate(state.system_matrix);
                 }
 
                 exec->remove_logger(gen_logger);
@@ -654,14 +674,14 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
             // generate it for apply usage
             auto precond = get_precond_factory<etype>(precond_name)(prec_args);
             auto detailed_solver =
-                generate_solver(exec, give(precond), solver_name,
-                                FLAGS_max_iters, solver_extra_args)
+                generate_solver<etype>(exec, give(precond), solver_name,
+                                       FLAGS_max_iters, solver_extra_args)
                     ->generate(state.system_matrix);
 
             if (auto prec = dynamic_cast<const gko::Preconditionable*>(
                     detailed_solver.get())) {
                 solver_case["preconditioner"] = json::object();
-                write_precond_info(
+                write_precond_info<etype>(
                     clone(exec->get_master(), prec->get_preconditioner()).get(),
                     solver_case["preconditioner"]);
             }
@@ -711,10 +731,10 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
         // different iteration criterion.
         if (!FLAGS_benchmark_from_scratch) {
             auto precond = get_precond_factory<etype>(precond_name)(prec_args);
-            solver =
-                gko::share(generate_solver(exec, give(precond), solver_name,
-                                           FLAGS_max_iters, solver_extra_args)
-                               ->generate(state.system_matrix));
+            solver = gko::share(
+                generate_solver<etype>(exec, give(precond), solver_name,
+                                       FLAGS_max_iters, solver_extra_args)
+                    ->generate(state.system_matrix));
             solver->apply(state.b, x_clone);
         }
         for (auto status : ic.run(false)) {
@@ -727,8 +747,8 @@ struct SolverBenchmark : Benchmark<solver_benchmark_state<Generator>> {
                 auto precond =
                     get_precond_factory<etype>(precond_name)(prec_args);
                 auto generated_solver = gko::share(
-                    generate_solver(exec, give(precond), solver_name,
-                                    FLAGS_max_iters, solver_extra_args)
+                    generate_solver<etype>(exec, give(precond), solver_name,
+                                           FLAGS_max_iters, solver_extra_args)
                         ->generate(state.system_matrix));
                 generate_timer->toc();
                 // when it is not from scratch, we always generate it explicitly
