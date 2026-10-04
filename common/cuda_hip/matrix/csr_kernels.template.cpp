@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -544,7 +544,7 @@ __device__ void device_classical_spmv(const size_type num_rows,
 
 template <size_type subwarp_size, typename matrix_accessor,
           typename input_accessor, typename output_accessor, typename IndexType>
-__global__ __launch_bounds__(spmv_block_size) void abstract_classical_spmv(
+__global__ __launch_bounds__(default_block_size) void abstract_classical_spmv(
     const size_type num_rows, acc::range<matrix_accessor> val,
     const IndexType* __restrict__ col_idxs,
     const IndexType* __restrict__ row_ptrs, acc::range<input_accessor> b,
@@ -559,7 +559,7 @@ __global__ __launch_bounds__(spmv_block_size) void abstract_classical_spmv(
 
 template <size_type subwarp_size, typename matrix_accessor,
           typename input_accessor, typename output_accessor, typename IndexType>
-__global__ __launch_bounds__(spmv_block_size) void abstract_classical_spmv(
+__global__ __launch_bounds__(default_block_size) void abstract_classical_spmv(
     const size_type num_rows,
     const typename matrix_accessor::storage_type* __restrict__ alpha,
     acc::range<matrix_accessor> val, const IndexType* __restrict__ col_idxs,
@@ -2102,11 +2102,12 @@ void classical_spmv(syn::value_list<int, subwarp_size>,
     const auto nwarps = exec->get_num_warps_per_sm() *
                         exec->get_num_multiprocessor() *
                         classical_oversubscription;
+    constexpr uint32 warps_per_block = default_block_size / config::warp_size;
     const auto gridx =
-        std::min(ceildiv(a->get_size()[0], spmv_block_size / subwarp_size),
-                 int64(nwarps / warps_in_block));
+        std::min(ceildiv(a->get_size()[0], default_block_size / subwarp_size),
+                 int64(nwarps / warps_per_block));
     const dim3 grid(gridx, b->get_size()[1]);
-    const auto block = spmv_block_size;
+    const auto block = default_block_size;
 
     const auto a_vals =
         acc::helper::build_const_rrm_accessor<arithmetic_type>(a);
