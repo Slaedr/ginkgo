@@ -301,24 +301,25 @@ TEST(AMPAlgorithm, GetsCorrectPrecisionBin)
 TEST(AMPAlgorithm, AdjustsBinForUnderflow)
 {
     const auto mins = gkra::get_bins_min_representable<double>();
+    const auto maxs = gkra::get_bins_max_representable<double>();
 
     // Value representable in bin 1 stays in bin 1
     double val_ok = static_cast<double>(mins[1]) * 2.0;
-    auto adj_ok = gkra::adjust_bin_for_underflow<double>(mins, val_ok, 1);
+    auto adj_ok = gkra::adjust_bin_for_range<double>(mins, maxs, val_ok, 1);
     EXPECT_EQ(adj_ok, 1);
 
     // Value below min of bin 1 but above min of bin 0 moves to bin 0
     double val_underflow_float = static_cast<double>(mins[1]) * 0.5;
     auto adj_underflow =
-        gkra::adjust_bin_for_underflow<double>(mins, val_underflow_float, 1);
+        gkra::adjust_bin_for_range<double>(mins, maxs, val_underflow_float, 1);
     EXPECT_EQ(adj_underflow, 0);
 
     // Dropped values (bin -1) stay dropped
-    auto adj_drop = gkra::adjust_bin_for_underflow<double>(mins, 1e-100, -1);
+    auto adj_drop = gkra::adjust_bin_for_range<double>(mins, maxs, 1e-100, -1);
     EXPECT_EQ(adj_drop, -1);
 
     // Bin 0 stays at bin 0 even for tiny values
-    auto adj_tiny = gkra::adjust_bin_for_underflow<double>(mins, 1e-320, 0);
+    auto adj_tiny = gkra::adjust_bin_for_range<double>(mins, maxs, 1e-320, 0);
     EXPECT_EQ(adj_tiny, 0);
 }
 
@@ -330,29 +331,142 @@ TEST(AMPAlgorithm, GetsAdjustedBin)
     const auto lbs =
         gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
     const auto mins = gkra::get_bins_min_representable<double>();
+    const auto maxs = gkra::get_bins_max_representable<double>();
     constexpr int q = gko::amp::narrow_types<double>::num_types;
 
     // Large value goes to bin 0
-    auto bin_large =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false, q - 1);
+    auto bin_large = gkra::get_adjusted_bin<double>(lbs, mins, maxs,
+                                                    lbs[0] * 2.0, false, q - 1);
     EXPECT_EQ(bin_large, 0);
 
     // Value that would go to bin 1 and is representable stays in bin 1
     double val_bin1 = (lbs[0] + lbs[1]) / 2.0;
     if (val_bin1 >= static_cast<double>(mins[1])) {
-        auto bin1 =
-            gkra::get_adjusted_bin<double>(lbs, mins, val_bin1, false, q - 1);
+        auto bin1 = gkra::get_adjusted_bin<double>(lbs, mins, maxs, val_bin1,
+                                                   false, q - 1);
         EXPECT_EQ(bin1, 1);
     }
 
     // Very small value gets dropped
-    auto bin_drop =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[1] * 0.5, false, q - 1);
+    auto bin_drop = gkra::get_adjusted_bin<double>(lbs, mins, maxs,
+                                                   lbs[1] * 0.5, false, q - 1);
     EXPECT_EQ(bin_drop, -1);
 }
 
 
 #endif
+
+
+TEST(AMPAlgorithm, AdjustsBinForOverflow)
+{
+    const auto mins = gkra::get_bins_min_representable<double>();
+    const auto maxs = gkra::get_bins_max_representable<double>();
+    constexpr int q = gko::amp::narrow_types<double>::num_types;
+
+    // Value well within the range of the lowest precision bin stays there
+    const double val_ok = maxs[q - 1] / 2.0;
+    EXPECT_EQ(gkra::adjust_bin_for_range<double>(mins, maxs, val_ok, q - 1),
+              q - 1);
+
+    // The maximum representable value itself does not overflow
+    EXPECT_EQ(
+        gkra::adjust_bin_for_range<double>(mins, maxs, maxs[q - 1], q - 1),
+        q - 1);
+
+    // Value above the max of float moves from the float bin to bin 0
+    const double val_over_float = maxs[1] * 1.001;
+    EXPECT_EQ(gkra::adjust_bin_for_range<double>(mins, maxs, val_over_float, 1),
+              0);
+
+#if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
+    // Value above the max of half moves to the next higher precision bin
+    // (float), which is still wide enough to represent it.
+    const double val_over_half = maxs[2] * 1.001;
+    const int adjusted_half =
+        gkra::adjust_bin_for_range<double>(mins, maxs, val_over_half, 2);
+    EXPECT_EQ(adjusted_half, 1);
+    EXPECT_LE(val_over_half, maxs[adjusted_half]);
+
+    // Value above the max of float cascades from the half bin to bin 0
+    EXPECT_EQ(gkra::adjust_bin_for_range<double>(mins, maxs, val_over_float, 2),
+              0);
+#endif
+
+    // Dropped values stay dropped, however large
+    EXPECT_EQ(gkra::adjust_bin_for_range<double>(mins, maxs, 1e300, -1), -1);
+
+    // Bin 0 has nowhere to go, even for a value beyond its range
+    EXPECT_EQ(gkra::adjust_bin_for_range<double>(
+                  mins, maxs, std::numeric_limits<double>::infinity(), 0),
+              0);
+
+#if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
+    // Test with float as base type
+    const auto mins_f = gkra::get_bins_min_representable<float>();
+    const auto maxs_f = gkra::get_bins_max_representable<float>();
+    const float val_over_half_f = maxs_f[1] * 1.001f;
+    EXPECT_EQ(
+        gkra::adjust_bin_for_range<float>(mins_f, maxs_f, val_over_half_f, 1),
+        0);
+    EXPECT_EQ(
+        gkra::adjust_bin_for_range<float>(mins_f, maxs_f, maxs_f[1] / 2, 1), 1);
+#endif
+}
+
+
+TEST(AMPAlgorithm, GetsAdjustedBinHandlesOverflow)
+{
+    // The row norm is so large that the lower bound of bin 0 exceeds the
+    // largest finite float (and is therefore inf as a float). A value
+    // between the float max and inf is assigned to the float bin by
+    // magnitude, but would overflow there.
+    const double rownorm = 1e38;
+    const float tol = 1e-3f;
+    const auto lbs =
+        gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
+    const auto mins = gkra::get_bins_min_representable<double>();
+    const auto maxs = gkra::get_bins_max_representable<double>();
+    constexpr int q = gko::amp::narrow_types<double>::num_types;
+
+    // Representable in float: stays in the float bin
+    const double val_ok = 2e38;
+    ASSERT_LT(val_ok, maxs[1]);
+    EXPECT_EQ(
+        gkra::get_adjusted_bin<double>(lbs, mins, maxs, val_ok, false, q - 1),
+        1);
+
+    // Overflows float: must go to bin 0
+    const double val_over = 1e39;
+    ASSERT_GT(val_over, maxs[1]);
+    EXPECT_EQ(
+        gkra::get_adjusted_bin<double>(lbs, mins, maxs, val_over, false, q - 1),
+        0);
+
+    // The diagonal goes to bin 0 regardless
+    EXPECT_EQ(
+        gkra::get_adjusted_bin<double>(lbs, mins, maxs, val_ok, true, q - 1),
+        0);
+
+#if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
+    // A value that is in the half bin by magnitude. It overflows fp16 (max
+    // 65504) and is moved to the float bin, but fits in bfloat16.
+    const double rownorm_half = 1e10;
+    const auto lbs_half =
+        gkra::get_bins_precision_lower_bounds<double>(rownorm_half, tol);
+    const double val_half = 2e7;
+    ASSERT_GT(val_half, lbs_half[2]);
+    ASSERT_LT(val_half, lbs_half[1]);
+#if GKO_AMP_HALF_IS_FP16
+    EXPECT_EQ(gkra::get_adjusted_bin<double>(lbs_half, mins, maxs, val_half,
+                                             false, q - 1),
+              1);
+#else
+    EXPECT_EQ(gkra::get_adjusted_bin<double>(lbs_half, mins, maxs, val_half,
+                                             false, q - 1),
+              2);
+#endif
+#endif
+}
 
 
 TEST(AMPAlgorithm, AssignsValueToTuple)
@@ -2034,7 +2148,7 @@ TEST(ReduceBinsMax, ReducesThreeIntArraysCorrectly)
 {
     std::shared_ptr<const gko::ReferenceExecutor> exec =
         gko::ReferenceExecutor::create();
-    constexpr int q = 3;
+    constexpr int q = gko::matrix::AMP<double>::num_precisions;
     const gko::size_type sz = 5;
     std::array<gko::array<int>, q> data;
     for (int i = 0; i < q; i++) {
@@ -2052,8 +2166,10 @@ TEST(ReduceBinsMax, ReducesThreeIntArraysCorrectly)
         }
     }
     data[1].get_data()[2] = 200;
-    data[2].get_data()[3] = -301;
-    data[2].get_data()[4] = 301;
+    if (q >= 3) {
+        data[2].get_data()[3] = -301;
+        data[2].get_data()[4] = 301;
+    }
     gko::amp::precision_array<int, double> maxes;
     auto dumtx = gko::matrix::Csr<std::complex<double>, int>::create(exec);
 
@@ -2062,7 +2178,9 @@ TEST(ReduceBinsMax, ReducesThreeIntArraysCorrectly)
 
     EXPECT_EQ(maxes[0], 5);
     EXPECT_EQ(maxes[1], 300);
-    EXPECT_EQ(maxes[2], 301);
+    if (q >= 3) {
+        EXPECT_EQ(maxes[2], 301);
+    }
 }
 
 

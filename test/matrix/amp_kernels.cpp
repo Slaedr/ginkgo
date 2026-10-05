@@ -541,6 +541,47 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 }
 
 
+TEST_F(Amp, GenerateWithEntriesThatWouldOverflowIsEquivalentToRef)
+{
+    using T = value_type;
+    // Diagonal entries of 1e10 give a row norm of ~1e10. At tolerance 1e-3
+    // the lowest-precision bin starts at ~1e7, so the off-diagonal entries
+    // of 2^25 (exactly representable in every candidate precision) are
+    // assigned to it by magnitude, but overflow fp16 and so must be moved to
+    // a wider bin.
+    const int n = 64;
+    gko::matrix_data<T, index_type> data(gko::dim<2>{n, n});
+    for (int i = 0; i < n; i++) {
+        data.nonzeros.emplace_back(i, i, T{1e10});
+        data.nonzeros.emplace_back(i, (i + 1) % n, T{33554432.0});
+    }
+    data.sort_row_major();
+    auto ell_ref = gko::share(Mtx::create(ref));
+    ell_ref->read(data);
+    auto ell_d = gko::share(gko::clone(exec, ell_ref));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(1e-3f)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(ell_ref);
+    auto amp_d = AmpMtx::build()
+                     .with_tolerance(1e-3f)
+                     .with_bin_foldup_nnz_ratio(0.0f)
+                     .on(exec)
+                     ->generate(ell_d);
+    auto expected = Vec::create(ref);
+    expected->read(data);
+    auto dense_ref = Vec::create(ref);
+    auto dense_d = Vec::create(exec);
+
+    amp_ref->convert_to(dense_ref.get());
+    amp_d->convert_to(dense_d.get());
+
+    GKO_ASSERT_MTX_NEAR(dense_ref, expected, 0);
+    GKO_ASSERT_MTX_NEAR(dense_d, expected, 0);
+}
+
+
 TEST_F(Amp, ReadfromDeviceProducesSameResultAsFactoryGenerate)
 {
     using Ell = Mtx;
@@ -1167,6 +1208,48 @@ TEST_F(AmpCsr, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 
     GKO_ASSERT_MTX_NEAR(c_d, c_ref, r<T>::value);
 }
+
+TEST_F(AmpCsr, GenerateWithEntriesThatWouldOverflowIsEquivalentToRef)
+{
+    using T = value_type;
+    constexpr int q = gko::matrix::AMP<T, index_type>::num_precisions;
+    // See the ELL variant of this test for the rationale.
+    const int n = 64;
+    gko::matrix_data<T, index_type> data(gko::dim<2>{n, n});
+    for (int i = 0; i < n; i++) {
+        data.nonzeros.emplace_back(i, i, T{1e10});
+        data.nonzeros.emplace_back(i, (i + 1) % n, T{33554432.0});
+    }
+    data.sort_row_major();
+    auto csr_ref = gko::share(CsrMtx::create(ref));
+    csr_ref->read(data);
+    auto csr_d = gko::share(gko::clone(exec, csr_ref));
+    auto amp_ref = AmpMtx::build()
+                       .with_tolerance(1e-3f)
+                       .with_bin_foldup_nnz_ratio(0.0f)
+                       .on(ref)
+                       ->generate(csr_ref);
+    auto amp_d = AmpMtx::build()
+                     .with_tolerance(1e-3f)
+                     .with_bin_foldup_nnz_ratio(0.0f)
+                     .on(exec)
+                     ->generate(csr_d);
+    auto expected = Vec::create(ref);
+    expected->read(data);
+    auto dense_ref = Vec::create(ref);
+    auto dense_d = Vec::create(exec);
+
+    amp_ref->convert_to(dense_ref.get());
+    amp_d->convert_to(dense_d.get());
+
+    for (int k = 0; k < q; k++) {
+        EXPECT_EQ(amp_ref->get_max_nnz_per_row_for_bin(k),
+                  amp_d->get_max_nnz_per_row_for_bin(k));
+    }
+    GKO_ASSERT_MTX_NEAR(dense_ref, expected, 0);
+    GKO_ASSERT_MTX_NEAR(dense_d, expected, 0);
+}
+
 
 TEST_F(AmpCsr, ReducesThreeLongArraysEquivalentToRef)
 {

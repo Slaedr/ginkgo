@@ -1112,6 +1112,95 @@ TYPED_TEST(Amp, BinFoldupCascadesSparseTrailingBinIntoBinZero)
 }
 
 
+TYPED_TEST(Amp, ReadMovesEntriesThatWouldOverflowToHigherPrecisionBinCsr)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Csr = gko::matrix::Csr<value_type, index_type>;
+    using Dense = typename TestFixture::Dense;
+    constexpr int nrows = 64;
+
+    // Diagonal entries of 1e10 give a row norm of ~1e10. At tolerance 1e-3,
+    // the lowest-precision bin starts at ~1e7, so the off-diagonal entries
+    // of 2^25 (a power of two, exactly representable in every candidate
+    // precision) are assigned to it by magnitude. 2^25 is above the max of
+    // fp16 (65504), so it must be moved to a wider bin rather than being
+    // stored as inf.
+    gko::matrix_data<value_type, index_type> data(gko::dim<2>{nrows, nrows});
+    for (int i = 0; i < nrows; i++) {
+        data.nonzeros.emplace_back(i, i, value_type{1e10});
+        data.nonzeros.emplace_back(i, (i + 1) % nrows, value_type{33554432.0});
+    }
+    data.sort_row_major();
+
+    auto base_empty = gko::share(Csr::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx = Mtx::build()
+                   .with_tolerance(1e-3f)
+                   .with_bin_foldup_nnz_ratio(0.0f)
+                   .on(this->exec)
+                   ->generate(base_empty);
+    mtx->read(data);
+
+#if GKO_AMP_HALF_IS_FP16
+    if constexpr (Mtx::num_precisions >= 2) {
+        // The overflowing entries must not be left in the lowest bin.
+        EXPECT_EQ(mtx->get_max_nnz_per_row_for_bin(Mtx::num_precisions - 1), 0);
+    }
+#endif
+    auto expected = Dense::create(this->exec);
+    expected->read(data);
+    auto actual = Dense::create(this->exec);
+    mtx->convert_to(actual.get());
+    GKO_ASSERT_MTX_NEAR(actual, expected, 0.0);
+}
+
+
+TYPED_TEST(Amp, ReadMovesEntriesThatWouldOverflowToHigherPrecisionBinEll)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Mtx = typename TestFixture::Mtx;
+    using Ell = typename TestFixture::Ell;
+    using Dense = typename TestFixture::Dense;
+    constexpr int nrows = 64;
+
+    // See the CSR variant of this test for the rationale.
+    gko::matrix_data<value_type, index_type> data(gko::dim<2>{nrows, nrows});
+    for (int i = 0; i < nrows; i++) {
+        data.nonzeros.emplace_back(i, i, value_type{1e10});
+        data.nonzeros.emplace_back(i, (i + 1) % nrows, value_type{33554432.0});
+    }
+    data.sort_row_major();
+
+    auto ell_empty = gko::share(Ell::create(this->exec, gko::dim<2>{0, 0}));
+    auto mtx = Mtx::build()
+                   .with_tolerance(1e-3f)
+                   .with_bin_foldup_nnz_ratio(0.0f)
+                   .on(this->exec)
+                   ->generate(ell_empty);
+    mtx->read(data);
+
+#if GKO_AMP_HALF_IS_FP16
+    if constexpr (Mtx::num_precisions >= 2) {
+        // The overflowing entries must not be left in the lowest bin.
+        auto lowest = dynamic_cast<const typename gko::matrix::Ell<
+            typename std::tuple_element<
+                Mtx::num_precisions - 1,
+                typename gko::amp::narrow_types<value_type>::type>::type,
+            index_type>*>(mtx->get_bin_matrix(Mtx::num_precisions - 1));
+        ASSERT_NE(lowest, nullptr);
+        EXPECT_EQ(lowest->get_num_stored_elements_per_row(), 0);
+    }
+#endif
+    auto expected = Dense::create(this->exec);
+    expected->read(data);
+    auto actual = Dense::create(this->exec);
+    mtx->convert_to(actual.get());
+    GKO_ASSERT_MTX_NEAR(actual, expected, 0.0);
+}
+
+
 TYPED_TEST(Amp, ReadFromEllProducesSameResultAsFactoryGenerate)
 {
     using value_type = typename TestFixture::value_type;

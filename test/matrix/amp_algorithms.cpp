@@ -631,6 +631,144 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinDouble)
 #endif  // GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
 
 
+TEST_F(AMPAlgorithms, AdjustsBinForOverflowDouble)
+{
+    constexpr int q = gkda::narrow_types<double>::num_types;
+    gko::array<double> mins_arr(exec, q);
+    gko::array<double> maxs_arr(exec, q);
+    bins_representable<double>(exec, mins_arr, maxs_arr);
+    maxs_arr.set_executor(ref);
+    const auto maxs = maxs_arr.get_const_data();
+    gko::array<int> result_arr(exec, 1);
+    gko::array<int> expected_arr(ref, 1);
+
+    // Value within the range of the lowest precision bin stays there
+    expected_arr.get_data()[0] = q - 1;
+    adjust_bin_range<double>(exec, maxs[q - 1] / 2.0, q - 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+
+    // The max representable value itself does not overflow
+    adjust_bin_range<double>(exec, maxs[q - 1], q - 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+
+    // Value above the max of float moves from the float bin to bin 0
+    expected_arr.get_data()[0] = 0;
+    adjust_bin_range<double>(exec, maxs[1] * 1.001, 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+
+#if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
+    // Value above the max of half moves to the float bin
+    expected_arr.get_data()[0] = 1;
+    adjust_bin_range<double>(exec, maxs[2] * 1.001, 2, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+
+    // Value above the max of float cascades from the half bin to bin 0
+    expected_arr.get_data()[0] = 0;
+    adjust_bin_range<double>(exec, maxs[1] * 1.001, 2, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+#endif
+
+    // Dropped values stay dropped, however large
+    expected_arr.get_data()[0] = -1;
+    adjust_bin_range<double>(exec, 1e300, -1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+}
+
+
+#if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
+
+TEST_F(AMPAlgorithms, AdjustsBinForOverflowFloat)
+{
+    gko::array<float> mins_arr(exec, 2);
+    gko::array<float> maxs_arr(exec, 2);
+    bins_representable<float>(exec, mins_arr, maxs_arr);
+    maxs_arr.set_executor(ref);
+    const auto maxs = maxs_arr.get_const_data();
+    gko::array<int> result_arr(exec, 1);
+    gko::array<int> expected_arr(ref, 1);
+
+    // Value within the range of half stays in the half bin
+    expected_arr.get_data()[0] = 1;
+    adjust_bin_range<float>(exec, maxs[1] / 2.0f, 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+
+    // Value above the max of half moves to bin 0
+    expected_arr.get_data()[0] = 0;
+    adjust_bin_range<float>(exec, maxs[1] * 1.001f, 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+}
+
+#endif
+
+
+TEST_F(AMPAlgorithms, GetsAdjustedBinHandlesOverflowDouble)
+{
+    // The row norm is so large that the lower bound of bin 0 exceeds the
+    // largest finite float (and is therefore inf as a float). A value
+    // between the float max and inf is assigned to the float bin by
+    // magnitude, but would overflow there.
+    const double rownorm = 1e38;
+    const float tol = 1e-3f;
+    constexpr int q = gkda::narrow_types<double>::num_types;
+    gko::array<double> mins_arr(exec, q);
+    gko::array<double> maxs_arr(exec, q);
+    bins_representable<double>(exec, mins_arr, maxs_arr);
+    maxs_arr.set_executor(ref);
+    const auto maxs = maxs_arr.get_const_data();
+    gko::array<int> result_arr(exec, 1);
+    gko::array<int> expected_arr(ref, 1);
+
+    // Representable in float: stays in the float bin
+    const double val_ok = 2e38;
+    ASSERT_LT(val_ok, maxs[1]);
+    expected_arr.get_data()[0] = 1;
+    adjusted_bin<double>(exec, rownorm, tol, val_ok, q - 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+
+    // Overflows float: must go to bin 0
+    const double val_over = 1e39;
+    ASSERT_GT(val_over, maxs[1]);
+    expected_arr.get_data()[0] = 0;
+    adjusted_bin<double>(exec, rownorm, tol, val_over, q - 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+
+#if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
+    // A value that is in the half bin by magnitude. It overflows fp16 (max
+    // 65504) and is moved to the float bin, but fits in bfloat16.
+#if GKO_AMP_HALF_IS_FP16
+    expected_arr.get_data()[0] = 1;
+#else
+    expected_arr.get_data()[0] = 2;
+#endif
+    adjusted_bin<double>(exec, 1e10, tol, 2e7, q - 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+#endif
+}
+
+
+#if GKO_AMP_HALF_IS_FP16 || GKO_AMP_HALF_IS_BFLOAT16
+
+TEST_F(AMPAlgorithms, GetsAdjustedBinHandlesOverflowFloat)
+{
+    const float tol = 1e-3f;
+    constexpr int q = gkda::narrow_types<float>::num_types;
+    gko::array<int> result_arr(exec, 1);
+    gko::array<int> expected_arr(ref, 1);
+
+    // A value that is in the half bin by magnitude. It overflows fp16 (max
+    // 65504) and is moved to bin 0, but fits in bfloat16.
+#if GKO_AMP_HALF_IS_FP16
+    expected_arr.get_data()[0] = 0;
+#else
+    expected_arr.get_data()[0] = 1;
+#endif
+    adjusted_bin<float>(exec, 1e10, tol, 2e7f, q - 1, result_arr);
+    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+}
+
+#endif
+
+
 TEST_F(AMPAlgorithms, AssignsValueToTuple)
 {
     gko::array<double> result_arr(exec, 4);
