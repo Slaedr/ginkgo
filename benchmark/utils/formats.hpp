@@ -472,6 +472,7 @@ inline std::shared_ptr<gko::LinOp> create_amp_base_matrix(
     if (FLAGS_amp_base_type == "csr" || FLAGS_amp_base_type == "csrc") {
         auto csr_mat = csr::create(exec);
         csr_mat->read(data);
+        csr_mat->sort_by_column_index();
         base_mat = std::move(csr_mat);
     } else {
         check_ell_admissibility(data);
