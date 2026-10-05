@@ -372,6 +372,8 @@ void generate_cwise_ell_max_nnz_per_row(
     // Compute minimum representable values for each bin
     const std::array<real_type, q> min_repr =
         get_bins_min_representable<real_type>();
+    const std::array<real_type, q> max_repr =
+        get_bins_max_representable<real_type>();
 
     const auto nrows = a->get_size()[0];
     const auto ostride = a->get_stride();
@@ -406,7 +408,8 @@ void generate_cwise_ell_max_nnz_per_row(
         for (int j = 0; j < omax_nnz; j++) {
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
-                min_bin, min_repr, std::abs(ovals[j * ostride + irow]),
+                min_bin, min_repr, max_repr,
+                std::abs(ovals[j * ostride + irow]),
                 force_diagonal_0 & (jcol == static_cast<IndexType>(irow)),
                 max_bin);
             if (ibin >= 0) {

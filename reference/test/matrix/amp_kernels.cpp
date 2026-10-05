@@ -112,16 +112,17 @@ TEST(AMPAlgorithm, GetsCorrectPrecisionBin)
 TEST(AMPAlgorithm, AdjustsBinForUnderflow)
 {
     const auto mins = gkra::get_bins_min_representable<double>();
+    const auto maxs = gkra::get_bins_max_representable<double>();
 
     // Value representable in bin 2 stays in bin 2
     double val_ok = static_cast<double>(mins[2]) * 2.0;
-    auto adj_ok = gkra::adjust_bin_for_underflow<double>(mins, val_ok, 2);
+    auto adj_ok = gkra::adjust_bin_for_range<double>(mins, maxs, val_ok, 2);
     EXPECT_EQ(adj_ok, 2);
 
     // Value below min of bin 2 should move to a higher-precision bin
     double val_underflow_half = static_cast<double>(mins[2]) * 0.5;
     int adjusted =
-        gkra::adjust_bin_for_underflow<double>(mins, val_underflow_half, 2);
+        gkra::adjust_bin_for_range<double>(mins, maxs, val_underflow_half, 2);
     ASSERT_GE(adjusted, 0);
     EXPECT_LT(adjusted, 2);
 #if GKO_AMP_HALF_IS_FP16
@@ -135,23 +136,24 @@ TEST(AMPAlgorithm, AdjustsBinForUnderflow)
     // Too small a number that was originally in half bin goes to double bin.
     const double val_underflow_fl = static_cast<double>(mins[1]) * 0.5;
     const int adjusted_fl =
-        gkra::adjust_bin_for_underflow<double>(mins, val_underflow_fl, 2);
+        gkra::adjust_bin_for_range<double>(mins, maxs, val_underflow_fl, 2);
     EXPECT_EQ(adjusted_fl, 0);
     // Should be representable in the adjusted bin
     EXPECT_GE(val_underflow_fl, static_cast<double>(mins[adjusted_fl]));
 
     // Dropped values (bin -1) stay dropped
-    auto adj_drop = gkra::adjust_bin_for_underflow<double>(mins, 1e-100, -1);
+    auto adj_drop = gkra::adjust_bin_for_range<double>(mins, maxs, 1e-100, -1);
     EXPECT_EQ(adj_drop, -1);
 
     // Bin 0 stays at bin 0 even for tiny values
-    auto adj_tiny = gkra::adjust_bin_for_underflow<double>(mins, 1e-320, 0);
+    auto adj_tiny = gkra::adjust_bin_for_range<double>(mins, maxs, 1e-320, 0);
     EXPECT_EQ(adj_tiny, 0);
 
     // Test with float as base type
     const auto mins_f = gkra::get_bins_min_representable<float>();
+    const auto maxs_f = gkra::get_bins_max_representable<float>();
     float val_ok_f = mins_f[1] * 2.0f;
-    auto adj_f = gkra::adjust_bin_for_underflow<float>(mins_f, val_ok_f, 1);
+    auto adj_f = gkra::adjust_bin_for_range<float>(mins_f, maxs_f, val_ok_f, 1);
     EXPECT_EQ(adj_f, 1);
 }
 
@@ -163,19 +165,20 @@ TEST(AMPAlgorithm, GetsAdjustedBinByMagnitude)
     const auto lbs =
         gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
     const auto mins = gkra::get_bins_min_representable<double>();
+    const auto maxs = gkra::get_bins_max_representable<double>();
 
     constexpr int q = gko::amp::narrow_types<double>::num_types;
     constexpr int q_f = gko::amp::narrow_types<float>::num_types;
 
     // Large value goes to bin 0
-    auto bin_large =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[0] * 2.0, false, q - 1);
+    auto bin_large = gkra::get_adjusted_bin<double>(lbs, mins, maxs,
+                                                    lbs[0] * 2.0, false, q - 1);
     EXPECT_EQ(bin_large, 0);
 
     // Value in middle range: precision bin then adjusted for underflow
     double val_mid = (lbs[0] + lbs[1]) / 2.0;
     int bin_mid =
-        gkra::get_adjusted_bin<double>(lbs, mins, val_mid, false, q - 1);
+        gkra::get_adjusted_bin<double>(lbs, mins, maxs, val_mid, false, q - 1);
     // Should be assigned to some bin (precision determined, then underflow
     // adjusted)
     EXPECT_GE(bin_mid, 0);
@@ -185,8 +188,8 @@ TEST(AMPAlgorithm, GetsAdjustedBinByMagnitude)
     // Values just smaller than FP16 min are put in float bin
     //  but those smaller than bfloat16 min are discarded.
     const double val_under = mins[2] / 1.1;
-    const int bin_under =
-        gkra::get_adjusted_bin<double>(lbs, mins, val_under, false, q - 1);
+    const int bin_under = gkra::get_adjusted_bin<double>(
+        lbs, mins, maxs, val_under, false, q - 1);
 #if GKO_AMP_HALF_IS_FP16
     EXPECT_EQ(bin_under, 1);
 #else
@@ -194,19 +197,20 @@ TEST(AMPAlgorithm, GetsAdjustedBinByMagnitude)
 #endif
 
     // Very small value gets dropped
-    auto bin_drop =
-        gkra::get_adjusted_bin<double>(lbs, mins, lbs[2] * 0.5, false, q - 1);
+    auto bin_drop = gkra::get_adjusted_bin<double>(lbs, mins, maxs,
+                                                   lbs[2] * 0.5, false, q - 1);
     EXPECT_EQ(bin_drop, -1);
 
     // Test with float as base type
     const auto lbs_f =
         gkra::get_bins_precision_lower_bounds<float>(rownorm, tol);
     const auto mins_f = gkra::get_bins_min_representable<float>();
-    auto bin_f0 = gkra::get_adjusted_bin<float>(lbs_f, mins_f, lbs_f[0] * 2.0f,
-                                                false, q_f - 1);
+    const auto maxs_f = gkra::get_bins_max_representable<float>();
+    auto bin_f0 = gkra::get_adjusted_bin<float>(
+        lbs_f, mins_f, maxs_f, lbs_f[0] * 2.0f, false, q_f - 1);
     EXPECT_EQ(bin_f0, 0);
     auto bin_f_drop = gkra::get_adjusted_bin<float>(
-        lbs_f, mins_f, lbs_f[1] * 0.5f, false, q_f - 1);
+        lbs_f, mins_f, maxs_f, lbs_f[1] * 0.5f, false, q_f - 1);
     EXPECT_EQ(bin_f_drop, -1);
 }
 
@@ -218,10 +222,12 @@ TEST(AMPAlgorithm, DiagonalGoesToBin0)
     const auto lbs =
         gkra::get_bins_precision_lower_bounds<double>(rownorm, tol);
     const auto mins = gkra::get_bins_min_representable<double>();
+    const auto maxs = gkra::get_bins_max_representable<double>();
     const double val = std::sqrt(lbs[0] * lbs[1]);
     constexpr int q = gko::amp::narrow_types<double>::num_types;
 
-    const int bin = gkra::get_adjusted_bin<double>(lbs, mins, val, true, q - 1);
+    const int bin =
+        gkra::get_adjusted_bin<double>(lbs, mins, maxs, val, true, q - 1);
 
     EXPECT_EQ(bin, 0);
 }

@@ -397,7 +397,7 @@ TYPED_TEST(Amp, FactoryDefaultsToDefaultBinFoldupNnzRatio)
 
     auto factory = Mtx::build().on(this->exec);
 
-    EXPECT_EQ(factory->get_parameters().bin_foldup_nnz_ratio, 0.01f);
+    EXPECT_EQ(factory->get_parameters().bin_foldup_nnz_ratio, 0.05f);
 }
 
 
