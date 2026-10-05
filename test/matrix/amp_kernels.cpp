@@ -1253,7 +1253,7 @@ TEST_F(AmpCsr, GenerateWithEntriesThatWouldOverflowIsEquivalentToRef)
 
 TEST_F(AmpCsr, ReducesThreeLongArraysEquivalentToRef)
 {
-    const int q = 3;
+    const int q = gko::matrix::AMP<double>::num_precisions;
     const int n = 61;
     std::array<gko::array<long>, q> data, d_data;
     for (int i = 0; i < q; i++) {

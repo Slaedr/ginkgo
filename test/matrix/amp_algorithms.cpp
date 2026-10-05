@@ -480,30 +480,41 @@ TEST_F(AMPAlgorithms, GetsCorrectBinLowerBoundsByPrecisionStartingFloat)
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
 }
 
-TEST_F(AMPAlgorithms, GetsCorrectBinMinRepresentableStartingDouble)
+TEST_F(AMPAlgorithms, GetsCorrectBinRepresentableStartingDouble)
 {
     const int sz = 2;
-    gko::array<double> result_arr(exec, sz);
-    gko::array<double> expected_arr(ref, sz);
-    auto expect = expected_arr.get_data();
-    expect[0] = std::numeric_limits<double>::min();
-    expect[1] = static_cast<double>(std::numeric_limits<float>::min());
+    gko::array<double> min_arr(exec, sz);
+    gko::array<double> expected_min_arr(ref, sz);
+    auto expect_min = expected_min_arr.get_data();
+    expect_min[0] = std::numeric_limits<double>::min();
+    expect_min[1] = static_cast<double>(std::numeric_limits<float>::min());
+    gko::array<double> max_arr(exec, sz);
+    gko::array<double> expected_max_arr(ref, sz);
+    auto expect_max = expected_max_arr.get_data();
+    expect_max[0] = std::numeric_limits<double>::max();
+    expect_max[1] = static_cast<double>(std::numeric_limits<float>::max());
 
-    bins_representable<double>(exec, result_arr);
+    bins_representable<double>(exec, min_arr, max_arr);
 
-    GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+    GKO_ASSERT_ARRAY_EQ(min_arr, expected_min_arr);
+    GKO_ASSERT_ARRAY_EQ(max_arr, expected_max_arr);
 }
 
-TEST_F(AMPAlgorithms, GetsCorrectBinMinRepresentableStartingFloat)
+TEST_F(AMPAlgorithms, GetsCorrectBinRepresentableStartingFloat)
 {
     const int sz = 1;
     gko::array<float> result_arr(exec, sz);
     gko::array<float> expected_arr(ref, sz);
     expected_arr.get_data()[0] = std::numeric_limits<float>::min();
+    gko::array<float> max_arr(exec, sz);
+    gko::array<float> expected_max_arr(ref, sz);
+    auto expect_max = expected_max_arr.get_data();
+    expect_max[0] = std::numeric_limits<float>::max();
 
-    bins_representable<float>(exec, result_arr);
+    bins_representable<float>(exec, result_arr, max_arr);
 
     GKO_ASSERT_ARRAY_EQ(result_arr, expected_arr);
+    GKO_ASSERT_ARRAY_EQ(max_arr, expected_max_arr);
 }
 
 TEST_F(AMPAlgorithms, GetsCorrectPrecisionBinDouble)
@@ -565,7 +576,8 @@ TEST_F(AMPAlgorithms, AdjustsBinForUnderflowDouble)
 {
     // Get device-computed min representable values
     gko::array<double> mins_arr(exec, 2);
-    bins_representable<double>(exec, mins_arr);
+    gko::array<double> maxs_arr(exec, 2);
+    bins_representable<double>(exec, mins_arr, maxs_arr);
     mins_arr.set_executor(ref);
     const auto mins = mins_arr.get_const_data();
     gko::array<int> result_arr(exec, 1);
@@ -603,7 +615,8 @@ TEST_F(AMPAlgorithms, GetsAdjustedBinDouble)
     lbs_arr.set_executor(ref);
     const auto lb = lbs_arr.get_const_data();
     gko::array<double> mins_arr(exec, 2);
-    bins_representable<double>(exec, mins_arr);
+    gko::array<double> maxs_arr(exec, 2);
+    bins_representable<double>(exec, mins_arr, maxs_arr);
     mins_arr.set_executor(ref);
     const auto mins = mins_arr.get_const_data();
     gko::array<int> result_arr(exec, 1);
