@@ -75,12 +75,29 @@ inline auto get_bins_min_representable()
     using narrow_types = typename gko::amp::narrow_types<RealType>::type;
     constexpr int q = gko::amp::narrow_types<RealType>::num_types;
     std::array<RealType, q> mins = {};
-    // get_bins_min_representable_impl<RealType, q, 0>(mins);
     gko::constexpr_for<0, q, 1>([&](auto k) {
         using bin_type = typename std::tuple_element<k, narrow_types>::type;
         mins[k] = static_cast<RealType>(std::numeric_limits<bin_type>::min());
     });
     return mins;
+}
+
+/**
+ * Get the maximum representable values for all bins.
+ *
+ * @tparam RealType  The highest precision real type to be considered.
+ */
+template <typename RealType>
+inline auto get_bins_max_representable()
+{
+    using narrow_types = typename gko::amp::narrow_types<RealType>::type;
+    constexpr int q = gko::amp::narrow_types<RealType>::num_types;
+    std::array<RealType, q> maxs = {};
+    gko::constexpr_for<0, q, 1>([&](auto k) {
+        using bin_type = typename std::tuple_element<k, narrow_types>::type;
+        maxs[k] = static_cast<RealType>(std::numeric_limits<bin_type>::max());
+    });
+    return maxs;
 }
 
 /**
@@ -107,20 +124,23 @@ inline int get_precision_bin(
 }
 
 /**
- * Adjust bin assignment to avoid underflow.
+ * Adjust bin assignment to avoid underflow or overflow.
  * If a value cannot be represented in its initially assigned bin
  * (below min representable), move to a higher precision bin.
  *
  * @param min_representable  The smallest value that can represented by the
  *                           different supported real scalar types without
  *                           underflow.
+ * @param max_representable  The largest value that can represented without
+ * overflow.
  * @param abs_number  Absolute value of the number to be binned.
  * @param ibin  The initial bin assigned to the number
  *              by @ref get_precision_bin.
  */
 template <typename RealType>
-inline int adjust_bin_for_underflow(
+inline int adjust_bin_for_range(
     const precision_array<RealType, RealType>& min_representable,
+    const precision_array<RealType, RealType>& max_representable,
     const RealType abs_number, int ibin)
 {
     constexpr int q = gko::amp::narrow_types<RealType>::num_types;
@@ -128,7 +148,8 @@ inline int adjust_bin_for_underflow(
         return ibin;  // Already dropped
     }
     // Check if value can be represented in the assigned bin
-    while (ibin > 0 && abs_number < min_representable[ibin]) {
+    while (ibin > 0 && (abs_number < min_representable[ibin] ||
+                        abs_number > max_representable[ibin])) {
         ibin--;  // Move to higher precision bin
     }
     return ibin;
@@ -161,14 +182,15 @@ template <typename RealType>
 inline int get_adjusted_bin(
     const precision_array<float, RealType>& lower_bounds,
     const precision_array<RealType, RealType>& min_representable,
+    const precision_array<RealType, RealType>& max_representable,
     const RealType abs_number, const bool is_diagonal, const int max_bin)
 {
     if (is_diagonal) {
         return 0;
     }
     const int ibin = get_precision_bin<RealType>(lower_bounds, abs_number, 0);
-    const int adjusted =
-        adjust_bin_for_underflow<RealType>(min_representable, abs_number, ibin);
+    const int adjusted = adjust_bin_for_range<RealType>(
+        min_representable, max_representable, abs_number, ibin);
     return adjusted > max_bin ? max_bin : adjusted;
 }
 

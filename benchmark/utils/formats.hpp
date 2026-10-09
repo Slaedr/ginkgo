@@ -159,7 +159,7 @@ DEFINE_string(amp_csr_strategy, "automatical",
               "with --amp_base_type=csr; the monolithic kernel used by "
               "\"amp\" never consults the buckets' strategies.");
 
-DEFINE_double(amp_bin_foldup_nnz_ratio, 0.01,
+DEFINE_double(amp_bin_foldup_nnz_ratio, 0.05,
               "Threshold, as a ratio of the original matrix's number of "
               "nonzeros, below which a trailing (lowest-precision) bin of "
               "an AMP matrix is folded into the next higher precision bin "
@@ -472,6 +472,7 @@ inline std::shared_ptr<gko::LinOp> create_amp_base_matrix(
     if (FLAGS_amp_base_type == "csr" || FLAGS_amp_base_type == "csrc") {
         auto csr_mat = csr::create(exec);
         csr_mat->read(data);
+        csr_mat->sort_by_column_index();
         base_mat = std::move(csr_mat);
     } else {
         check_ell_admissibility(data);

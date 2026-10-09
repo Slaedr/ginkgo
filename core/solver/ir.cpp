@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2026 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -243,8 +243,10 @@ void Ir<ValueType>::apply_dense_impl(const VectorType* dense_b,
         if (solver_->apply_uses_initial_guess()) {
             // Use the inner solver to solve
             // A * inner_solution = residual
-            // with residual as initial guess.
-            inner_solution->copy_from(residual_ptr);
+            // with zero initial guess.
+            // TODO: Maybe make this selectable between zero and
+            //       random initial guess.
+            inner_solution->fill(zero<ValueType>());
             solver_->apply(residual_ptr, inner_solution);
 
             // x = x + relaxation_factor * inner_solution

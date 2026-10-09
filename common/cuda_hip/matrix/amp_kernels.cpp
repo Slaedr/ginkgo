@@ -571,6 +571,8 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
     // Compute minimum representable values for each bin
     const std::array<real_type, q> min_repr =
         get_bins_min_representable<real_type>();
+    const std::array<real_type, q> max_repr =
+        get_bins_max_representable<real_type>();
 
     // thread-level reduction
     IndexType max_nnz_thread[q];
@@ -606,7 +608,7 @@ __global__ __launch_bounds__(default_block_size) void compute_max_nnzs(
         for (int j = 0; j < omax_nnz; j++) {
             const auto jcol = ocolids[j * ostride + irow];
             const int ibin = get_adjusted_bin<real_type>(
-                min_bin, min_repr, abs(ovals[j * ostride + irow]),
+                min_bin, min_repr, max_repr, abs(ovals[j * ostride + irow]),
                 force_diagonal_0 & (jcol == static_cast<IndexType>(irow)),
                 max_bin);
             if (ibin >= 0) {
