@@ -544,6 +544,7 @@ TEST_F(Amp, AdvancedSpmvIsEquivalentToRefWhenBin0HasOnlyDiagonal)
 TEST_F(Amp, GenerateWithEntriesThatWouldOverflowIsEquivalentToRef)
 {
     using T = value_type;
+    constexpr auto q = AmpMtx::num_precisions;
     // Diagonal entries of 1e10 give a row norm of ~1e10. At tolerance 1e-3
     // the lowest-precision bin starts at ~1e7, so the off-diagonal entries
     // of 2^25 (exactly representable in every candidate precision) are
@@ -577,6 +578,10 @@ TEST_F(Amp, GenerateWithEntriesThatWouldOverflowIsEquivalentToRef)
     amp_ref->convert_to(dense_ref.get());
     amp_d->convert_to(dense_d.get());
 
+    for (int k = 0; k < q; k++) {
+        EXPECT_EQ(amp_ref->get_max_nnz_per_row_for_bin(k),
+                  amp_d->get_max_nnz_per_row_for_bin(k));
+    }
     GKO_ASSERT_MTX_NEAR(dense_ref, expected, 0);
     GKO_ASSERT_MTX_NEAR(dense_d, expected, 0);
 }

@@ -125,14 +125,14 @@ GKO_INLINE GKO_KERNEL int get_precision_bin(
 
 /**
  * Adjust bin assignment to avoid underflow or overflow.
- * If a value cannot be represented in its initially assigned bin
- * (below min representable), move to a higher precision bin.
+ * If a value cannot be represented in its initially assigned bin,
+ * move to a higher precision bin.
  *
  * @param min_representable  The smallest value that can represented by the
  *                           different supported real scalar types without
  *                           underflow.
- * @param max_representable  The largest value that can represented without
- * overflow.
+ * @param max_representable  The largest value that be can represented without
+ *                           overflow.
  * @param abs_number  Absolute value of the number to be binned.
  * @param ibin  The initial bin assigned to the number
  *              by @ref get_precision_bin.

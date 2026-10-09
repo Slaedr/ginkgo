@@ -75,7 +75,6 @@ inline auto get_bins_min_representable()
     using narrow_types = typename gko::amp::narrow_types<RealType>::type;
     constexpr int q = gko::amp::narrow_types<RealType>::num_types;
     std::array<RealType, q> mins = {};
-    // get_bins_min_representable_impl<RealType, q, 0>(mins);
     gko::constexpr_for<0, q, 1>([&](auto k) {
         using bin_type = typename std::tuple_element<k, narrow_types>::type;
         mins[k] = static_cast<RealType>(std::numeric_limits<bin_type>::min());
@@ -94,7 +93,6 @@ inline auto get_bins_max_representable()
     using narrow_types = typename gko::amp::narrow_types<RealType>::type;
     constexpr int q = gko::amp::narrow_types<RealType>::num_types;
     std::array<RealType, q> maxs = {};
-    // get_bins_min_representable_impl<RealType, q, 0>(mins);
     gko::constexpr_for<0, q, 1>([&](auto k) {
         using bin_type = typename std::tuple_element<k, narrow_types>::type;
         maxs[k] = static_cast<RealType>(std::numeric_limits<bin_type>::max());
